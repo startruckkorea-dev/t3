@@ -200,7 +200,7 @@ const T365_DEFAULT_CATEGORIES = [
   { key: "product", label: "제품 & 경쟁사 정보", icon: Package, color: "#3B5B8C", soft: "#E8EEF7", desc: "차종 · 사양 · 가격 정책과 경쟁사 동향" },
   { key: "guide", label: "고객대응 가이드", icon: Headphones, color: "#6D4FB0", soft: "#F0ECF9", desc: "상담 · 견적 · 출고 · 클레임 대응 요령" },
   { key: "training", label: "세일즈 트레이닝", icon: GraduationCap, color: "#0E7490", soft: "#E0F2F7", desc: "영업 스킬 · 사례 · 교육 영상" },
-  { key: "required", label: "필수 교육자료", icon: BookOpenCheck, color: "#C2410C", soft: "#FDEEE6", desc: "반드시 읽고 「조회확인」을 눌러야 하는 자료", required: true },
+  { key: "required", label: "필수 교육자료", icon: BookOpenCheck, color: "#C2410C", soft: "#FDEEE6", desc: "반드시 읽어야 하는 자료 — 열면 조회확인이 기록됩니다", required: true },
   { key: "marketing", label: "마케팅", icon: Megaphone, color: "#B45309", soft: "#FBF1E2", desc: "캠페인 · 프로모션 · 기프트 세트 안내" },
   { key: "general", label: "일반게시판", icon: MessagesSquare, color: "#475569", soft: "#EEF1F5", desc: "공지 · 일정 · 기타 안내" },
 ];
@@ -239,7 +239,7 @@ function parseContacts(v) {
  * 수준: "n" 없음 · "v" 보기 · "e" 편집(보기 포함). Overview 는 항상 보기. 편집이 없는 메뉴(전체 게시물 · 조회확인 현황 · 접속 기록 · 활동 이력)는 보기까지만.
  * Permissions 에는 역할 기본값과 다른 칸만 { "cat:crm": "e", "status": "n" } 꼴로 저장한다. 열이 없거나 비어 있으면 역할 기본값.
  * 값이 깨져 있으면 Overview 만(fail-closed). 설정 파일 관리자(고정 IT 포함)는 전부 — 화면에서 바꿀 수 없다.
- * 「조회확인」 버튼은 메뉴 권한이 아니라 Agent 역할에 묶여 있다. */
+ * 조회확인(필수 글을 열면 자동 기록)은 메뉴 권한이 아니라 Agent 역할에 묶여 있다. */
 const T365_PERM_GROUPS = [
   { key: "home", label: "개요", band: "#EEF1F5", ink: "#475569", line: "#CBD5E1", items: [{ key: "overview", label: "Overview", edit: false, locked: true }, { key: "all", label: "전체 게시물", edit: false }] },
   { key: "boards", label: "게시판", band: "#E4F1F0", ink: "#2F7B7A", line: "#9CCBC8", items: T365_DEFAULT_CATEGORIES.map((c) => ({ key: "cat:" + c.key, cat: c.key, label: c.label, edit: true })) },
@@ -1049,19 +1049,25 @@ async function tFindRead(key) {
   const rows = await tListAll(T365_LISTS.reads, `&$filter=fields/Title eq '${odq(key)}'`);
   return rows.filter((r) => r.Title === key).sort((a, b) => Number(a.id) - Number(b.id))[0] || null;
 }
-function t365RecordView(post, me) {
+// opts.confirm — Agent 가 조회확인 필수 글을 열면 열람과 같은 쓰기로 ConfirmedAt 도 채운다(이미 있으면 처음 시각 유지)
+function t365RecordView(post, me, opts) {
   const key = readKey(post.id, me.email);
+  const confirm = !!(opts && opts.confirm) && me.role === "Agent";
   return serialRead(key, async () => {
     const now = new Date().toISOString();
     let row = await tFindRead(key);
     if (row) {
-      const f = { LastViewedAt: now, ViewCount: (Number(row.ViewCount) || 0) + 1 };
+      const f = { LastViewedAt: now, ViewCount: (Number(row.ViewCount) || 0) + 1, ...(confirm && !row.ConfirmedAt ? { ConfirmedAt: now } : {}) };
       await tUpdate(T365_LISTS.reads, row.id, f);
       return { ...row, ...f };
     }
-    const fields = { Title: key, PostId: String(post.id), UserEmail: normEmail(me.email), UserName: me.name, Company: me.company || "", Role: me.role, FirstViewedAt: now, LastViewedAt: now, ViewCount: 1 };
+    const fields = { Title: key, PostId: String(post.id), UserEmail: normEmail(me.email), UserName: me.name, Company: me.company || "", Role: me.role, FirstViewedAt: now, LastViewedAt: now, ViewCount: 1, ...(confirm ? { ConfirmedAt: now } : {}) };
     try { return await tCreate(T365_LISTS.reads, fields); }
-    catch (e) { row = await tFindRead(key); if (row) return row; throw e; }   // 다른 탭이 먼저 만든 경우(고유 값 제약)
+    catch (e) {   // 다른 탭이 먼저 만든 경우(고유 값 제약)
+      row = await tFindRead(key); if (!row) throw e;
+      if (confirm && !row.ConfirmedAt) { await tUpdate(T365_LISTS.reads, row.id, { ConfirmedAt: now }); row = { ...row, ConfirmedAt: now }; }
+      return row;
+    }
   });
 }
 function t365Confirm(post, me) {
@@ -1223,6 +1229,9 @@ function BoardCell({ cat, bare }) {
   );
 }
 const HomeColHead = ({ children }) => <div className="t365-cols px-4 h-9 flex items-stretch gap-3 bg-[#F1F4F8] border-b border-slate-200 text-[12px] font-semibold text-slate-600 select-none">{children}</div>;
+// Agent 조회확인 상태 — 버튼이 아니라 표시(글을 열면 자동으로 확인 완료)
+const UnconfirmedPill = () => <span className="t365-pill whitespace-nowrap" style={{ background: "#FDEEE6", color: "#C2410C" }} data-confirm-state="pending"><BellRing size={10} />미확인</span>;
+const ConfirmedPill = () => <span className="t365-pill whitespace-nowrap bg-emerald-50 text-emerald-700" data-confirm-state="done"><CheckCircle2 size={10} />확인 완료</span>;
 // 게시물 앞의 작은 표시 — 공지 · 필수(제목 왼쪽)
 const NoticePill = () => <span className="t365-pill bg-amber-100 text-amber-800" data-pill="pin"><Pin size={10} />공지</span>;
 const ReqPill = () => <span className="t365-pill" style={{ background: "#FDEEE6", color: "#C2410C" }} data-pill="req"><BellRing size={10} />필수</span>;
@@ -1282,7 +1291,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
               {ctx.isAgent && (todo.length
                 ? <span className="text-[11px] font-bold px-2 rounded-full leading-5 text-white" style={{ background: "#C2410C" }} data-testid="todo-required">확인 필요 {todo.length}건</span>
                 : <span className="text-[11px] font-medium px-2 rounded-full leading-5 bg-emerald-50 text-emerald-700" data-testid="todo-required">모두 확인 완료</span>)}
-              <span className="text-[11.5px] text-slate-400 hidden md:inline truncate">{ctx.isAgent ? "필수 자료는 끝까지 읽은 뒤 「조회확인」을 눌러 주세요" : "꼭 읽어야 하는 공지와 필수 교육자료입니다"}</span>
+              <span className="text-[11.5px] text-slate-400 hidden md:inline truncate">{ctx.isAgent ? "필수 자료는 열어 보면 자동으로 조회확인됩니다" : "꼭 읽어야 하는 공지와 필수 교육자료입니다"}</span>
               {notice.length > NOTICE_MAX && <button onClick={() => onSearch("", "notice")} className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 whitespace-nowrap shrink-0" data-testid="notice-more">더보기 <ChevronRight size={12} className="inline -mt-0.5" /></button>}
             </div>
             {notice.length > 0 && <HomeColHead>
@@ -1301,10 +1310,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                   </span>
                   <span className="text-[11.5px] text-slate-400 tabular-nums shrink-0 hidden md:flex items-center justify-end w-[68px]">{shortDate(p.PublishedAt || p._created)}</span>
                   {ctx.isAgent && <span className="shrink-0 w-[96px] flex items-center justify-end">
-                    {ctx.isAgent ? (p.RequireConfirm ? (r && r.ConfirmedAt
-                      ? <span className="inline-flex items-center gap-1 text-[11.5px] text-emerald-700 font-medium"><CheckCircle2 size={13} />확인 완료</span>
-                      : <span className="inline-flex items-center gap-0.5 text-[11.5px] font-semibold text-white rounded-md px-2 h-6" style={{ background: "#C2410C" }}>확인하기<ChevronRight size={12} /></span>) : <span className="text-[11.5px] text-slate-300">-</span>)
-                      : null}
+                    {ctx.isAgent ? (p.RequireConfirm ? (r && r.ConfirmedAt ? <ConfirmedPill /> : <UnconfirmedPill />) : <span className="text-[11.5px] text-slate-300">-</span>) : null}
                   </span>}
                 </button>
               );
@@ -1349,7 +1355,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                 <button key={p.id} onClick={() => openPost(p)} title={p.Title} className="w-full text-left px-4 h-10 flex items-center gap-2 border-t border-slate-100 first:border-t-0 hover:bg-orange-50/40">
                   <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "#C2410C" }}></span>
                   <span className="truncate text-[13px] text-slate-800 flex-1">{p.Title}</span>
-                  <span className="text-[11px] font-semibold shrink-0" style={{ color: "#C2410C" }}>확인하기</span>
+                  <UnconfirmedPill />
                 </button>
               )) : <SmallEmpty icon={CheckCircle2}>필수 자료를 모두 확인했습니다.</SmallEmpty>}
             </WidgetCard>
@@ -1458,8 +1464,8 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
   const StatusCell = ({ p }) => {
     if (ctx.isAgent) {
       const r = myRow(p);
-      return r && r.ConfirmedAt ? <span className="inline-flex items-center gap-1 text-[11.5px] text-emerald-700"><CheckCircle2 size={13} /> 확인</span>
-        : p.RequireConfirm ? <span className="text-[11px] font-semibold px-1.5 rounded leading-5 bg-orange-50 text-orange-700 whitespace-nowrap">확인 필요</span>
+      return r && r.ConfirmedAt ? <ConfirmedPill />
+        : p.RequireConfirm ? <UnconfirmedPill />
         : <span className="text-[11.5px] text-slate-300">-</span>;
     }
     const s = rateOf(p);
@@ -1664,6 +1670,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
   const cat = catMap[post.Category];
   const mine = (readIdx.get(String(post.id)) || new Map()).get(normEmail(me.email));
   const [busy, setBusy] = useState(false);
+  const [autoState, setAutoState] = useState("");   // 자동 조회확인 — saving | error | ""
   const [deleting, setDeleting] = useState(false);
   const [videoSrc, setVideoSrc] = useState("");
   const scrollRef = useRef(null);
@@ -1679,7 +1686,10 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
 
   useEffect(() => {
     let alive = true;
-    t365RecordView(post, me).then((row) => { if (alive && row) ctx.upsertRead(row); }).catch((e) => console.warn("[Training365] 열람 기록 실패:", e.message));
+    const autoConfirm = ctx.isAgent && !!post.RequireConfirm;
+    setAutoState(autoConfirm && !(mine && mine.ConfirmedAt) ? "saving" : "");
+    t365RecordView(post, me, { confirm: autoConfirm }).then((row) => { if (alive && row) { ctx.upsertRead(row); setAutoState(""); } })
+      .catch((e) => { console.warn("[Training365] 열람 기록 실패:", e.message); if (alive) setAutoState(autoConfirm ? "error" : ""); });
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
     return () => { alive = false; };
   }, [post.id]);
@@ -1688,7 +1698,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
   async function confirmRead() {
     if (busyRef.current) return;
     busyRef.current = true; setBusy(true);
-    try { const row = await t365Confirm(post, me); if (row) { ctx.upsertRead(row); toast("조회확인을 기록했습니다"); } }
+    try { const row = await t365Confirm(post, me); if (row) { ctx.upsertRead(row); setAutoState(""); toast("조회확인을 기록했습니다"); } }
     catch (e) { uiAlert(`조회확인을 저장하지 못했습니다 — ${e.message}\n잠시 후 다시 눌러 주세요.`); }
     busyRef.current = false; setBusy(false);
   }
@@ -1713,7 +1723,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
     <PostModalShell onClose={onBack} label={post.Title} suspended={suspended} panelClass="md:max-w-[960px] md:h-[min(88vh,920px)]">
       {/* 머리 띠 — 게시판 색 줄 · 게시판 · 위치 · 이전/다음 · 수정 · 삭제 · 닫기 */}
       <div className="shrink-0 h-[3px]" style={{ background: cat ? cat.color : BRAND.accent }} aria-hidden="true"></div>
-      <div className="shrink-0 h-12 px-3 md:px-5 flex items-center gap-2 text-white" style={{ background: "linear-gradient(90deg,#16294A 0%,#1A3B55 70%,#22525A 100%)" }} data-testid="post-titlebar">
+      <div className="shrink-0 h-12 px-3 md:px-5 flex items-center gap-2 text-white" style={{ background: "#1A2B4C" }} data-testid="post-titlebar">
         {cat && <span className="inline-flex items-center gap-2 text-[13px] font-semibold shrink-0"><CatIconBox cat={{ ...cat, soft: "#FFFFFF" }} size={24} icon={13} />{cat.label}</span>}
         {idx >= 0 && siblings.length > 1 && <span className="text-[11.5px] text-white/55 tabular-nums hidden sm:inline">{listLabel !== (cat && cat.label) ? `${listLabel} · ` : ""}{idx + 1} / {siblings.length}</span>}
         <span className="ml-auto inline-flex items-center gap-0.5 shrink-0">
@@ -1730,7 +1740,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
       <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain bg-white" data-testid="post-scroll">
         <article className="min-h-full flex flex-col" data-testid="article">
           {/* 제목 · 정보 */}
-          <header className="px-5 md:px-10 pt-6 pb-5 border-b border-slate-200" style={{ background: `linear-gradient(180deg, ${cat ? cat.soft : "#F1F5F9"} 0%, #FFFFFF 100%)` }}>
+          <header className="px-5 md:px-10 pt-6 pb-5 border-b border-slate-200 bg-white">
             {(post.IsPinned || post.RequireConfirm) && (
               <div className="flex items-center gap-1 mb-2">
                 {post.IsPinned && <NoticePill />}
@@ -1821,27 +1831,37 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
         </article>
       </div>
 
-      {/* 아래 띠 — Agent 는 조회확인, 그 밖은 목록 */}
-      <div className={`shrink-0 px-4 md:px-6 py-3 border-t flex items-center gap-3 ${ctx.isAgent && !confirmed && post.RequireConfirm ? "bg-orange-50/80 border-orange-100" : ctx.isAgent && confirmed ? "bg-emerald-50/70 border-emerald-100" : "bg-slate-50/80 border-slate-100"}`} data-testid={ctx.isAgent ? "confirm-box" : "post-footer"}>
-        {ctx.isAgent ? (confirmed ? (
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            <CheckCircle2 size={20} className="text-emerald-600 shrink-0" />
-            <div className="min-w-0"><div className="text-[13.5px] font-semibold text-emerald-800" data-testid="confirmed-label">조회확인 완료</div><div className="text-[11.5px] text-emerald-700/80 tabular-nums truncate">{fmtDate(mine.ConfirmedAt)} 에 확인했습니다</div></div>
+      {/* 아래 띠 — Agent 의 조회확인 필수 글은 열면 자동 확인(상태만 보여 줌), 그 밖은 목록 단추만 */}
+      {(() => {
+        const showState = ctx.isAgent && (post.RequireConfirm || confirmed);
+        const tone = !showState ? "bg-slate-50/80 border-slate-100" : confirmed ? "bg-emerald-50/70 border-emerald-100" : autoState === "error" ? "bg-red-50/70 border-red-100" : "bg-orange-50/70 border-orange-100";
+        return (
+          <div className={`shrink-0 px-4 md:px-6 py-3 border-t flex items-center gap-3 ${tone}`} data-testid={ctx.isAgent ? "confirm-box" : "post-footer"}>
+            {showState ? (confirmed ? (
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <CheckCircle2 size={20} className="text-emerald-600 shrink-0" />
+                <div className="min-w-0"><div className="text-[13.5px] font-semibold text-emerald-800" data-testid="confirmed-label">조회확인 완료</div><div className="text-[11.5px] text-emerald-700/80 tabular-nums truncate">{fmtDate(mine.ConfirmedAt)} 에 확인되었습니다</div></div>
+              </div>
+            ) : autoState === "error" ? (
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <AlertTriangle size={18} className="text-red-500 shrink-0" />
+                <div className="min-w-0"><div className="text-[13.5px] font-semibold text-red-700">조회확인을 기록하지 못했습니다</div><div className="text-[11.5px] text-red-600/80 truncate">네트워크를 확인한 뒤 「다시 기록」을 눌러 주세요.</div></div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2.5 min-w-0 flex-1 text-orange-800">
+                <span className="w-4 h-4 rounded-full border-2 border-orange-200 border-t-orange-600 animate-spin shrink-0"></span>
+                <span className="text-[13px] font-medium">조회확인을 기록하고 있습니다...</span>
+              </div>
+            )) : <span className="flex-1"></span>}
+            <button onClick={onBack} className={`${btnCls} shrink-0`} data-testid="btn-list"><LayoutList size={14} /> 목록</button>
+            {showState && !confirmed && autoState === "error" && (
+              <button onClick={confirmRead} disabled={busy} data-testid="btn-confirm" className="h-10 px-4 rounded-xl text-[14px] font-semibold text-white shadow-sm disabled:opacity-60 inline-flex items-center gap-1.5 shrink-0" style={{ background: "#C2410C" }}>
+                <CheckCircle2 size={16} /> {busy ? "저장 중..." : "다시 기록"}
+              </button>
+            )}
           </div>
-        ) : (
-          <div className="min-w-0 flex-1">
-            <div className="text-[13.5px] font-semibold truncate" style={{ color: post.RequireConfirm ? "#9A3412" : "#334155" }}>{post.RequireConfirm ? "필수 확인 자료입니다" : "내용을 확인하셨나요?"}</div>
-            <div className="text-[11.5px] text-slate-500 truncate hidden sm:block">끝까지 읽으셨다면 「조회확인」을 눌러 주세요. 확인한 시각이 본사에 기록됩니다.</div>
-          </div>
-        )) : null}
-        {!ctx.isAgent && <span className="flex-1"></span>}
-        <button onClick={onBack} className={`${btnCls} shrink-0`} data-testid="btn-list"><LayoutList size={14} /> 목록</button>
-        {ctx.isAgent && !confirmed && (
-          <button onClick={confirmRead} disabled={busy} data-testid="btn-confirm" className="h-10 px-5 rounded-xl text-[14.5px] font-semibold text-white shadow-sm disabled:opacity-60 inline-flex items-center gap-1.5 shrink-0" style={{ background: post.RequireConfirm ? "#C2410C" : BRAND.accent }}>
-            <CheckCircle2 size={17} /> {busy ? "저장 중..." : "조회확인"}
-          </button>
-        )}
-      </div>
+        );
+      })()}
       {deleting && <BlockingOverlay message="삭제하고 있습니다..." />}
     </PostModalShell>
   );
@@ -2701,7 +2721,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
           <KeyRound size={14} className="shrink-0 mt-0.5 text-slate-400" />
           <div>
           <b className="text-slate-600">등록된 사용자만</b> 로그인할 수 있습니다. <b className="text-slate-600">역할</b>이 기본 권한이고(Agent: 게시판 보기 · 조회확인 / 본사: 보기 · 확인 현황 / 작성자: 보기 + 지정 게시판 편집 / 관리자: 전체), 아래 표의 <b className="text-slate-600">보기 · 편집</b> 칸을 바꾸면 그 사람에게만 따로 적용됩니다.
-          {" "}<b className="text-slate-600">보기</b> = 메뉴가 보이고 열람만, <b className="text-slate-600">편집</b> = 글쓰기 · 수정 · 삭제 · 첨부(관리 메뉴는 추가 · 변경). 「조회확인」 단추는 권한과 관계없이 Agent 역할에만 있습니다.
+          {" "}<b className="text-slate-600">보기</b> = 메뉴가 보이고 열람만, <b className="text-slate-600">편집</b> = 글쓰기 · 수정 · 삭제 · 첨부(관리 메뉴는 추가 · 변경). 조회확인(필수 글을 열면 자동 기록)은 권한과 관계없이 Agent 역할에만 적용됩니다.
           {" "}바꾼 칸은 노란색으로 표시되고 <b className="text-slate-600">「반영」을 눌러야 저장</b>되며 활동 이력에 남습니다.
         </div>
         </div>
@@ -4015,7 +4035,7 @@ function App({ boot }) {
   const meta = curCat ? [curCat.icon, curCat.desc, curCat] : ({
     overview: [LayoutDashboard, isAgent ? "게시판 홈 — 공지 · 확인이 필요한 필수 자료와 게시판별 새 글을 한눈에 봅니다" : "게시판 홈 — 공지 · 필수 자료와 게시판별 새 글, Agent 조회확인 현황을 한눈에 봅니다"],
     all: [LayoutList, "모든 게시판의 글을 한 번에 찾아봅니다 — 안 읽은 글 · 공지 · 필수 보기와 검색"],
-    status: [BarChart3, "게시물마다 대상 Agent 중 몇 명이 「조회확인」을 눌렀는지 봅니다 — 눌러서 누가 · 언제 확인했는지 확인"],
+    status: [BarChart3, "게시물마다 대상 Agent 중 몇 명이 조회확인했는지(필수 글을 연 시각) 봅니다 — 눌러서 누가 · 언제 확인했는지 확인"],
     users: [Users, "사용자 · 역할과 메뉴별 보기 · 편집 권한을 관리합니다. 역할이 기본값이고, 칸을 바꾸면 그 사람만 따로 적용됩니다. 변경은 활동 이력에 남습니다."],
     categories: [Tags, "게시판 7개의 이름 · 설명 · 순서 · 사용 · 아이콘 · 색 · 문의 담당자와 게시판 홈 배너를 관리합니다"],
     access: [LogIn, "계정별 로그인 · 로그아웃 시각과 세션 종료(추정)를 조회하고 Excel 로 내보냅니다"],
