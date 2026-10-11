@@ -132,7 +132,7 @@ import {
   ExternalLink, Mail, ShieldCheck, AlertTriangle, ArrowLeftToLine, ArrowRightFromLine, Menu, LockKeyhole, ChevronLeft, FileText,
   Bold, List, ListOrdered, Heading2, Link2, Clock, BarChart3, Tags, HelpCircle, ListChecks, UserPlus, FileSpreadsheet, PlayCircle,
   Circle, Quote, BookOpen, LogOut, SquarePen, Truck, Container, Bus, Car, Gauge, Fuel, Wrench, Cog, HardHat, ClipboardList, Newspaper, Bell, Calendar, Gift, Star, Trophy, Award, Lightbulb, Target, Rocket, Zap, CircleDollarSign, Handshake, Briefcase, Building2, Phone, MapPin, Globe, Leaf, Flag, Camera, Sparkles, ImagePlus, Palette, GalleryHorizontal, ArrowRight, Pause, Play, AlignLeft, Rows3, ChevronRight, ChevronDown, ChevronUp, ChevronsLeft, ChevronsRight, TrendingUp, FileArchive, FileImage, FileVideo, Info, Inbox,
-  BellRing,
+  BellRing, MessageCircleQuestion, MessageSquareReply,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -168,7 +168,7 @@ const T365_LISTS = {
   reads: "training365_Reads",
   users: "training365_Users",
   access: "training365_AccessLog",
-  categories: "training365_Categories",   // 선택 — 없으면 코드의 기본 7개 카테고리
+  categories: "training365_Categories",   // 선택 — 없으면 코드의 기본 카테고리(8개)
   banners: "training365_Banners",         // 선택 — 없으면 Overview 위에 기본 배너(그림 없이)
 };
 // 목록마다 꼭 있어야 하는 열(내부 이름) — 관리자 준비 안내 · 쓰기 전 확인용. 관리자 준비 안내와 같아야 한다
@@ -180,6 +180,8 @@ const T365_COLUMNS = {
   categories: ["Title", "Key", "Description", "SortOrder", "Active", "Icon", "Color", "Contacts"],
   banners: ["Title", "Subtitle", "LinkUrl", "ImageJson", "SortOrder", "Active"],
 };
+// 선택 열 — 없어도 게시판은 동작하고 그 기능만 저장되지 않는다(관리자 안내)
+const T365_OPT_COLUMNS = { posts: ["Answer", "AnsweredBy", "AnsweredAt"] };   // Q&A 답변
 const T365_FILE_ROOT = "training365";          // (10-12 이전 첨부 위치 — 문서 라이브러리 training365/YYYY-MM/. 새 첨부는 AttachedFiles/Training365_Media-Files/{번호}/)
 const T365_LOG_ROOT = "Logging_data/Training365"; // 관리 행위 이력 — APS 와 같은 파일 방식
 
@@ -194,7 +196,7 @@ const ROLE_META = {
   "관리자": { cls: "bg-[#E4F1F0] text-[#2F7B7A] border-[#CFE6E4]", desc: "사용자 · 카테고리 · 게시물 · 접속 기록 관리" },
 };
 
-// 7개 게시판(2026-09-09 · 10-07 회의록). key 는 저장 값이라 바꾸지 않는다 — 이름 · 설명 · 순서 · 사용은 카테고리 관리에서
+// 기본 게시판 8개(7개 — 2026-09-09 · 10-07 회의록, Q&A — 10-12 추가). key 는 저장 값이라 바꾸지 않는다 — 이름 · 설명 · 순서 · 사용은 카테고리 관리에서
 const T365_DEFAULT_CATEGORIES = [
   { key: "crm", label: "CRM", icon: MonitorSmartphone, color: "#2F7B7A", soft: "#E4F1F0", desc: "CRM 사용법 · 권한 신청 · 자주 묻는 질문" },
   { key: "product", label: "제품 & 경쟁사 정보", icon: Package, color: "#3B5B8C", soft: "#E8EEF7", desc: "차종 · 사양 · 가격 정책과 경쟁사 동향" },
@@ -203,10 +205,12 @@ const T365_DEFAULT_CATEGORIES = [
   { key: "required", label: "필수 교육자료", icon: BookOpenCheck, color: "#C2410C", soft: "#FDEEE6", desc: "반드시 읽어야 하는 자료 — 열면 조회확인이 기록됩니다", required: true },
   { key: "marketing", label: "마케팅", icon: Megaphone, color: "#B45309", soft: "#FBF1E2", desc: "캠페인 · 프로모션 · 기프트 세트 안내" },
   { key: "general", label: "일반게시판", icon: MessagesSquare, color: "#475569", soft: "#EEF1F5", desc: "공지 · 일정 · 기타 안내" },
+  // Q&A — Agent 를 포함한 모든 역할이 질문을 올리고(본인 글만 수정 · 삭제), Agent 가 아닌 담당자가 답변한다(Posts 의 Answer 열)
+  { key: "qna", label: "Q&A", icon: MessageCircleQuestion, color: "#1D4ED8", soft: "#E1EAFD", desc: "궁금한 점을 편하게 물어보세요 — 담당자가 답변합니다", qna: true },
 ];
 // 카테고리 꾸미기(카테고리 관리) — 아이콘은 「lucide:이름」 또는 직접 올린 작은 그림(data:image/png · jpeg · webp, 30KB 이하)을 Icon 열에,
 // 색은 아래 팔레트 중 하나를 Color 열에 저장한다. 값이 없거나 형식이 틀리면 기본 아이콘 · 색(fail-safe).
-const T365_ICON_LIB = { MonitorSmartphone, Package, Headphones, GraduationCap, BookOpenCheck, Megaphone, MessagesSquare, Truck, Container, Bus, Car, Gauge, Fuel, Wrench, Cog, HardHat, ShieldCheck, ClipboardList, FileText, Newspaper, Bell, Calendar, Gift, Star, Trophy, Award, Lightbulb, Target, Rocket, Zap, TrendingUp, BarChart3, CircleDollarSign, Handshake, Briefcase, Building2, Users, Phone, Mail, MapPin, Globe, Leaf, Flag, Camera, Video, Sparkles };
+const T365_ICON_LIB = { MessageCircleQuestion, MonitorSmartphone, Package, Headphones, GraduationCap, BookOpenCheck, Megaphone, MessagesSquare, Truck, Container, Bus, Car, Gauge, Fuel, Wrench, Cog, HardHat, ShieldCheck, ClipboardList, FileText, Newspaper, Bell, Calendar, Gift, Star, Trophy, Award, Lightbulb, Target, Rocket, Zap, TrendingUp, BarChart3, CircleDollarSign, Handshake, Briefcase, Building2, Users, Phone, Mail, MapPin, Globe, Leaf, Flag, Camera, Video, Sparkles };
 const T365_ICON_IMG_MAX = 30 * 1024;
 const T365_ICON_IMG_RE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
 const T365_PALETTE = [
@@ -261,6 +265,7 @@ function rolePreset(role, writerCats) {
     else if (role === "Agent") lv = it.group === "home" || it.group === "boards" ? "v" : "n";
     else if (role === "본사") lv = it.group === "admin" ? "n" : "v";
     else if (role === "작성자") lv = it.group === "admin" ? "n" : it.group === "boards" && wc.has(it.cat) ? "e" : "v";
+    if (it.cat === "qna") lv = "e";   // Q&A — 역할이 있으면 누구나 질문(본인 글만 수정 · 삭제 — canEditPost)
     out[it.key] = capLevel(it, lv);
   });
   return out;
@@ -433,7 +438,7 @@ async function tCheckLists() {
   for (const [k, name] of Object.entries(T365_LISTS)) {
     try {
       const cols = await tListColumns(name);
-      out[k] = { missing: false, missingCols: T365_COLUMNS[k].filter((c) => !cols.has(c)) };
+      out[k] = { missing: false, missingCols: T365_COLUMNS[k].filter((c) => !cols.has(c)), optMissing: (T365_OPT_COLUMNS[k] || []).filter((c) => !cols.has(c)) };
     } catch (e) { out[k] = isMissingListError(e) ? { missing: true, missingCols: [] } : { error: e.message, missingCols: [] }; }
   }
   return out;
@@ -1036,7 +1041,8 @@ function SetupNotice({ status, infoToo = true }) {
   const optionalMissing = status.categories && status.categories.missing;
   const bannerMissing = status.banners && status.banners.missing;
   const warn = missing.length || cols.length || errs.length;
-  if (!warn && !((optionalMissing || bannerMissing || optCols.length) && infoToo)) return null;   // 선택 목록 안내만 남았으면 게시판 화면에서는 숨긴다(Overview · 관리 화면에서만)
+  const ansMissing = (status.posts && !status.posts.missing && status.posts.optMissing) || [];
+  if (!warn && !((optionalMissing || bannerMissing || optCols.length || ansMissing.length) && infoToo)) return null;   // 선택 목록 안내만 남았으면 게시판 화면에서는 숨긴다(Overview · 관리 화면에서만)
   return (
     <div className={`rounded-xl border px-4 py-3 mb-5 text-xs leading-relaxed ${warn ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-blue-50 border-blue-100 text-blue-900"}`} data-testid="setup-notice">
       <div className="flex items-start gap-2.5">
@@ -1048,8 +1054,9 @@ function SetupNotice({ status, infoToo = true }) {
             {cols.map((c) => <li key={c}>없는 열 — {c} (그 값은 저장되지 않습니다)</li>)}
             {errs.map((c) => <li key={c}>읽기 실패 — {c}</li>)}
             {infoToo && optCols.map((c) => <li key={c}>선택 목록에 없는 열 — {c} (카테고리 아이콘 · 색 · 문의 담당자 / 배너 값이 저장되지 않습니다 — IT 에 열 추가 요청)</li>)}
+            {infoToo && ansMissing.length > 0 && <li data-testid="qna-cols-missing">{T365_LISTS.posts} 에 Q&A 답변 열이 없습니다 — {ansMissing.join(", ")} (Answer: 여러 줄 텍스트 · AnsweredBy: 한 줄 텍스트 · AnsweredAt: 한 줄 텍스트) 를 만들어야 답변이 저장됩니다</li>}
             {infoToo && bannerMissing && <li>{T365_LISTS.banners} 목록이 없어 게시판 홈에 기본 배너(그림 없음)를 보여 줍니다 — 그림 배너를 쓰려면 목록을 만드세요</li>}
-            {optionalMissing && <li>{T365_LISTS.categories} 목록이 없어 기본 카테고리 7개(이름 · 설명 · 순서 고정)를 씁니다 — 카테고리 이름 · 설명을 바꾸려면 목록을 만드세요</li>}
+            {optionalMissing && <li>{T365_LISTS.categories} 목록이 없어 기본 카테고리 {T365_DEFAULT_CATEGORIES.length}개(이름 · 설명 · 순서 고정)를 씁니다 — 카테고리 이름 · 설명을 바꾸려면 목록을 만드세요</li>}
           </ul>
           <button onClick={() => setOpen((v) => !v)} className="mt-1.5 font-medium underline underline-offset-2">{open ? "준비 순서 접기" : "준비 순서 보기"}</button>
           {open && (
@@ -1178,11 +1185,17 @@ function fileKind(name) {
   return { Icon: FileText, c: "#64748B", bg: "#F1F5F9" };
 }
 // 제목 옆 작은 표시 — 새 글 N · 첨부 · 동영상 · 필수
+// Q&A 상태 — 답변이 있으면 「답변 완료」, 없으면 「답변 대기」
+const qnaAnswered = (p) => !!String((p && p.Answer) || "").trim();
+const QnaPill = ({ p }) => qnaAnswered(p)
+  ? <span className="t365-pill whitespace-nowrap" style={{ background: "#E1EAFD", color: "#1D4ED8" }} data-qna="done"><MessageSquareReply size={10} />답변 완료</span>
+  : <span className="t365-pill whitespace-nowrap bg-slate-100 text-slate-500" data-qna="wait">답변 대기</span>;
 function PostMarks({ p, compact }) {
   const att = parseFiles(p.AttachmentsJson).length > 0;
   const vid = !!(safeHttpsUrl(p.VideoUrl) || parseFiles(p.VideoFileJson).length);
   return (
     <span className="inline-flex items-center gap-1 shrink-0 align-middle">
+      {p.Category === "qna" && <QnaPill p={p} />}
       {p.RequireConfirm && !compact && <span className="text-[10px] font-bold px-1 rounded leading-[16px]" style={{ background: "#FDEEE6", color: "#C2410C" }}>필수</span>}
       {att && <Paperclip size={12} className="text-slate-400" aria-label="첨부" />}
       {vid && <PlayCircle size={12.5} className="text-slate-400" aria-label="동영상" />}
@@ -1279,7 +1292,7 @@ const isTyping = (e) => { const t = e.target; return !!t && (t.tagName === "INPU
 
 /* ------------------------------------------------------------------ */
 /* Overview — 인트라넷 「게시판 홈」: 검색 · 요약 한 줄 · 공지 · 필수 ·           */
-/* 게시판별 최근 글 상자(7개) · 오른쪽 작은 상자(확인 대기 / 확인율 · 많이 본 글 · 안내) */
+/* 공지 · 필수 · 최근 게시물 · 오른쪽 작은 상자(확인 대기 · 많이 본 글 · Q&A) */
 /* ------------------------------------------------------------------ */
 function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banners, onManageBanners }) {
   const { posts, cats, catMap, readIdx, me } = ctx;
@@ -1291,6 +1304,8 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
   // 공지 · 필수 — Agent 는 아직 확인 안 한 필수 자료가 먼저
   const notice = vis.filter((p) => p.IsPinned || p.RequireConfirm).sort((a, b) => (isTodo(b) ? 1 : 0) - (isTodo(a) ? 1 : 0) || (b.IsPinned ? 1 : 0) - (a.IsPinned ? 1 : 0) || byNewest(a, b));
   const NOTICE_MAX = 6;
+  // Q&A — 답변 대기 먼저, 그다음 최신순
+  const qna = vis.filter((p) => p.Category === "qna").sort((a, b) => (qnaAnswered(a) ? 1 : 0) - (qnaAnswered(b) ? 1 : 0) || byNewest(a, b));
   const popular = vis.map((p) => ({ p, v: viewStats(readIdx, p.id).views })).filter((x) => x.v > 0).sort((a, b) => b.v - a.v || byNewest(a.p, b.p)).slice(0, 5);
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState(null);
@@ -1333,22 +1348,22 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
               {notice.length > NOTICE_MAX && <button onClick={() => onSearch("", "notice")} className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 whitespace-nowrap shrink-0" data-testid="notice-more">더보기 <ChevronRight size={12} className="inline -mt-0.5" /></button>}
             </div>
             {notice.length > 0 && <HomeColHead>
-              <span className="w-[104px] shrink-0 flex items-center">구분</span><span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
-              <span className="w-[108px] shrink-0 hidden md:flex items-center">작성자</span>
-              <span className="w-[104px] shrink-0 hidden md:flex items-center">작성일</span>{ctx.isAgent && <span className="w-[96px] shrink-0 flex items-center">조회확인</span>}
+              <span className="w-[92px] shrink-0 flex items-center">구분</span><span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
+              <span className={`w-[100px] shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center`}>작성자</span>
+              <span className="w-[96px] shrink-0 hidden md:flex items-center">작성일</span>{ctx.isAgent && <span className="w-[96px] shrink-0 flex items-center">조회확인</span>}
             </HomeColHead>}
             {notice.length ? notice.slice(0, NOTICE_MAX).map((p) => {
               const c = catMap[p.Category]; const r = myRow(p);
               return (
                 <button key={p.id} onClick={() => openPost(p)} data-notice={p.id} title={p.Title} className="t365-cols w-full text-left px-4 h-11 flex items-stretch gap-3 border-t border-[#E9EEF3] first:border-t-0 even:bg-slate-50/70 hover:!bg-[#EEF6F5] min-w-0">
-                  <span className="w-[104px] shrink-0 flex items-center gap-1">{p.IsPinned && <NoticePill />}{p.RequireConfirm && <ReqPill />}</span>
+                  <span className="w-[92px] shrink-0 flex items-center gap-1">{p.IsPinned && <NoticePill />}{p.RequireConfirm && <ReqPill />}</span>
                   <BoardCell cat={c} />
                   <span className="min-w-0 flex-1 flex items-center gap-1.5">
                     <span className={`min-w-0 truncate text-[13.5px] ${r ? "text-slate-600" : "font-semibold text-slate-900"}`}>{p.Title}</span>
                     <PostMarks p={p} compact />
                   </span>
-                  <span className="w-[108px] text-[12px] text-slate-500 shrink-0 hidden md:flex items-center min-w-0"><span className="truncate">{p.AuthorName || ""}</span></span>
-                  <span className="text-[11.5px] text-slate-400 tabular-nums shrink-0 hidden md:flex items-center w-[104px]" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
+                  <span className={`w-[100px] text-[12px] text-slate-500 shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center min-w-0`}><span className="truncate">{p.AuthorName || ""}</span></span>
+                  <span className="text-[11.5px] text-slate-400 tabular-nums shrink-0 hidden md:flex items-center w-[96px]" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
                   {ctx.isAgent && <span className="shrink-0 w-[96px] flex items-center">
                     {ctx.isAgent ? (p.RequireConfirm ? (r && r.ConfirmedAt ? <ConfirmedPill /> : <UnconfirmedPill />) : <span className="text-[11.5px] text-slate-300">-</span>) : null}
                   </span>}
@@ -1424,6 +1439,21 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
             </>
             ) : <SmallEmpty icon={Eye}>아직 조회 기록이 없습니다.</SmallEmpty>}
           </WidgetCard>
+          {catMap.qna && (
+            <WidgetCard icon={MessageCircleQuestion} title="Q&A" tint="#1D4ED8" testid="w-qna"
+              right={<span className="flex items-center gap-1.5">
+                {ctx.canWrite("qna") && <button onClick={() => setEditing({ cat: "qna" })} className="h-7 px-2.5 rounded-md text-[12px] font-semibold text-white inline-flex items-center gap-1" style={{ background: "#1D4ED8" }} data-testid="qna-ask"><MessageCircleQuestion size={13} />질문하기</button>}
+                <button onClick={() => setTab("cat:qna")} className="h-7 px-1.5 text-[12px] text-slate-400 hover:text-slate-700 inline-flex items-center">전체<ChevronRight size={13} /></button>
+              </span>}>
+              {qna.length ? qna.slice(0, 5).map((p) => (
+                <button key={p.id} onClick={() => openPost(p)} title={p.Title} data-qna-row={p.id} className="w-full text-left px-4 h-11 flex items-center gap-2.5 hover:bg-[#EEF3FD] border-t border-[#E9EEF3] first:border-t-0 min-w-0">
+                  <span className="w-[72px] shrink-0 flex"><QnaPill p={p} /></span>
+                  <span className={`min-w-0 flex-1 truncate text-[13px] ${myRow(p) ? "text-slate-600" : "font-semibold text-slate-900"}`}>{p.Title}</span>
+                  <span className="text-[11px] text-slate-400 tabular-nums shrink-0" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
+                </button>
+              )) : <SmallEmpty icon={MessageCircleQuestion}>아직 질문이 없습니다 — 궁금한 점을 편하게 물어보세요.</SmallEmpty>}
+            </WidgetCard>
+          )}
         </aside>
       </div>
       {/* 홈에서 누른 글은 홈 위 팝업으로(게시판으로 옮겨 가지 않음) — 위 · 아래 단추는 홈 목록(최신순) 기준 */}
@@ -1438,8 +1468,8 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
             </div>
           </PostModalShell>
         ))}
-      {editing && <PostEditor ctx={ctx} post={editing.post} defaultCat={editing.post.Category} onClose={() => setEditing(null)} onSaved={async (id) => {
-        setEditing(null); await ctx.reload(); toast("게시물을 수정했습니다");
+      {editing && <PostEditor ctx={ctx} post={editing.post} defaultCat={editing.cat || (editing.post && editing.post.Category)} onClose={() => setEditing(null)} onSaved={async (id) => {
+        const wasEdit = !!editing.post; setEditing(null); await ctx.reload(); toast(wasEdit ? "게시물을 수정했습니다" : "질문을 올렸습니다");
         if (id) setOpenId(String(id));
       }} />}
     </div>
@@ -1544,19 +1574,24 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden t365-portlet" data-testid="board">
         {/* 보기 탭 · 검색 · 글쓰기 */}
         <div className="px-3 md:px-4 border-b border-slate-200 flex flex-col md:flex-row md:items-center gap-2 md:gap-3 pt-2 md:pt-0">
-          <div className="flex items-end gap-0.5 overflow-x-auto -mb-px order-2 md:order-1" role="tablist">
-            {tabs.map(([k, label]) => {
-              const on = filter === k || (k === "notice" && filter === "pinned") || (k === "notice" && filter === "required" && !ctx.isAgent);
-              const n = cnt(k);
-              return (
-                <button key={k} role="tab" aria-selected={on} onClick={() => setFilter(k)} data-filter={k}
-                  className={`relative px-2.5 md:px-3 h-12 text-[13.5px] whitespace-nowrap inline-flex items-center gap-1.5 border-b-2 ${on ? "text-slate-900 font-semibold" : "text-slate-500 hover:text-slate-800 border-transparent"}`}
-                  style={on ? { borderColor: BRAND.accent } : undefined}>
-                  {label}
-                  <span className={`text-[11px] tabular-nums rounded-full px-1.5 leading-[18px] ${on ? "text-white" : k === "todo" && n ? "text-white" : "bg-slate-100 text-slate-500"}`} style={on ? { background: BRAND.accent } : k === "todo" && n ? { background: "#C2410C" } : undefined}>{n}</span>
-                </button>
-              );
-            })}
+          {/* 보기 탭 — 회색 바탕 위의 둥근 조각(segmented) · 아이콘 + 개수 */}
+          <div className="order-2 md:order-1 py-2 md:py-2.5 overflow-x-auto">
+            <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-100 ring-1 ring-inset ring-slate-200/70" role="tablist">
+              {tabs.map(([k, label]) => {
+                const on = filter === k || (k === "notice" && filter === "pinned") || (k === "notice" && filter === "required" && !ctx.isAgent);
+                const n = cnt(k);
+                const TI = { all: LayoutList, unread: Eye, notice: Megaphone, todo: BellRing }[k] || LayoutList;
+                const tint = k === "todo" || k === "notice" ? "#C2410C" : BRAND.accent;
+                return (
+                  <button key={k} role="tab" aria-selected={on} onClick={() => setFilter(k)} data-filter={k}
+                    className={`h-8 px-3 rounded-lg text-[13px] whitespace-nowrap inline-flex items-center gap-1.5 transition-all ${on ? "bg-white text-slate-900 font-semibold shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-800 hover:bg-white/60"}`}>
+                    <TI size={14} style={{ color: on ? tint : "#94A3B8" }} />
+                    {label}
+                    <span className={`min-w-[20px] text-center text-[11px] font-semibold tabular-nums rounded-full px-1.5 leading-[18px] ${on || (k === "todo" && n) ? "text-white" : "bg-slate-200/80 text-slate-500"}`} style={on ? { background: tint } : k === "todo" && n ? { background: "#C2410C" } : undefined}>{n}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div className="flex items-center gap-1.5 md:ml-auto order-1 md:order-2 md:py-2.5 min-w-0">
             <select value={field} onChange={(e) => setField(e.target.value)} className={`${ctrl} px-2 shrink-0`} aria-label="검색 대상" data-testid="search-field">
@@ -1568,7 +1603,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
               {q ? <button onClick={() => setQ("")} aria-label="검색어 지우기" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"><X size={14} /></button>
                 : <kbd className="hidden md:inline absolute right-2 top-1/2 -translate-y-1/2 text-[10.5px] text-slate-400 border border-slate-200 rounded px-1.5 leading-[18px]">/</kbd>}
             </div>
-            {canWriteHere && <button onClick={() => setEditing({})} className={`${btnPrimaryCls} shrink-0`} style={{ background: BRAND.accent }} data-testid="btn-write"><SquarePen size={14} /><span className="hidden sm:inline">글쓰기</span></button>}
+            {canWriteHere && <button onClick={() => setEditing({})} className={`${btnPrimaryCls} shrink-0`} style={{ background: BRAND.accent }} data-testid="btn-write">{catKey === "qna" || (!catKey && ctx.isAgent) ? <MessageCircleQuestion size={14} /> : <SquarePen size={14} />}<span className="hidden sm:inline">{catKey === "qna" || (!catKey && ctx.isAgent) ? "질문하기" : "글쓰기"}</span></button>}
           </div>
         </div>
         {/* 건수 · 분류 · 정렬 · 보기 방식 · 쪽당 글 수 */}
@@ -1864,6 +1899,8 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
             </section>
           )}
 
+          {post.Category === "qna" && <QnaAnswer ctx={ctx} post={post} />}
+
           {/* 조회확인 현황(본사 · 관리) — 한 줄, 누르면 명단 */}
           {showRate && <section className="px-5 md:px-10 pt-1 pb-5"><ConfirmPanel ctx={ctx} post={post} /></section>}
 
@@ -1916,6 +1953,56 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
   );
 }
 
+// Q&A 답변 — Agent 가 아닌 담당자(Q&A 편집 권한)가 쓰고 고친다. 답변은 같은 게시물의 Answer · AnsweredBy · AnsweredAt 열
+function QnaAnswer({ ctx, post }) {
+  const canAnswer = !ctx.isAgent && ctx.canWrite("qna");
+  const has = qnaAnswered(post);
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(post.Answer || "");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setText(post.Answer || ""); setEditing(false); }, [post.id, post.Answer]);
+  async function save() {
+    const v = text.trim();
+    if (!v) { uiAlert("답변 내용을 입력해 주세요."); return; }
+    if (v.length > T365_BODY_MAX) { uiAlert("답변이 너무 깁니다."); return; }
+    setBusy(true);
+    try {
+      const cols = await tListColumns(T365_LISTS.posts);
+      if (!cols.has("Answer")) { uiAlert(`게시물 목록에 Answer 열이 없어 답변을 저장할 수 없습니다 — IT 에 열 추가(Answer · AnsweredBy · AnsweredAt)를 요청해 주세요.`); setBusy(false); return; }
+      await tUpdate(T365_LISTS.posts, post.id, { Answer: v, AnsweredBy: ctx.me.name, AnsweredAt: new Date().toISOString() }, { prevCat: post.Category });   // 쓰기 확인은 그 글의 게시판(Q&A) 편집 권한
+      t365Log("게시물", has ? "답변 수정" : "답변", post.Title, { info: { 게시물ID: post.id } });
+      await ctx.reload();
+      setEditing(false); toast(has ? "답변을 수정했습니다" : "답변을 등록했습니다");
+    } catch (e) { uiAlert(e.message); }
+    setBusy(false);
+  }
+  return (
+    <section className="px-5 md:px-10 pt-1 pb-4" data-testid="qna-answer">
+      <div className={`rounded-xl overflow-hidden border ${has ? "border-[#BFD3F6] bg-white" : "border-dashed border-slate-300 bg-slate-50/60"}`}>
+        <div className="px-4 h-11 flex items-center gap-2 border-b" style={{ background: has ? "#EEF3FD" : "transparent", borderColor: has ? "#D6E2FA" : "#E2E8F0" }}>
+          <span className="w-6 h-6 rounded-md flex items-center justify-center text-[12px] font-extrabold text-white shrink-0" style={{ background: has ? "#1D4ED8" : "#94A3B8" }}>A</span>
+          <span className="text-[13px] font-semibold text-slate-800">답변</span>
+          {has && <span className="text-[11.5px] text-slate-500 truncate">{post.AnsweredBy || "담당자"}{post.AnsweredAt ? ` · ${fmtDate(post.AnsweredAt)}` : ""}</span>}
+          {!has && <span className="text-[11.5px] text-slate-400">답변 대기</span>}
+          {canAnswer && !editing && <button onClick={() => setEditing(true)} className="ml-auto h-7 px-2.5 rounded-md text-[12px] font-medium inline-flex items-center gap-1 text-white" style={{ background: "#1D4ED8" }} data-testid="qna-answer-btn"><MessageSquareReply size={13} />{has ? "답변 수정" : "답변 쓰기"}</button>}
+        </div>
+        {editing ? (
+          <div className="p-3">
+            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} autoFocus placeholder="답변을 입력하세요 — 줄바꿈 · 목록(-) · **굵게** 를 쓸 수 있습니다" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-[13.5px] leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/30 resize-y" data-testid="qna-answer-input" />
+            <div className="mt-2 flex items-center justify-end gap-2">
+              <button onClick={() => { setEditing(false); setText(post.Answer || ""); }} disabled={busy} className={btnCls}>취소</button>
+              <button onClick={save} disabled={busy} className="h-9 px-4 rounded-lg text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: "#1D4ED8" }} data-testid="qna-answer-save">{busy ? "저장 중..." : has ? "수정 저장" : "답변 등록"}</button>
+            </div>
+          </div>
+        ) : has ? (
+          <div className="px-4 py-3.5 text-[14px]" data-testid="qna-answer-body"><RichText text={post.Answer} /></div>
+        ) : (
+          <div className="px-4 py-4 text-[12.5px] text-slate-500">{ctx.isAgent ? "담당자가 확인한 뒤 이곳에 답변을 드립니다. 급한 문의는 오른쪽 아래 「?」 에서 담당자에게 메일을 보내 주세요." : canAnswer ? "아직 답변이 없는 질문입니다 — 「답변 쓰기」 로 답변해 주세요." : "아직 답변이 없는 질문입니다."}</div>
+        )}
+      </div>
+    </section>
+  );
+}
 // 게시물 하나의 조회확인 현황(접기) — 대상은 Agent 역할 사용자만(회의록: 본사 제외). 열람한 사람은 역할과 관계없이 따로
 function ConfirmPanel({ ctx, post }) {
   const s = confirmStats(post, ctx.readIdx, ctx.agents);
@@ -2112,7 +2199,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
     };
     try {
       const now = new Date().toISOString();
-      const fields = { Title: t, Category: cat, Body: body, IsPinned: !!pinned, RequireConfirm: !!reqConfirm };
+      const fields = { Title: t, Category: cat, Body: body, IsPinned: !ctx.isAgent && !!pinned, RequireConfirm: !ctx.isAgent && !!reqConfirm };   // Agent 는 공지 · 필수를 걸 수 없다(Q&A 질문)
       let id;
       if (isEdit) {
         id = post.id;
@@ -2259,11 +2346,11 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
 
         {/* 오른쪽 — 설정 */}
         <aside className="md:w-[340px] shrink-0 bg-slate-50/80 border-t md:border-t-0 md:border-l border-slate-200 p-4 space-y-3 md:overflow-y-auto">
-          <Card title="게시 옵션" icon={Tags}>
+          {!ctx.isAgent && <Card title="게시 옵션" icon={Tags}>
             <Switch on={pinned} onChange={setPinned} testid="ed-pin" label="중요 · 상단 고정" desc="목록 맨 위와 Overview 「공지 · 필수」 에 보입니다" tint="#D97706" />
             <div className="border-t border-slate-100"></div>
             <Switch on={reqConfirm} onChange={(v) => { touchedReq.current = true; setReqConfirm(v); }} testid="ed-req" label="조회확인 필수" desc="Agent 의 「확인 대기」 목록에 올라가고 확인율을 집계합니다" tint="#C2410C" />
-          </Card>
+          </Card>}
           <Card title="첨부파일" icon={Paperclip} right={<span className="text-[11px] text-slate-400 tabular-nums">{allCount} / {T365_FILES_MAX}{allCount ? ` · ${fmtSize(totalSize)}` : ""}</span>}>
             <label onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); addFiles(e.dataTransfer.files); }}
               className={`flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed px-3 py-4 cursor-pointer text-center transition-colors ${drag ? "border-[#2F7B7A] bg-[#E4F1F0]" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"}`} data-testid="ed-drop">
@@ -3307,7 +3394,7 @@ function CatStyleModal({ ctx, d, onApply, onClose }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* 카테고리 · 배너 관리 — 카테고리 7개(이름 · 설명 · 순서 · 사용 · 아이콘 · 색 · 문의 담당자)와   */
+/* 카테고리 · 배너 관리 — 기본 카테고리(이름 · 설명 · 순서 · 사용 · 아이콘 · 색 · 문의 담당자)와   */
 /* Overview 배너. 카테고리는 노란 변경 표시 → 「반영」, 배너는 하나씩 바로 저장                 */
 /* ------------------------------------------------------------------ */
 const catDraftOf = (c) => ({ key: c.key, label: c.label, desc: c.desc, order: c.order, active: c.active, icon: c.iconKey || "", color: c.colorKey || "", contacts: c.contacts || [] });
@@ -3371,7 +3458,7 @@ function CategoriesTab({ ctx, catRows, bannerRows, listStatus, reload }) {
         {missing ? (
           <div className="rounded-xl border px-4 py-3 mb-4 text-xs leading-relaxed bg-blue-50 border-blue-100 text-blue-900 flex items-start gap-2.5" data-testid="cat-missing">
             <AlertTriangle size={15} className="shrink-0 mt-0.5 text-blue-500" />
-            <div>카테고리 설정 목록({T365_LISTS.categories})이 없어 <b>기본 7개 카테고리</b>를 그대로 씁니다. 이름 · 설명 · 순서 · 사용 · 아이콘 · 색 · 문의 담당자를 바꾸려면 IT 에 목록 생성을 요청한 뒤 새로고침하세요. 게시판 기능은 이 목록 없이도 모두 동작합니다.</div>
+            <div>카테고리 설정 목록({T365_LISTS.categories})이 없어 <b>기본 카테고리 {T365_DEFAULT_CATEGORIES.length}개</b>를 그대로 씁니다. 이름 · 설명 · 순서 · 사용 · 아이콘 · 색 · 문의 담당자를 바꾸려면 IT 에 목록 생성을 요청한 뒤 새로고침하세요. 게시판 기능은 이 목록 없이도 모두 동작합니다.</div>
           </div>
         ) : missCols.length > 0 && (
           <div className="rounded-xl border px-4 py-3 mb-4 text-xs leading-relaxed bg-amber-50 border-amber-200 text-amber-900 flex items-start gap-2.5" data-testid="cat-misscols">
@@ -3578,7 +3665,7 @@ function BannerModal({ b, onClose, onSaved }) {
     </Modal>
   );
 }
-// 기본 7개 + 목록 값(이름 · 설명 · 순서 · 사용). includeInactive=false 면 사용 중인 것만, 순서대로
+// 기본 카테고리 + 목록 값(이름 · 설명 · 순서 · 사용). includeInactive=false 면 사용 중인 것만, 순서대로
 function mergeCategories(catRows, includeInactive) {
   const out = T365_DEFAULT_CATEGORIES.map((c, i) => {
     const r = (catRows || []).find((x) => String(x.Key || "").trim() === c.key);
@@ -4098,7 +4185,7 @@ function App({ boot }) {
     all: [LayoutList, "모든 게시판의 글을 한 번에 찾아봅니다 — 안 읽은 글 · 공지 · 필수 보기와 검색"],
     status: [BarChart3, "게시물마다 대상 Agent 중 몇 명이 조회확인했는지(필수 글을 연 시각) 봅니다 — 눌러서 누가 · 언제 확인했는지 확인"],
     users: [Users, "사용자 · 역할과 메뉴별 보기 · 편집 권한을 관리합니다. 역할이 기본값이고, 칸을 바꾸면 그 사람만 따로 적용됩니다. 변경은 활동 이력에 남습니다."],
-    categories: [Tags, "게시판 7개의 이름 · 설명 · 순서 · 사용 · 아이콘 · 색 · 문의 담당자와 게시판 홈 배너를 관리합니다"],
+    categories: [Tags, "게시판의 이름 · 설명 · 순서 · 사용 · 아이콘 · 색 · 문의 담당자와 게시판 홈 배너를 관리합니다"],
     access: [LogIn, "계정별 로그인 · 로그아웃 시각과 세션 종료(추정)를 조회하고 Excel 로 내보냅니다"],
     activity: [History, "게시물 · 사용자 · 카테고리 관리 이력을 날짜별로 조회합니다 (기본 최근 3일)"],
   }[tab] || [LayoutDashboard, ""]);
