@@ -69,6 +69,7 @@
   /* 게시판 홈 상자(포틀릿) — 위쪽 남색 굵은 선 · 흰 머리 · 회색 칸 머리 줄로 상자끼리 · 머리와 목록을 또렷하게 구분 */
   .t365-portlet { border-top: 3px solid #1A2B4C; box-shadow: 0 1px 2px rgba(15,23,42,.05), 0 6px 18px -10px rgba(15,23,42,.18); }
   .t365-portlet-head { display: flex; align-items: center; gap: .5rem; padding: 0 1rem; height: 3rem; background: #fff; border-bottom: 1px solid #E2E8F0; }
+  .t365-meta > span + span::before { content: ""; display: inline-block; width: 1px; height: 11px; background: #E2E8F0; margin: 0 12px; }
   .t365-pop { animation: t365-pop .22s cubic-bezier(.2,.9,.3,1.15); }
   @keyframes t365-pop { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }
   .t365-fade { animation: t365-fade .18s ease-out; }
@@ -1687,7 +1688,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
   const confirmed = !!(mine && mine.ConfirmedAt);
 
   return (
-    <PostModalShell onClose={onBack} label={post.Title} suspended={suspended}>
+    <PostModalShell onClose={onBack} label={post.Title} suspended={suspended} panelClass="md:max-w-[960px] md:h-[min(88vh,920px)]">
       {/* 머리 띠 — 게시판 색 줄 · 게시판 · 위치 · 이전/다음 · 수정 · 삭제 · 닫기 */}
       <div className="shrink-0 h-[3px]" style={{ background: cat ? cat.color : BRAND.accent }} aria-hidden="true"></div>
       <div className="shrink-0 h-12 px-3 md:px-5 flex items-center gap-2 border-b" style={{ background: cat ? cat.soft : "#F1F5F9", borderColor: "rgba(15,23,42,.08)" }} data-testid="post-titlebar">
@@ -1705,31 +1706,31 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain bg-white" data-testid="post-scroll">
-        <article data-testid="article">
+        <article className="min-h-full flex flex-col" data-testid="article">
           {/* 제목 · 정보 */}
-          <header className="px-5 md:px-10 pt-6 md:pt-7 pb-4 border-b border-slate-200" style={{ background: "linear-gradient(180deg, #F8FAFC 0%, #FFFFFF 100%)" }}>
-            {(post.IsPinned || post.RequireConfirm) && (
-              <div className="flex items-center gap-1.5 flex-wrap mb-2">
-                {post.IsPinned && <NoticePill />}
-                {post.RequireConfirm && <span className="t365-pill" style={{ background: "#FDEEE6", color: "#C2410C" }}>조회확인 필수</span>}
-              </div>
-            )}
-            <h1 className="text-[21px] md:text-[25px] font-bold text-slate-900 leading-[1.35] tracking-[-0.015em] break-words" data-testid="post-title">{post.Title}</h1>
-            {/* 정보 — 이름표가 붙은 칸(누구나 보는 값만. 확인율은 아래 「조회확인」 · 본사 · 관리만) */}
-            <dl className="mt-4 flex flex-wrap gap-x-7 gap-y-3" data-testid="meta-bar">
-              <div className="min-w-0"><dt className="text-[10.5px] font-medium text-slate-400 tracking-wide">작성자</dt>
-                <dd className="mt-1 flex items-center gap-1.5 text-[13px] font-semibold text-slate-800"><span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0" style={{ background: cat ? cat.color : BRAND.accent }}>{String(post.AuthorName || "?").trim().slice(0, 1)}</span>{post.AuthorName || "-"}</dd></div>
-              <div><dt className="text-[10.5px] font-medium text-slate-400 tracking-wide">작성일</dt><dd className="mt-1 text-[13px] text-slate-700 tabular-nums">{fmtDate(post.PublishedAt || post._created)}</dd></div>
-              {post.UpdatedAt && <div><dt className="text-[10.5px] font-medium text-slate-400 tracking-wide">수정일</dt><dd className="mt-1 text-[13px] text-slate-500 tabular-nums">{fmtDate(post.UpdatedAt)}</dd></div>}
-              <div title="열어 본 횟수의 합 — 같은 사람이 다시 열어도 1씩 늘어납니다"><dt className="text-[10.5px] font-medium text-slate-400 tracking-wide">조회</dt><dd className="mt-1 text-[13px] text-slate-700 tabular-nums inline-flex items-center gap-1" data-testid="meta-views"><Eye size={13} className="text-slate-400" />{vs.views}회</dd></div>
-              {files.length > 0 && <div><dt className="text-[10.5px] font-medium text-slate-400 tracking-wide">첨부</dt><dd className="mt-1"><button onClick={() => { const el = scrollRef.current && scrollRef.current.querySelector("[data-testid=attachments]"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="text-[13px] font-medium inline-flex items-center gap-1 hover:underline underline-offset-2" style={{ color: BRAND.accent }} data-testid="meta-files"><Paperclip size={12.5} />{files.length}개 · {fmtSize(totalSize)}</button></dd></div>}
-              {ctx.isAgent && post.RequireConfirm && <div><dt className="text-[10.5px] font-medium text-slate-400 tracking-wide">내 조회확인</dt><dd className={`mt-1 text-[13px] font-semibold inline-flex items-center gap-1 ${confirmed ? "text-emerald-700" : "text-orange-700"}`} data-testid="meta-mine">{confirmed ? <><CheckCircle2 size={13} />완료 · {fmtDate(mine.ConfirmedAt).slice(5)}</> : "아직 안 함 — 맨 아래에서 확인"}</dd></div>}
-              {ctx.isAgent && !post.RequireConfirm && confirmed && <div><dt className="text-[10.5px] font-medium text-slate-400 tracking-wide">내 조회확인</dt><dd className="mt-1 text-[13px] font-semibold text-emerald-700 inline-flex items-center gap-1"><CheckCircle2 size={13} />완료</dd></div>}
-            </dl>
+          <header className="px-5 md:px-10 pt-6 pb-4 border-b border-slate-200">
+            <div className="flex items-start gap-2">
+              {(post.IsPinned || post.RequireConfirm) && (
+                <span className="shrink-0 flex items-center gap-1 mt-[3px]">
+                  {post.IsPinned && <NoticePill />}
+                  {post.RequireConfirm && <span className="t365-pill" style={{ background: "#FDEEE6", color: "#C2410C" }}>조회확인 필수</span>}
+                </span>
+              )}
+              <h1 className="min-w-0 text-[18px] md:text-[20px] font-bold text-slate-900 leading-[1.4] tracking-[-0.015em] break-words" data-testid="post-title">{post.Title}</h1>
+            </div>
+            {/* 정보 한 줄 — 이름표(회색) · 값(진하게) · 세로 구분선 */}
+            <div className="t365-meta mt-3 flex flex-wrap items-center gap-y-1.5 text-[12.5px] text-slate-400" data-testid="meta-bar">
+              <span className="inline-flex items-center gap-1.5">작성자 <b className="font-semibold text-slate-700">{post.AuthorName || "-"}</b></span>
+              <span className="inline-flex items-center gap-1.5">작성일 <b className="font-normal text-slate-700 tabular-nums">{fmtDate(post.PublishedAt || post._created)}</b></span>
+              {post.UpdatedAt && <span className="inline-flex items-center gap-1.5">수정일 <b className="font-normal text-slate-500 tabular-nums">{fmtDate(post.UpdatedAt)}</b></span>}
+              <span className="inline-flex items-center gap-1.5" title="열어 본 횟수의 합 — 같은 사람이 다시 열어도 1씩 늘어납니다">조회 <b className="font-normal text-slate-700 tabular-nums" data-testid="meta-views">{vs.views}</b></span>
+              {files.length > 0 && <span className="inline-flex items-center gap-1.5">첨부 <button onClick={() => { const el = scrollRef.current && scrollRef.current.querySelector("[data-testid=attachments]"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="font-medium inline-flex items-center gap-1 hover:underline underline-offset-2" style={{ color: BRAND.accent }} data-testid="meta-files"><Paperclip size={12} />{files.length}개 · {fmtSize(totalSize)}</button></span>}
+              {ctx.isAgent && (post.RequireConfirm || confirmed) && <span className="inline-flex items-center gap-1.5">내 조회확인 <b className={`font-semibold inline-flex items-center gap-1 ${confirmed ? "text-emerald-700" : "text-orange-700"}`} data-testid="meta-mine">{confirmed ? <><CheckCircle2 size={12} />완료{mine && mine.ConfirmedAt ? ` · ${fmtDate(mine.ConfirmedAt).slice(5)}` : ""}</> : "아직 안 함"}</b></span>}
+            </div>
           </header>
 
           {/* 본문 */}
-          <section className="px-5 md:px-10 py-6 md:py-7 min-h-[96px]">
+          <section className="flex-1 px-5 md:px-10 py-6 md:py-7 min-h-[180px]">
             <div className="max-w-[760px]" data-testid="post-body"><RichText text={post.Body} /></div>
             {(vurl || vfile) && (
               <div className="max-w-[760px] mt-7">
