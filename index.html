@@ -65,6 +65,9 @@
   .t365-dlg-in { animation: t365-dlg .16s ease-out; }
   @keyframes t365-dlg { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
   .t365-clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  /* 게시판 — 제목 앞 작은 표시(공지 · 필수) · 검색어 강조 */
+  .t365-pill { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; font-size: 10.5px; font-weight: 700; padding: 0 5px; line-height: 18px; border-radius: 4px; white-space: nowrap; }
+  mark.t365-hl { background: #FEF08A; color: inherit; border-radius: 2px; padding: 0 1px; }
 
 html, * { scrollbar-width: thin; scrollbar-color: #CBD5E1 transparent; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -103,7 +106,7 @@ import {
   Pin, Paperclip, Video, CheckCircle2, Eye, Users, KeyRound, History, LogIn, Search, Plus, Pencil, Trash2, X, Download, Upload,
   ExternalLink, Mail, ShieldCheck, AlertTriangle, ArrowLeftToLine, ArrowRightFromLine, Menu, LockKeyhole, ChevronLeft, FileText,
   Bold, List, ListOrdered, Heading2, Link2, Clock, BarChart3, Tags, HelpCircle, ListChecks, UserPlus, FileSpreadsheet, PlayCircle,
-  Circle, Quote, BookOpen, LogOut, ChevronRight, ChevronDown, ChevronUp, ChevronsLeft, ChevronsRight, TrendingUp, FileArchive, FileImage, FileVideo, Info, Inbox,
+  Circle, Quote, BookOpen, LogOut, SquarePen, AlignLeft, Rows3, ChevronRight, ChevronDown, ChevronUp, ChevronsLeft, ChevronsRight, TrendingUp, FileArchive, FileImage, FileVideo, Info, Inbox,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -904,7 +907,7 @@ function ProgressBar({ pct, color }) {
 function pctColor(p) { return p >= 90 ? "#15803D" : p >= 60 ? BRAND.accent : p >= 30 ? "#B45309" : "#C2410C"; }
 
 // 목록 준비 안내 — 관리자에게만. 목록 이름은 여기에서만 보인다(일반 사용자 화면에는 내부 이름을 내지 않는다)
-function SetupNotice({ status }) {
+function SetupNotice({ status, infoToo = true }) {
   const [open, setOpen] = useState(false);
   if (!status) return null;
   const req = ["posts", "reads", "users", "access"];
@@ -912,8 +915,8 @@ function SetupNotice({ status }) {
   const cols = Object.entries(status).filter(([, v]) => !v.missing && v.missingCols && v.missingCols.length).map(([k, v]) => `${T365_LISTS[k]}: ${v.missingCols.join(", ")}`);
   const errs = Object.entries(status).filter(([, v]) => v.error).map(([k, v]) => `${T365_LISTS[k]} — ${v.error}`);
   const optionalMissing = status.categories && status.categories.missing;
-  if (!missing.length && !cols.length && !errs.length && !optionalMissing) return null;
   const warn = missing.length || cols.length || errs.length;
+  if (!warn && !(optionalMissing && infoToo)) return null;   // 선택 목록 안내만 남았으면 게시판 화면에서는 숨긴다(Overview · 관리 화면에서만)
   return (
     <div className={`rounded-xl border px-4 py-3 mb-5 text-xs leading-relaxed ${warn ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-blue-50 border-blue-100 text-blue-900"}`} data-testid="setup-notice">
       <div className="flex items-start gap-2.5">
@@ -1089,10 +1092,53 @@ const SmallEmpty = ({ icon: Icon = Inbox, children }) => (
 );
 
 /* ------------------------------------------------------------------ */
-/* Overview — 포털 공지판처럼: 짧은 소개 · (관리) 한 줄 수치 · 공지·필수 띠 ·      */
-/* 탭 게시판(전체 + 7개) · 오른쪽 작은 위젯(확인 대기 / 확인율 낮은 자료 · 많이 본 글 · 자주 찾는 링크) */
+/* 게시판 공통 부품 — 개인 보기 설정 · 검색어 강조 · 알림 띠(toast) · 안 읽은 글     */
 /* ------------------------------------------------------------------ */
-function OverviewTab({ ctx, openPost, setTab, accessRows }) {
+// 개인 화면 설정(목록 보기 방식 · 쪽당 글 수) — 이 브라우저에만 기억(서버에는 저장하지 않는다)
+function usePref(key, def, allowed) {
+  const [v, setV] = useState(() => { try { const x = localStorage.getItem("t365.pref." + key); if (x != null && (!allowed || allowed.includes(x))) return x; } catch (e) {} return def; });
+  const set = (x) => { setV(x); try { localStorage.setItem("t365.pref." + key, x); } catch (e) {} };
+  return [v, set];
+}
+// 검색어 강조 — 글자를 나눠 <mark> 로만 감싼다(HTML 해석 없음)
+function Hl({ text, q }) {
+  const s = String(text == null ? "" : text), qq = String(q || "").trim();
+  if (!qq) return s;
+  const lo = s.toLowerCase(), ql = qq.toLowerCase(), out = [];
+  let i = 0, k = 0;
+  for (let j = lo.indexOf(ql); j >= 0; j = lo.indexOf(ql, i)) {
+    if (j > i) out.push(s.slice(i, j));
+    out.push(<mark key={k++} className="t365-hl">{s.slice(j, j + qq.length)}</mark>);
+    i = j + qq.length;
+  }
+  out.push(s.slice(i));
+  return out;
+}
+// 짧은 알림 띠 — 링크 복사 · 조회확인 같은 가벼운 결과(확인 창을 띄울 정도가 아닌 것)
+let _toastSet = null;
+function toast(msg) { if (_toastSet) _toastSet({ msg, id: Date.now() }); }
+function ToastHost() {
+  const [t, setT] = useState(null);
+  useEffect(() => { _toastSet = setT; return () => { _toastSet = null; }; }, []);
+  useEffect(() => { if (!t) return; const tm = setTimeout(() => setT(null), 2400); return () => clearTimeout(tm); }, [t]);
+  return t ? (
+    <div key={t.id} role="status" className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[210] bg-slate-900 text-white text-[13px] px-4 py-2.5 rounded-xl shadow-lg t365-dlg-in flex items-center gap-2 max-w-[calc(100vw-32px)]" data-testid="toast">
+      <CheckCircle2 size={15} className="text-emerald-400 shrink-0" /><span className="truncate">{t.msg}</span>
+    </div>
+  ) : null;
+}
+// 게시물 앞의 작은 표시 — 공지 · 필수(제목 왼쪽)
+const NoticePill = () => <span className="t365-pill bg-amber-100 text-amber-800" data-pill="pin"><Pin size={10} />공지</span>;
+const ReqPill = () => <span className="t365-pill" style={{ background: "#FDEEE6", color: "#C2410C" }} data-pill="req">필수</span>;
+const dateCell = (p) => fmtDay(p.PublishedAt || p._created).slice(2).replace(/-/g, ".");
+// 입력 칸에서 치는 글자(검색어 등)와 겹치지 않을 때만 「/」 로 검색 칸 열기
+const isTyping = (e) => { const t = e.target; return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable); };
+
+/* ------------------------------------------------------------------ */
+/* Overview — 인트라넷 「게시판 홈」: 검색 · 요약 한 줄 · 공지 · 필수 ·           */
+/* 게시판별 최근 글 상자(7개) · 오른쪽 작은 상자(확인 대기 / 확인율 · 많이 본 글 · 안내) */
+/* ------------------------------------------------------------------ */
+function OverviewTab({ ctx, openPost, setTab, accessRows, onSearch }) {
   const { posts, cats, catMap, readIdx, me, agents, users } = ctx;
   const showRate = ctx.canView("status");
   const myRow = (p) => (readIdx.get(String(p.id)) || new Map()).get(normEmail(me.email));
@@ -1100,6 +1146,7 @@ function OverviewTab({ ctx, openPost, setTab, accessRows }) {
   const required = vis.filter((p) => p.RequireConfirm);
   const isTodo = (p) => ctx.isAgent && p.RequireConfirm && !(myRow(p) && myRow(p).ConfirmedAt);
   const todo = vis.filter(isTodo);
+  const unread = vis.filter((p) => !myRow(p));
   const stats = new Map(required.map((p) => [p.id, confirmStats(p, readIdx, agents)]));
   const sumDone = [...stats.values()].reduce((a, s) => a + s.done, 0), sumTotal = [...stats.values()].reduce((a, s) => a + s.total, 0);
   const ratePct = sumTotal ? Math.round((sumDone / sumTotal) * 100) : 0;
@@ -1109,165 +1156,142 @@ function OverviewTab({ ctx, openPost, setTab, accessRows }) {
   const newWeek = vis.filter(isNewPost).length;
   // 공지 · 필수 — Agent 는 아직 확인 안 한 필수 자료가 먼저
   const notice = vis.filter((p) => p.IsPinned || p.RequireConfirm).sort((a, b) => (isTodo(b) ? 1 : 0) - (isTodo(a) ? 1 : 0) || (b.IsPinned ? 1 : 0) - (a.IsPinned ? 1 : 0) || byNewest(a, b));
-  const NOTICE_MAX = 5;
-  const [bTab, setBTab] = useState("all");
-  const tabCats = [{ key: "all", label: "전체" }, ...cats.map((c) => ({ key: c.key, label: c.label }))];
-  const tabList = (bTab === "all" ? vis : vis.filter((p) => p.Category === bTab));
-  const tabRows = tabList.slice(0, 8);
-  const tabCanWrite = bTab === "all" ? cats.some((c) => ctx.canWrite(c.key)) : ctx.canWrite(bTab);
+  const NOTICE_MAX = 6;
   const popular = vis.map((p) => ({ p, v: viewStats(readIdx, p.id).views })).filter((x) => x.v > 0).sort((a, b) => b.v - a.v || byNewest(a.p, b.p)).slice(0, 5);
-  const low = required.map((p) => ({ p, s: stats.get(p.id) })).sort((a, b) => (a.s.total ? a.s.pct : 101) - (b.s.total ? b.s.pct : 101) || byNewest(a.p, b.p)).slice(0, 5);
-  const goMore = () => setTab(bTab === "all" ? "all" : "cat:" + bTab);
+  const [q, setQ] = useState("");
+  const searchRef = useRef(null);
+  useEffect(() => {
+    const k = (e) => { if (e.key === "/" && !isTyping(e) && !e.ctrlKey && !e.metaKey && searchRef.current) { e.preventDefault(); searchRef.current.focus(); } };
+    window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k);
+  }, []);
+  const firstName = String(me.name || "").replace(/\s*\(.*\)\s*$/, "") || me.shortName;
+  const headline = [
+    ctx.isAgent ? (todo.length ? <span key="t" className="whitespace-nowrap">확인할 필수 자료 <b style={{ color: "#C2410C" }}>{todo.length}건</b></span> : <span key="t" className="text-emerald-700 whitespace-nowrap">필수 자료 모두 확인 완료</span>) : null,
+    <span key="n" className="whitespace-nowrap">최근 7일 새 글 <b className="text-slate-700">{newWeek}건</b></span>,
+    unread.length ? <span key="u" className="whitespace-nowrap">안 읽은 글 <button onClick={() => onSearch("", "unread")} className="font-semibold text-slate-700 underline underline-offset-2 decoration-slate-300 hover:decoration-slate-500" data-testid="unread-link">{unread.length}건</button></span> : null,
+  ].filter(Boolean).reduce((a, x, i) => (i ? [...a, <span key={"d" + i} className="text-slate-300 mx-1.5">·</span>, x] : [x]), []);
 
   return (
     <div className="w-full">
-      {/* 짧은 소개 띠 */}
-      <div className="rounded-xl px-4 md:px-5 py-3 mb-4 text-white flex items-center gap-3.5 relative overflow-hidden" style={{ background: `linear-gradient(115deg, ${BRAND.navy} 0%, #1A3A5C 100%)` }} data-testid="intro">
-        <div className="w-9 h-9 rounded-lg bg-white/10 flex items-center justify-center shrink-0"><BookOpen size={17} /></div>
-        <div className="min-w-0 flex-1">
-          <div className="text-[13.5px] font-semibold">Training365란?</div>
-          <p className="text-[12.5px] text-white/70 leading-snug mt-0.5 t365-clamp2">{T365_INTRO_SHORT}</p>
+      {/* 인사 · 요약 · 전체 검색 */}
+      <section className="bg-white rounded-xl border border-slate-200 shadow-sm mb-5 overflow-hidden" data-testid="welcome">
+        <div className="px-4 md:px-5 py-4 flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-6">
+          <div className="min-w-0 flex-1">
+            <div className="text-[15.5px] font-semibold text-slate-900">안녕하세요, {firstName}님</div>
+            <p className="text-[13px] text-slate-500 mt-0.5" data-testid="headline">{headline}</p>
+          </div>
+          <form onSubmit={(e) => { e.preventDefault(); onSearch(q.trim()); }} className="flex items-center gap-1.5 w-full lg:w-[420px] shrink-0" role="search" data-testid="home-search">
+            <div className="relative flex-1">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="모든 게시판에서 제목 · 내용 · 첨부 이름 검색" aria-label="게시물 검색" className="h-10 w-full border border-slate-300 rounded-lg text-[13.5px] bg-slate-50/60 pl-9 pr-9 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/40" data-testid="home-search-input" />
+              <kbd className="hidden md:inline absolute right-2.5 top-1/2 -translate-y-1/2 text-[10.5px] text-slate-400 border border-slate-200 rounded px-1.5 leading-[18px] bg-white">/</kbd>
+            </div>
+            <button type="submit" className={`${btnPrimaryCls} h-10 px-4`} style={{ background: BRAND.accent }}>검색</button>
+          </form>
         </div>
-        <div className="hidden lg:flex items-center gap-2 shrink-0 text-[11.5px]">
-          <span className="px-2.5 py-1 rounded-full bg-white/10 text-white/80">게시판 {cats.length}개</span>
-          <span className="px-2.5 py-1 rounded-full bg-white/10 text-white/80">전체 글 {vis.length}건</span>
-          {ctx.isAgent && <span className="px-2.5 py-1 rounded-full font-semibold" style={{ background: todo.length ? "#C2410C" : "rgba(255,255,255,.1)", color: "#fff" }}>확인 대기 {todo.length}건</span>}
-        </div>
-        <div className="absolute -right-8 -top-10 w-32 h-32 rounded-full bg-white/[0.04]"></div>
-      </div>
-
-      {/* 관리 · 본사 — 한 줄 수치 */}
-      {showRate && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm mb-4 grid grid-cols-2 md:grid-cols-4 overflow-hidden" data-testid="stat-bar">
-          {[
-            { k: "kpi-rate", label: "필수 자료 확인율", value: required.length && sumTotal ? `${ratePct}%` : "–", sub: required.length ? (sumTotal ? `${sumDone} / ${sumTotal} 확인` : "대상 Agent 없음") : "필수 자료 없음", bar: required.length && sumTotal ? ratePct : null, go: "status" },
-            { k: "kpi-pending", label: "미확인 Agent", value: `${pendingAgents}`, unit: "명", sub: `등록 Agent ${agents.length}명`, go: "status" },
-            { k: "kpi-active", label: "활성 사용자 · 7일", value: active7 ? `${active7.size}` : "–", unit: active7 ? "명" : "", sub: `사용자 ${users.filter((u) => u.Active !== false).length}명`, go: ctx.canView("access") ? "access" : null },
-            { k: "kpi-new", label: "최근 7일 새 글", value: `${newWeek}`, unit: "건", sub: `전체 ${vis.length}건`, go: "all" },
-          ].map((x, i) => (
-            <button key={x.k} data-testid={x.k} onClick={() => x.go && setTab(x.go)} className={`text-left px-4 py-2.5 min-w-0 border-slate-100 ${i % 2 ? "border-l" : ""} ${i === 2 ? "md:border-l" : ""} ${i >= 2 ? "border-t md:border-t-0" : ""} ${x.go ? "hover:bg-slate-50" : "cursor-default"}`}>
-              <div className="text-[11px] text-slate-500 truncate">{x.label}</div>
-              <div className="flex items-baseline gap-2 min-w-0">
-                <span className="text-[19px] font-bold text-slate-800 tabular-nums leading-tight">{x.value}<span className="text-[12px] font-normal text-slate-400 ml-0.5">{x.unit || ""}</span></span>
-                {x.bar != null && <span className="h-1.5 w-14 rounded-full bg-slate-100 overflow-hidden hidden sm:inline-block"><span className="block h-full rounded-full" style={{ width: `${x.bar}%`, background: pctColor(x.bar) }}></span></span>}
-                <span className="text-[11px] text-slate-400 truncate">{x.sub}</span>
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* 공지 · 필수 */}
-      <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-5" data-testid="notice-strip">
-        <div className="flex items-center gap-2 px-4 h-11 border-b border-slate-100" style={{ background: "linear-gradient(90deg,#FFF7F1,#FFFFFF 60%)" }}>
-          <Megaphone size={15} style={{ color: "#C2410C" }} />
-          <h2 className="text-[13.5px] font-semibold text-slate-800">공지 · 필수</h2>
-          {ctx.isAgent && (todo.length
-            ? <span className="text-[11px] font-bold px-2 rounded-full leading-5 text-white" style={{ background: "#C2410C" }} data-testid="todo-required">확인 필요 {todo.length}건</span>
-            : <span className="text-[11px] font-medium px-2 rounded-full leading-5 bg-emerald-50 text-emerald-700" data-testid="todo-required">모두 확인 완료</span>)}
-          <span className="text-[11.5px] text-slate-400 hidden sm:inline">{ctx.isAgent ? "필수 자료는 읽은 뒤 「조회확인」을 눌러 주세요" : showRate ? "필수 자료는 Agent 확인율을 함께 보여 줍니다" : ""}</span>
-          {notice.length > NOTICE_MAX && <button onClick={() => setTab("cat:required")} className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 whitespace-nowrap">더보기 <ChevronRight size={12} className="inline -mt-0.5" /></button>}
-        </div>
-        {notice.length ? notice.slice(0, NOTICE_MAX).map((p) => {
-          const c = catMap[p.Category]; const r = myRow(p); const s = stats.get(p.id);
-          return (
-            <button key={p.id} onClick={() => openPost(p)} data-notice={p.id} className="w-full text-left px-4 py-2.5 flex items-center gap-2.5 border-t border-slate-100 first:border-t-0 hover:bg-slate-50 min-w-0">
-              {p.RequireConfirm
-                ? <span className="text-[10.5px] font-bold w-9 text-center rounded leading-5 shrink-0" style={{ background: "#FDEEE6", color: "#C2410C" }}>필수</span>
-                : <span className="text-[10.5px] font-bold w-9 text-center rounded leading-5 shrink-0 bg-amber-50 text-amber-700">공지</span>}
-              <span className="hidden sm:inline-block w-[104px] shrink-0 truncate"><CatTag cat={c} /></span>
-              <span className={`min-w-0 flex-1 truncate text-[13.5px] ${r ? "text-slate-600" : "font-semibold text-slate-900"}`}>{p.Title}</span>
-              <PostMarks p={p} compact />
-              <span className="text-[11.5px] text-slate-400 tabular-nums shrink-0 hidden md:inline w-12 text-right">{shortDate(p.PublishedAt || p._created)}</span>
-              <span className="shrink-0 w-[92px] flex justify-end">
-                {ctx.isAgent ? (p.RequireConfirm ? (r && r.ConfirmedAt
-                  ? <span className="inline-flex items-center gap-1 text-[11.5px] text-emerald-700 font-medium"><CheckCircle2 size={13} />확인 완료</span>
-                  : <span className="inline-flex items-center gap-0.5 text-[11.5px] font-semibold text-white rounded-md px-2 h-6" style={{ background: "#C2410C" }}>확인하기<ChevronRight size={12} /></span>) : null)
-                  : showRate && p.RequireConfirm ? <MiniRate s={s} w={44} /> : null}
-              </span>
-            </button>
-          );
-        }) : <SmallEmpty icon={CheckCircle2}>지금 걸려 있는 공지 · 필수 자료가 없습니다.</SmallEmpty>}
+        {showRate && (
+          <div className="grid grid-cols-2 md:grid-cols-4 border-t border-slate-100" data-testid="stat-bar">
+            {[
+              { k: "kpi-rate", label: "필수 자료 확인율", value: required.length && sumTotal ? `${ratePct}%` : "–", sub: required.length ? (sumTotal ? `${sumDone} / ${sumTotal} 확인` : "대상 Agent 없음") : "필수 자료 없음", bar: required.length && sumTotal ? ratePct : null, go: "status" },
+              { k: "kpi-pending", label: "미확인 Agent", value: `${pendingAgents}`, unit: "명", sub: `등록 Agent ${agents.length}명`, go: "status" },
+              { k: "kpi-active", label: "활성 사용자 · 7일", value: active7 ? `${active7.size}` : "–", unit: active7 ? "명" : "", sub: `사용자 ${users.filter((u) => u.Active !== false).length}명`, go: ctx.canView("access") ? "access" : null },
+              { k: "kpi-new", label: "최근 7일 새 글", value: `${newWeek}`, unit: "건", sub: `전체 ${vis.length}건`, go: "all" },
+            ].map((x, i) => (
+              <button key={x.k} data-testid={x.k} onClick={() => x.go && setTab(x.go)} className={`text-left px-4 md:px-5 py-2.5 min-w-0 border-slate-100 ${i % 2 ? "border-l" : ""} ${i === 2 ? "md:border-l" : ""} ${i >= 2 ? "border-t md:border-t-0" : ""} ${x.go ? "hover:bg-slate-50" : "cursor-default"}`}>
+                <div className="text-[11px] text-slate-500 truncate">{x.label}</div>
+                <div className="flex items-baseline gap-2 min-w-0">
+                  <span className="text-[18px] font-bold text-slate-800 tabular-nums leading-tight">{x.value}<span className="text-[12px] font-normal text-slate-400 ml-0.5">{x.unit || ""}</span></span>
+                  {x.bar != null && <span className="h-1.5 w-14 rounded-full bg-slate-100 overflow-hidden hidden sm:inline-block"><span className="block h-full rounded-full" style={{ width: `${x.bar}%`, background: pctColor(x.bar) }}></span></span>}
+                  <span className="text-[11px] text-slate-400 truncate">{x.sub}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
       </section>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
-        {/* 탭 게시판 */}
-        <section className="xl:col-span-8 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden self-start min-w-0" data-testid="board-widget">
-          <div className="flex items-end gap-0.5 px-2 border-b border-slate-200 overflow-x-auto" role="tablist">
-            {tabCats.map((t) => {
-              const n = t.key === "all" ? vis.length : vis.filter((p) => p.Category === t.key).length;
-              const on = bTab === t.key;
+        <div className="xl:col-span-8 min-w-0 space-y-5">
+          {/* 공지 · 필수 */}
+          <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" data-testid="notice-strip">
+            <div className="flex items-center gap-2 px-4 h-11 border-b border-slate-100">
+              <Megaphone size={15} style={{ color: "#C2410C" }} />
+              <h2 className="text-[14px] font-semibold text-slate-800">공지 · 필수</h2>
+              {ctx.isAgent && (todo.length
+                ? <span className="text-[11px] font-bold px-2 rounded-full leading-5 text-white" style={{ background: "#C2410C" }} data-testid="todo-required">확인 필요 {todo.length}건</span>
+                : <span className="text-[11px] font-medium px-2 rounded-full leading-5 bg-emerald-50 text-emerald-700" data-testid="todo-required">모두 확인 완료</span>)}
+              <span className="text-[11.5px] text-slate-400 hidden md:inline truncate">{ctx.isAgent ? "필수 자료는 끝까지 읽은 뒤 「조회확인」을 눌러 주세요" : showRate ? "필수 자료는 Agent 확인율을 함께 보여 줍니다" : ""}</span>
+              {notice.length > NOTICE_MAX && <button onClick={() => onSearch("", "notice")} className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 whitespace-nowrap shrink-0" data-testid="notice-more">더보기 <ChevronRight size={12} className="inline -mt-0.5" /></button>}
+            </div>
+            {notice.length ? notice.slice(0, NOTICE_MAX).map((p) => {
+              const c = catMap[p.Category]; const r = myRow(p); const s = stats.get(p.id);
               return (
-                <button key={t.key} role="tab" aria-selected={on} onClick={() => setBTab(t.key)} data-btab={t.key}
-                  className={`relative px-3 h-11 text-[13px] whitespace-nowrap inline-flex items-center gap-1 ${on ? "text-slate-900 font-semibold" : "text-slate-500 hover:text-slate-800"}`}>
-                  {t.label}<span className={`text-[11px] tabular-nums ${on ? "" : "text-slate-400"}`} style={on ? { color: BRAND.accent } : undefined}>{n}</span>
-                  {on && <span className="absolute left-2 right-2 bottom-0 h-[2px] rounded-full" style={{ background: BRAND.accent }}></span>}
+                <button key={p.id} onClick={() => openPost(p)} data-notice={p.id} title={p.Title} className="w-full text-left px-4 h-11 flex items-center gap-2.5 border-t border-slate-100 first:border-t-0 hover:bg-slate-50 min-w-0">
+                  <span className="w-[46px] shrink-0 flex">{p.RequireConfirm ? <ReqPill /> : <NoticePill />}</span>
+                  <span className="hidden sm:inline-block w-[112px] shrink-0 truncate"><CatTag cat={c} /></span>
+                  <span className={`min-w-0 flex-1 truncate text-[13.5px] ${r ? "text-slate-600" : "font-semibold text-slate-900"}`}>{p.Title}</span>
+                  <PostMarks p={p} compact />
+                  <span className="text-[11.5px] text-slate-400 tabular-nums shrink-0 hidden md:inline w-12 text-right">{shortDate(p.PublishedAt || p._created)}</span>
+                  <span className="shrink-0 w-[84px] flex justify-end">
+                    {ctx.isAgent ? (p.RequireConfirm ? (r && r.ConfirmedAt
+                      ? <span className="inline-flex items-center gap-1 text-[11.5px] text-emerald-700 font-medium"><CheckCircle2 size={13} />확인 완료</span>
+                      : <span className="inline-flex items-center gap-0.5 text-[11.5px] font-semibold text-white rounded-md px-2 h-6" style={{ background: "#C2410C" }}>확인하기<ChevronRight size={12} /></span>) : null)
+                      : showRate && p.RequireConfirm ? <MiniRate s={s} w={40} /> : null}
+                  </span>
                 </button>
+              );
+            }) : <SmallEmpty icon={CheckCircle2}>지금 걸려 있는 공지 · 필수 자료가 없습니다.</SmallEmpty>}
+          </section>
+
+          {/* 게시판별 최근 글 — 인트라넷 게시판 홈 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-testid="board-boxes">
+            {cats.map((c) => {
+              const list = vis.filter((p) => p.Category === c.key);
+              const rows = list.slice(0, 5);
+              const un = list.filter((p) => !myRow(p)).length;
+              const td = ctx.isAgent ? list.filter(isTodo).length : 0;
+              const I = c.icon || FileText;
+              return (
+                <section key={c.key} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-w-0" data-box={c.key}>
+                  <button onClick={() => setTab("cat:" + c.key)} className="flex items-center gap-2.5 px-4 h-12 border-b border-slate-100 text-left hover:bg-slate-50/70 group" data-box-head={c.key}>
+                    <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: c.soft }}><I size={14} style={{ color: c.color }} /></span>
+                    <span className="text-[14px] font-semibold text-slate-800 truncate">{c.label}</span>
+                    <span className="text-[11.5px] text-slate-400 tabular-nums shrink-0">{list.length}</span>
+                    {td ? <span className="text-[10.5px] font-bold px-1.5 rounded-full leading-[18px] text-white shrink-0" style={{ background: "#C2410C" }}>확인 {td}</span>
+                      : un ? <span className="text-[10.5px] font-semibold px-1.5 rounded-full leading-[18px] bg-rose-50 text-rose-600 shrink-0" data-unread={c.key}>새 글 {un}</span> : null}
+                    <span className="ml-auto text-[12px] text-slate-400 group-hover:text-slate-700 inline-flex items-center shrink-0">더보기<ChevronRight size={13} /></span>
+                  </button>
+                  <div className="flex-1 py-1">
+                    {rows.length ? rows.map((p) => {
+                      const rd = !!myRow(p);
+                      return (
+                        <button key={p.id} onClick={() => openPost(p)} data-wpost={p.id} title={p.Title} className="w-full text-left px-4 h-9 flex items-center gap-2 hover:bg-slate-50 min-w-0">
+                          <span className={`w-1 h-1 rounded-full shrink-0 ${rd ? "bg-slate-300" : ""}`} style={rd ? undefined : { background: c.color }}></span>
+                          {p.IsPinned && <Pin size={11} className="text-amber-500 shrink-0" />}
+                          <span className={`truncate text-[13px] ${rd ? "text-slate-600" : "font-semibold text-slate-900"}`}>{p.Title}</span>
+                          <PostMarks p={p} />
+                          <span className="ml-auto pl-2 text-[11.5px] text-slate-400 tabular-nums shrink-0">{shortDate(p.PublishedAt || p._created)}</span>
+                        </button>
+                      );
+                    }) : (
+                      <div className="px-4 py-3 text-[12.5px] text-slate-400 flex items-center gap-2">
+                        <Inbox size={14} className="text-slate-300 shrink-0" />아직 글이 없습니다.
+                        {ctx.canWrite(c.key) && <button onClick={() => setTab("cat:" + c.key)} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>첫 글 쓰기</button>}
+                      </div>
+                    )}
+                  </div>
+                </section>
               );
             })}
           </div>
-          {tabRows.length ? (
-            <>
-              <table className="w-full table-fixed hidden md:table">
-                <colgroup><col style={{ width: 128 }} /><col /><col style={{ width: 92 }} /><col style={{ width: 62 }} /><col style={{ width: 52 }} />{showRate && <col style={{ width: 92 }} />}</colgroup>
-                <thead><tr className="text-[11px] text-slate-400 border-b border-slate-100">
-                  {["분류", "제목", "작성자", "날짜", "조회", ...(showRate ? ["확인율"] : [])].map((h, i) => <th key={h} className={`font-medium py-1.5 px-3 ${i === 1 ? "text-left" : i === 0 ? "text-left" : "text-center"}`}>{h}</th>)}
-                </tr></thead>
-                <tbody>
-                  {tabRows.map((p) => {
-                    const unread = !myRow(p); const vs = viewStats(readIdx, p.id);
-                    return (
-                      <tr key={p.id} onClick={() => openPost(p)} data-wpost={p.id} className="border-t border-slate-100 first:border-t-0 hover:bg-slate-50 cursor-pointer">
-                        <td className="px-3 h-10 truncate"><CatTag cat={catMap[p.Category]} /></td>
-                        <td className="px-3 h-10 min-w-0">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            {p.IsPinned && <Pin size={11} className="text-amber-500 shrink-0" />}
-                            <span className={`truncate text-[13.5px] ${unread ? "font-semibold text-slate-900" : "text-slate-600"}`}>{p.Title}</span>
-                            <PostMarks p={p} />
-                          </div>
-                        </td>
-                        <td className="px-3 h-10 text-[12.5px] text-slate-500 truncate text-center">{p.AuthorName || "-"}</td>
-                        <td className="px-2 h-10 text-[12px] text-slate-400 tabular-nums text-center">{shortDate(p.PublishedAt || p._created)}</td>
-                        <td className="px-2 h-10 text-[12px] text-slate-400 tabular-nums text-center">{vs.views}</td>
-                        {showRate && <td className="px-2 h-10 text-center">{p.RequireConfirm ? <MiniRate s={confirmStats(p, readIdx, agents)} w={36} /> : <span className="text-[11px] text-slate-300">-</span>}</td>}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              <div className="md:hidden">
-                {tabRows.map((p) => {
-                  const unread = !myRow(p); const vs = viewStats(readIdx, p.id);
-                  return (
-                    <button key={p.id} onClick={() => openPost(p)} className="w-full text-left px-4 py-2.5 border-t border-slate-100 first:border-t-0">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        {p.IsPinned && <Pin size={11} className="text-amber-500 shrink-0" />}
-                        <span className={`truncate text-[14px] ${unread ? "font-semibold text-slate-900" : "text-slate-600"}`}>{p.Title}</span>
-                        <PostMarks p={p} />
-                      </div>
-                      <div className="text-[11.5px] text-slate-400 mt-0.5 flex items-center gap-1.5"><CatTag cat={catMap[p.Category]} /><span>·</span><span className="truncate">{p.AuthorName || "-"}</span><span>·</span><span className="tabular-nums">{shortDate(p.PublishedAt || p._created)}</span><span>·</span><span>조회 {vs.views}</span></div>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          ) : (
-            <div className="px-4 py-4 text-center text-[12.5px] text-slate-400">
-              아직 글이 없습니다.{tabCanWrite && <> <button onClick={goMore} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>첫 글 쓰러 가기</button></>}
-            </div>
-          )}
-          <div className="flex items-center justify-between px-4 h-10 border-t border-slate-100 text-[12px]">
-            <span className="text-slate-400">{bTab === "all" ? "모든 게시판" : (catMap[bTab] || {}).label} · 최근 {Math.min(8, tabList.length)}건</span>
-            <button onClick={goMore} className="font-medium text-slate-500 hover:text-slate-900 inline-flex items-center gap-0.5" data-testid="board-more">더보기<ChevronRight size={13} /></button>
-          </div>
-        </section>
+        </div>
 
-        {/* 오른쪽 위젯 */}
+        {/* 오른쪽 작은 상자 */}
         <aside className="xl:col-span-4 space-y-4 min-w-0">
           {ctx.isAgent && (
             <WidgetCard icon={BookOpenCheck} tint="#C2410C" title="내 확인 대기" testid="w-todo" right={todo.length ? <span className="text-[11px] font-bold px-1.5 rounded-full leading-[18px] text-white" style={{ background: "#C2410C" }}>{todo.length}</span> : null}>
               {todo.length ? todo.slice(0, 5).map((p) => (
-                <button key={p.id} onClick={() => openPost(p)} className="w-full text-left px-4 py-2 flex items-center gap-2 border-t border-slate-100 first:border-t-0 hover:bg-orange-50/40">
+                <button key={p.id} onClick={() => openPost(p)} title={p.Title} className="w-full text-left px-4 h-10 flex items-center gap-2 border-t border-slate-100 first:border-t-0 hover:bg-orange-50/40">
                   <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "#C2410C" }}></span>
                   <span className="truncate text-[13px] text-slate-800 flex-1">{p.Title}</span>
                   <span className="text-[11px] font-semibold shrink-0" style={{ color: "#C2410C" }}>확인하기</span>
@@ -1280,7 +1304,7 @@ function OverviewTab({ ctx, openPost, setTab, accessRows }) {
               <ol className="py-1">
                 {popular.map(({ p, v }, i) => (
                   <li key={p.id}>
-                    <button onClick={() => openPost(p)} className="w-full text-left px-4 py-1.5 flex items-center gap-2.5 hover:bg-slate-50">
+                    <button onClick={() => openPost(p)} title={p.Title} className="w-full text-left px-4 h-9 flex items-center gap-2.5 hover:bg-slate-50">
                       <span className={`w-5 text-center text-[12.5px] font-bold tabular-nums shrink-0 ${i < 3 ? "" : "text-slate-400"}`} style={i < 3 ? { color: BRAND.accent } : undefined}>{i + 1}</span>
                       <span className="truncate text-[13px] text-slate-700 flex-1">{p.Title}</span>
                       <span className="text-[11px] text-slate-400 tabular-nums shrink-0 inline-flex items-center gap-0.5"><Eye size={11} />{v}</span>
@@ -1290,20 +1314,11 @@ function OverviewTab({ ctx, openPost, setTab, accessRows }) {
               </ol>
             ) : <SmallEmpty icon={Eye}>아직 조회 기록이 없습니다.</SmallEmpty>}
           </WidgetCard>
-          <WidgetCard icon={Link2} title="자주 찾는 링크" tint="#64748B" testid="w-links">
-            <div className="grid grid-cols-2 gap-1.5 p-3">
-              {cats.map((c) => { const I = c.icon || FileText; return (
-                <button key={c.key} onClick={() => setTab("cat:" + c.key)} className="flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-slate-50 border border-slate-100 text-left min-w-0">
-                  <span className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: c.soft }}><I size={13} style={{ color: c.color }} /></span>
-                  <span className="text-[12.5px] text-slate-700 truncate">{c.label}</span>
-                </button>
-              ); })}
-              <button onClick={() => ctx.openContact && ctx.openContact()} className="flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-slate-50 border border-slate-100 text-left min-w-0" data-testid="link-contact">
-                <span className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 bg-slate-100"><HelpCircle size={13} className="text-slate-500" /></span>
-                <span className="text-[12.5px] text-slate-700 truncate">문의하기</span>
-              </button>
-            </div>
-          </WidgetCard>
+          <section className="rounded-xl border border-slate-200 bg-white shadow-sm px-4 py-3.5" data-testid="intro">
+            <div className="flex items-center gap-2 text-[13.5px] font-semibold text-slate-800"><BookOpen size={15} style={{ color: BRAND.accent }} />Training365 이용 안내</div>
+            <p className="text-[12.5px] text-slate-500 leading-relaxed mt-1.5">{T365_INTRO_SHORT}</p>
+            <button onClick={() => ctx.openContact && ctx.openContact()} className={`${btnCls} h-8 mt-3 text-[12.5px]`} data-testid="link-contact"><HelpCircle size={13} /> 문의하기 · 담당자 연락처</button>
+          </section>
         </aside>
       </div>
     </div>
@@ -1311,22 +1326,34 @@ function OverviewTab({ ctx, openPost, setTab, accessRows }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* 게시판 목록 — 고전 게시판 표(번호 · 분류 · 제목 · 작성자 · 작성일 · 조회 · 확인율)  */
-/* 공지(중요) 글은 쪽마다 맨 위 · 검색(제목+내용/제목/내용/작성자) · 정렬 · 쪽 번호    */
+/* 게시판 목록 — 인트라넷 게시판 표                                        */
+/* 위: 보기 탭(전체 · 안 읽은 글 · 공지 · 확인 필요) + 검색 · 글쓰기                  */
+/* 가운데: 총 건수 · 분류 · 정렬 · 보기 방식(목록 / 요약) · 쪽당 글 수            */
+/* 공지 글은 쪽마다 맨 위 · 검색어 강조 · 잘린 제목은 말풍선 · 쪽 번호(10쪽 묶음)       */
 /* ------------------------------------------------------------------ */
-function BoardTab({ ctx, catKey, openId, setOpenId }) {
+function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
   const { posts, catMap, cats, readIdx, me } = ctx;
   const showRate = ctx.canView("status");
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState((seed && seed.q) || "");
   const [field, setField] = useState("tb");
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState((seed && seed.filter) || "all");
   const [catFilter, setCatFilter] = useState("");
   const [sort, setSort] = useState("new");
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState(null);
-  useEffect(() => { setPage(1); }, [q, field, filter, catFilter, catKey, sort]);
-  useEffect(() => { setQ(""); setFilter("all"); setCatFilter(""); setSort("new"); }, [catKey]);
-  const PAGE_SIZE = 15;
+  const [view, setView] = usePref("view", "list", ["list", "summary"]);
+  const [size, setSize] = usePref("size", "15", ["15", "30", "50"]);
+  const searchRef = useRef(null);
+  const firstRun = useRef(true);
+  useEffect(() => { setPage(1); }, [q, field, filter, catFilter, catKey, sort, size]);
+  useEffect(() => { if (firstRun.current) { firstRun.current = false; return; } setQ(""); setFilter("all"); setCatFilter(""); setSort("new"); }, [catKey]);
+  useEffect(() => { if (seed && onSeedUsed) onSeedUsed(); }, []);   // 게시판 홈에서 넘긴 검색어 · 보기 탭은 처음 한 번만(다른 게시판을 다녀와도 다시 걸리지 않게)
+  useEffect(() => {
+    if (openId) return;
+    const k = (e) => { if (e.key === "/" && !isTyping(e) && !e.ctrlKey && !e.metaKey && searchRef.current) { e.preventDefault(); searchRef.current.focus(); } };
+    window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k);
+  }, [openId]);
+  const PAGE_SIZE = Number(size) || 15;
   const myRow = (p) => (readIdx.get(String(p.id)) || new Map()).get(normEmail(me.email));
   const scope = posts.filter((p) => (catKey ? p.Category === catKey : !!catMap[p.Category]));
   const numOf = new Map([...scope].sort((a, b) => postTs(a) - postTs(b) || Number(a.id) - Number(b.id)).map((p, i) => [p.id, i + 1]));   // 번호 = 게시 순서(APS 공통)
@@ -1337,29 +1364,31 @@ function BoardTab({ ctx, catKey, openId, setOpenId }) {
     return field === "t" ? t.includes(qq) : field === "b" ? b.includes(qq) : field === "a" ? a.includes(qq) : t.includes(qq) || b.includes(qq);
   };
   const rateOf = (p) => (p.RequireConfirm ? confirmStats(p, readIdx, ctx.agents) : null);
-  const view = scope
-    .filter((p) => !catFilter || p.Category === catFilter)
-    .filter((p) => filter === "all" ? true : filter === "unread" ? !myRow(p) : filter === "pinned" ? p.IsPinned : filter === "todo" ? (p.RequireConfirm && !(myRow(p) && myRow(p).ConfirmedAt)) : filter === "required" ? p.RequireConfirm : true)
-    .filter(hit);
+  const isTodo = (p) => p.RequireConfirm && !(myRow(p) && myRow(p).ConfirmedAt);
+  const passFilter = (p, f) => f === "all" ? true : f === "unread" ? !myRow(p) : f === "notice" ? (p.IsPinned || p.RequireConfirm) : f === "pinned" ? p.IsPinned : f === "todo" ? isTodo(p) : f === "required" ? p.RequireConfirm : true;
+  const base = scope.filter((p) => !catFilter || p.Category === catFilter).filter(hit);
+  const view0 = base.filter((p) => passFilter(p, filter));
   const sorter = sort === "old" ? (a, b) => -byNewest(a, b) : sort === "views" ? (a, b) => viewStats(readIdx, b.id).views - viewStats(readIdx, a.id).views || byNewest(a, b)
     : sort === "rate" ? (a, b) => ((rateOf(a) || {}).pct ?? 101) - ((rateOf(b) || {}).pct ?? 101) || byNewest(a, b) : byNewest;
-  const pinnedRows = filter === "pinned" ? [] : view.filter((p) => p.IsPinned).sort(byNewest);
-  const normalRows = (filter === "pinned" ? view : view.filter((p) => !p.IsPinned)).sort(sorter);
+  // 공지는 쪽마다 맨 위(검색 · 공지 보기 · 정렬을 바꿨을 때는 섞어서 그대로)
+  const pinTop = filter === "all" || filter === "unread";
+  const pinnedRows = pinTop && !qq ? view0.filter((p) => p.IsPinned).sort(byNewest) : [];
+  const normalRows = (pinnedRows.length ? view0.filter((p) => !p.IsPinned) : view0).sort(sorter);
   const totalPages = Math.max(1, Math.ceil(normalRows.length / PAGE_SIZE));
   const pageSafe = Math.min(page, totalPages);
   const pageRows = normalRows.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
-  const rows = [...pinnedRows.map((p) => ({ p, pin: true })), ...pageRows.map((p) => ({ p, pin: filter === "pinned" }))];
+  const rows = [...pinnedRows.map((p) => ({ p, pin: true })), ...pageRows.map((p) => ({ p, pin: false }))];
   const canWriteHere = catKey ? ctx.canWrite(catKey) : cats.some((c) => ctx.canWrite(c.key));
-  const unreadN = scope.filter((p) => !myRow(p)).length;
   const open = openId ? posts.find((p) => String(p.id) === String(openId)) : null;
 
-  // 글 보기는 목록 위의 큰 창(주소 #/cat/키/번호 로 바로 열림) — 목록은 뒤에 그대로
+  // 글 보기는 목록 위의 큰 창(주소 #/cat/키/번호 로 바로 열림) — 목록은 뒤에 그대로(t365-ui2)
   const openOk = !!(open && (!catKey || open.Category === catKey) && catMap[open.Category]);
   const siblings = [...scope].sort(byNewest);
   const closeModal = () => setOpenId(null);
 
-  const filters = [["all", "전체"], ["unread", `안 읽은 글${unreadN ? ` ${unreadN}` : ""}`], ["pinned", "공지"], ctx.isAgent ? ["todo", "확인 필요"] : ["required", "조회확인 필수"]];
-  const ctrl = "h-9 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/40";
+  const cnt = (f) => base.filter((p) => passFilter(p, f)).length;
+  const tabs = [["all", "전체"], ["unread", "안 읽은 글"], ["notice", "공지 · 필수"], ctx.isAgent ? ["todo", "확인 필요"] : null].filter(Boolean);
+  const ctrl = "h-9 border border-slate-300 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/40";
   const StatusCell = ({ p }) => {
     if (ctx.isAgent) {
       const r = myRow(p);
@@ -1372,110 +1401,140 @@ function BoardTab({ ctx, catKey, openId, setOpenId }) {
   };
   const showStatusCol = ctx.isAgent || showRate;
   const colCount = 5 + (catKey ? 0 : 1) + (showStatusCol ? 1 : 0);   // 빈 줄 colSpan 이 실제 열 수와 다르면 고정 표가 왼쪽으로 쏠린다(10-12 화면)
-  // 쪽 번호 — 10쪽 묶음
   const block = Math.floor((pageSafe - 1) / 10);
   const pages = Array.from({ length: Math.min(10, totalPages - block * 10) }, (_, i) => block * 10 + i + 1);
   const pgBtn = "min-w-[32px] h-8 px-2 rounded-md text-[13px] tabular-nums inline-flex items-center justify-center disabled:opacity-30";
+  const emptyMsg = scope.length ? (qq ? <>「{q.trim()}」 검색 결과가 없습니다. <button onClick={() => setQ("")} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>검색어 지우기</button></> : filter === "unread" ? "안 읽은 글이 없습니다 — 모두 읽었습니다." : filter === "todo" ? "확인할 필수 자료가 없습니다." : "조건에 맞는 글이 없습니다.")
+    : <>등록된 게시물이 없습니다.{canWriteHere && <> <button onClick={() => setEditing({})} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>첫 글 쓰기</button></>}</>;
+  const TitleLine = ({ p, pin, big, inTable }) => {
+    const unread = !myRow(p);
+    return (
+      <div className="flex items-center gap-1.5 min-w-0">
+        {pin && !inTable && <NoticePill />}
+        {p.RequireConfirm && <ReqPill />}
+        <span className={`truncate ${big ? "text-[15px]" : "text-[14px]"} ${pin || unread ? "font-semibold text-slate-900" : "text-slate-600"}`} data-unread-title={unread ? "1" : undefined}><Hl text={p.Title} q={field === "t" || field === "tb" ? q : ""} /></span>
+        <PostMarks p={p} compact />
+      </div>
+    );
+  };
 
   return (
     <div className="w-full">
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2 flex-wrap">
-          <span className="text-[13px] text-slate-500 mr-1">총 <b className="text-slate-800 tabular-nums">{view.length}</b>건</span>
-          <div className="flex items-center rounded-lg border border-slate-300 overflow-x-auto h-9 max-w-full shrink-0">
-            {filters.map(([k, label], i) => (
-              <button key={k} onClick={() => setFilter(k)} data-filter={k}
-                className={`px-3 h-full text-[13px] whitespace-nowrap ${i ? "border-l border-slate-300" : ""} ${filter === k ? "text-white" : "text-slate-600 bg-white hover:bg-slate-50"}`}
-                style={filter === k ? { background: BRAND.accent } : undefined}>{label}</button>
-            ))}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" data-testid="board">
+        {/* 보기 탭 · 검색 · 글쓰기 */}
+        <div className="px-3 md:px-4 border-b border-slate-200 flex flex-col md:flex-row md:items-center gap-2 md:gap-3 pt-2 md:pt-0">
+          <div className="flex items-end gap-0.5 overflow-x-auto -mb-px order-2 md:order-1" role="tablist">
+            {tabs.map(([k, label]) => {
+              const on = filter === k || (k === "notice" && filter === "pinned") || (k === "notice" && filter === "required" && !ctx.isAgent);
+              const n = cnt(k);
+              return (
+                <button key={k} role="tab" aria-selected={on} onClick={() => setFilter(k)} data-filter={k}
+                  className={`relative px-2.5 md:px-3 h-12 text-[13.5px] whitespace-nowrap inline-flex items-center gap-1.5 border-b-2 ${on ? "text-slate-900 font-semibold" : "text-slate-500 hover:text-slate-800 border-transparent"}`}
+                  style={on ? { borderColor: BRAND.accent } : undefined}>
+                  {label}
+                  <span className={`text-[11px] tabular-nums rounded-full px-1.5 leading-[18px] ${on ? "text-white" : k === "todo" && n ? "text-white" : "bg-slate-100 text-slate-500"}`} style={on ? { background: BRAND.accent } : k === "todo" && n ? { background: "#C2410C" } : undefined}>{n}</span>
+                </button>
+              );
+            })}
           </div>
-          {!catKey && (
-            <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className={`${ctrl} px-2.5 w-[calc(50%-4px)] sm:w-40`} aria-label="카테고리">
-              <option value="">전체 분류</option>{cats.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-            </select>
-          )}
-          <select value={sort} onChange={(e) => setSort(e.target.value)} className={`${ctrl} px-2.5 ${catKey ? "w-full sm:w-32" : "w-[calc(50%-4px)] sm:w-32"}`} aria-label="정렬" data-testid="board-sort">
-            <option value="new">최신순</option><option value="old">오래된순</option><option value="views">조회순</option>{showRate && <option value="rate">확인율 낮은순</option>}
-          </select>
-          {canWriteHere && <button onClick={() => setEditing({})} className={`${btnPrimaryCls} sm:ml-auto w-full sm:w-auto justify-center`} style={{ background: BRAND.accent }} data-testid="btn-write"><Pencil size={14} /> 글쓰기</button>}
-        </div>
-
-        {/* 넓은 화면 — 표 */}
-        <div className="hidden md:block">
-          <table className="w-full table-fixed" data-testid="board-table">
-            <colgroup><col style={{ width: 60 }} />{!catKey && <col style={{ width: 120 }} />}<col /><col style={{ width: 120 }} /><col style={{ width: 100 }} /><col style={{ width: 70 }} />{showStatusCol && <col style={{ width: 110 }} />}</colgroup>
-            <thead className="bg-slate-50 text-slate-500 text-[12px]">
-              <tr>{["번호", ...(catKey ? [] : ["분류"]), "제목", "작성자", "작성일", "조회", ...(showStatusCol ? [ctx.isAgent ? "조회확인" : "확인율"] : [])].map((h) => <th key={h} className={`px-3 py-2.5 font-medium whitespace-nowrap border-b border-slate-200 ${h === "제목" ? "text-left" : "text-center"}`}>{h}</th>)}</tr>
-            </thead>
-            <tbody>
-              {rows.length ? rows.map(({ p, pin }) => {
-                const unread = !myRow(p); const vs = viewStats(readIdx, p.id);
-                return (
-                  <tr key={(pin ? "pin" : "") + p.id} onClick={() => setOpenId(p.id)} data-post={p.id} className={`border-t border-slate-100 cursor-pointer ${pin ? "bg-amber-50/60 hover:bg-amber-50" : "hover:bg-slate-50"}`}>
-                    <td className="px-2 h-11 text-center text-[12.5px] text-slate-400 tabular-nums">{pin ? <span className="inline-flex items-center gap-0.5 text-[11px] font-bold px-1.5 rounded leading-5 bg-amber-100 text-amber-800"><Pin size={10} />공지</span> : numOf.get(p.id)}</td>
-                    {!catKey && <td className="px-3 h-11 text-center truncate"><CatTag cat={catMap[p.Category]} /></td>}
-                    <td className="px-3 h-11 min-w-0">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className={`truncate text-[14px] ${pin ? "font-semibold text-slate-900" : unread ? "font-semibold text-slate-900" : "text-slate-600"}`}>{p.Title}</span>
-                        <PostMarks p={p} />
-                      </div>
-                    </td>
-                    <td className="px-3 h-11 text-[12.5px] text-slate-600 truncate text-center">{p.AuthorName || "-"}</td>
-                    <td className="px-2 h-11 text-center text-[12.5px] text-slate-500 tabular-nums">{fmtDay(p.PublishedAt || p._created).slice(2).replace(/-/g, ".")}</td>
-                    <td className="px-2 h-11 text-center text-[12.5px] text-slate-500 tabular-nums">{vs.views}</td>
-                    {showStatusCol && <td className="px-2 h-11 text-center"><StatusCell p={p} /></td>}
-                  </tr>
-                );
-              }) : (
-                <tr><td colSpan={colCount} className="text-center text-slate-400 text-[13px] py-14">{scope.length ? "조회 결과가 없습니다." : <>등록된 게시물이 없습니다.{canWriteHere && <> <button onClick={() => setEditing({})} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>첫 글 쓰기</button></>}</>}</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        {/* 휴대폰 — 두 줄 목록 */}
-        <div className="md:hidden">
-          {rows.length ? rows.map(({ p, pin }) => {
-            const unread = !myRow(p); const vs = viewStats(readIdx, p.id);
-            return (
-              <button key={(pin ? "pin" : "") + p.id} onClick={() => setOpenId(p.id)} data-post={p.id} className={`w-full text-left px-4 py-2.5 border-t border-slate-100 first:border-t-0 ${pin ? "bg-amber-50/60" : ""}`}>
-                <div className="flex items-center gap-1.5 min-w-0">
-                  {pin && <span className="text-[10.5px] font-bold px-1 rounded leading-[18px] bg-amber-100 text-amber-800 shrink-0">공지</span>}
-                  <span className={`truncate text-[14.5px] ${unread || pin ? "font-semibold text-slate-900" : "text-slate-600"}`}>{p.Title}</span>
-                  <PostMarks p={p} />
-                </div>
-                <div className="flex items-center gap-1.5 mt-1 text-[11.5px] text-slate-400 min-w-0">
-                  {!catKey && <><CatTag cat={catMap[p.Category]} /><span>·</span></>}
-                  <span className="truncate max-w-[90px]">{p.AuthorName || "-"}</span><span>·</span>
-                  <span className="tabular-nums">{fmtDay(p.PublishedAt || p._created).slice(2).replace(/-/g, ".")}</span><span>·</span><span>조회 {vs.views}</span>
-                  {showStatusCol && <span className="ml-auto shrink-0"><StatusCell p={p} /></span>}
-                </div>
-              </button>
-            );
-          }) : <div className="text-center text-slate-400 text-[13px] py-10">{scope.length ? "조회 결과가 없습니다." : "등록된 게시물이 없습니다."}</div>}
-        </div>
-
-        {/* 쪽 번호 · 검색 */}
-        <div className="px-4 py-3 border-t border-slate-100 flex flex-col items-center gap-3">
-          {totalPages > 1 && (
-            <div className="flex items-center gap-1" data-testid="pager">
-              <button className={`${pgBtn} text-slate-500 hover:bg-slate-100`} disabled={pageSafe <= 1} onClick={() => setPage(1)} aria-label="처음"><ChevronsLeft size={15} /></button>
-              <button className={`${pgBtn} text-slate-500 hover:bg-slate-100`} disabled={pageSafe <= 1} onClick={() => setPage(pageSafe - 1)} aria-label="이전"><ChevronLeft size={15} /></button>
-              {pages.map((n) => <button key={n} onClick={() => setPage(n)} data-page={n} className={`${pgBtn} ${n === pageSafe ? "text-white font-semibold" : "text-slate-600 hover:bg-slate-100"}`} style={n === pageSafe ? { background: BRAND.accent } : undefined}>{n}</button>)}
-              <button className={`${pgBtn} text-slate-500 hover:bg-slate-100`} disabled={pageSafe >= totalPages} onClick={() => setPage(pageSafe + 1)} aria-label="다음"><ChevronRight size={15} /></button>
-              <button className={`${pgBtn} text-slate-500 hover:bg-slate-100`} disabled={pageSafe >= totalPages} onClick={() => setPage(totalPages)} aria-label="끝"><ChevronsRight size={15} /></button>
-            </div>
-          )}
-          <div className="flex items-center gap-1.5 w-full sm:w-auto">
+          <div className="flex items-center gap-1.5 md:ml-auto order-1 md:order-2 md:py-2.5 min-w-0">
             <select value={field} onChange={(e) => setField(e.target.value)} className={`${ctrl} px-2 shrink-0`} aria-label="검색 대상" data-testid="search-field">
               <option value="tb">제목+내용</option><option value="t">제목</option><option value="b">내용</option><option value="a">작성자</option>
             </select>
-            <div className="relative flex-1 sm:w-72">
+            <div className="relative flex-1 md:w-64 min-w-0">
               <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="검색어를 입력하세요" className={`${ctrl} w-full pl-8 pr-8`} data-testid="board-search" />
-              {q && <button onClick={() => setQ("")} aria-label="검색어 지우기" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"><X size={14} /></button>}
+              <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="검색어 입력" aria-label="검색어" className={`${ctrl} w-full pl-8 pr-8`} data-testid="board-search" />
+              {q ? <button onClick={() => setQ("")} aria-label="검색어 지우기" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"><X size={14} /></button>
+                : <kbd className="hidden md:inline absolute right-2 top-1/2 -translate-y-1/2 text-[10.5px] text-slate-400 border border-slate-200 rounded px-1.5 leading-[18px]">/</kbd>}
             </div>
+            {canWriteHere && <button onClick={() => setEditing({})} className={`${btnPrimaryCls} shrink-0`} style={{ background: BRAND.accent }} data-testid="btn-write"><SquarePen size={14} /><span className="hidden sm:inline">글쓰기</span></button>}
           </div>
         </div>
+        {/* 건수 · 분류 · 정렬 · 보기 방식 · 쪽당 글 수 */}
+        <div className="px-3 md:px-4 py-2 border-b border-slate-100 bg-slate-50/60 flex items-center gap-2 flex-wrap text-[12.5px] text-slate-500">
+          <span data-testid="board-count">총 <b className="text-slate-800 tabular-nums">{view0.length}</b>건{qq ? <> · 「<span className="text-slate-700">{q.trim()}</span>」 검색 결과</> : null}<span className="hidden sm:inline"> · {pageSafe}/{totalPages}쪽</span></span>
+          <div className="ml-auto flex items-center gap-1.5">
+            {!catKey && (
+              <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="h-8 border border-slate-300 rounded-md text-[12.5px] bg-white px-2 max-w-[132px]" aria-label="게시판">
+                <option value="">전체 게시판</option>{cats.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+              </select>
+            )}
+            <select value={sort} onChange={(e) => setSort(e.target.value)} className="h-8 border border-slate-300 rounded-md text-[12.5px] bg-white px-2" aria-label="정렬" data-testid="board-sort">
+              <option value="new">최신순</option><option value="old">오래된순</option><option value="views">조회순</option>{showRate && <option value="rate">확인율 낮은순</option>}
+            </select>
+            <div className="hidden sm:flex items-center rounded-md border border-slate-300 overflow-hidden h-8 bg-white" role="group" aria-label="보기 방식">
+              {[["list", Rows3, "목록형"], ["summary", AlignLeft, "요약형"]].map(([k, I, l], i) => (
+                <button key={k} onClick={() => setView(k)} title={l} aria-label={l} aria-pressed={view === k} data-view-mode={k} className={`w-8 h-full flex items-center justify-center ${i ? "border-l border-slate-300" : ""} ${view === k ? "text-white" : "text-slate-500 hover:bg-slate-50"}`} style={view === k ? { background: BRAND.accent } : undefined}><I size={14} /></button>
+              ))}
+            </div>
+            <select value={size} onChange={(e) => setSize(e.target.value)} className="hidden sm:block h-8 border border-slate-300 rounded-md text-[12.5px] bg-white px-2" aria-label="쪽당 글 수" data-testid="page-size">
+              {["15", "30", "50"].map((n) => <option key={n} value={n}>{n}개씩</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* 넓은 화면 — 목록형 표 */}
+        {view === "list" && (
+          <div className="hidden md:block">
+            <table className="w-full table-fixed" data-testid="board-table">
+              <colgroup><col style={{ width: 60 }} />{!catKey && <col style={{ width: 120 }} />}<col /><col style={{ width: 120 }} /><col style={{ width: 100 }} /><col style={{ width: 70 }} />{showStatusCol && <col style={{ width: 110 }} />}</colgroup>
+              <thead className="text-slate-500 text-[12px]">
+                <tr>{["번호", ...(catKey ? [] : ["게시판"]), "제목", "작성자", "작성일", "조회", ...(showStatusCol ? [ctx.isAgent ? "조회확인" : "확인율"] : [])].map((h) => <th key={h} className={`px-3 h-10 font-medium whitespace-nowrap border-b border-slate-200 ${h === "제목" ? "text-left" : "text-center"}`}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {rows.length ? rows.map(({ p, pin }) => {
+                  const vs = viewStats(readIdx, p.id);
+                  return (
+                    <tr key={(pin ? "pin" : "") + p.id} onClick={() => setOpenId(p.id)} data-post={p.id} data-pin={pin ? "1" : undefined} title={p.Title} className={`border-t border-slate-100 first:border-t-0 cursor-pointer ${pin ? "bg-amber-50/50 hover:bg-amber-50" : "hover:bg-slate-50"}`}>
+                      <td className="px-2 h-12 text-center text-[12.5px] text-slate-400 tabular-nums">{pin ? <span className="inline-flex"><NoticePill /></span> : numOf.get(p.id)}</td>
+                      {!catKey && <td className="px-3 h-12 text-center truncate"><CatTag cat={catMap[p.Category]} /></td>}
+                      <td className="px-3 h-12 min-w-0"><TitleLine p={p} pin={pin} inTable /></td>
+                      <td className="px-3 h-12 text-[12.5px] text-slate-600 truncate text-center"><Hl text={p.AuthorName || "-"} q={field === "a" ? q : ""} /></td>
+                      <td className="px-2 h-12 text-center text-[12.5px] text-slate-500 tabular-nums">{dateCell(p)}</td>
+                      <td className="px-2 h-12 text-center text-[12.5px] text-slate-500 tabular-nums">{vs.views}</td>
+                      {showStatusCol && <td className="px-2 h-12 text-center"><StatusCell p={p} /></td>}
+                    </tr>
+                  );
+                }) : (
+                  <tr><td colSpan={colCount} className="text-center text-slate-400 text-[13px] py-14" data-testid="board-empty">{emptyMsg}</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {/* 요약형(넓은 화면) · 휴대폰 — 제목 · 본문 첫 줄 · 정보 줄 */}
+        <div className={view === "list" ? "md:hidden" : ""} data-testid={view === "summary" ? "summary-list" : undefined}>
+          {rows.length ? rows.map(({ p, pin }) => {
+            const vs = viewStats(readIdx, p.id); const nf = parseFiles(p.AttachmentsJson).length;
+            const pv = view === "summary" ? plainPreview(p.Body, 220) : "";
+            return (
+              <button key={(pin ? "pin" : "") + p.id} onClick={() => setOpenId(p.id)} data-post={p.id} className={`w-full text-left px-4 ${view === "summary" ? "md:px-5 py-3.5" : "py-3"} border-t border-slate-100 first:border-t-0 block ${pin ? "bg-amber-50/50 hover:bg-amber-50" : "hover:bg-slate-50"}`}>
+                <TitleLine p={p} pin={pin} big={view === "summary"} />
+                {pv && <p className="text-[13px] text-slate-500 leading-relaxed mt-1 t365-clamp2 hidden md:block"><Hl text={pv} q={field === "b" || field === "tb" ? q : ""} /></p>}
+                <div className="flex items-center gap-1.5 mt-1.5 text-[11.5px] text-slate-400 min-w-0">
+                  {!catKey && <><CatTag cat={catMap[p.Category]} /><span>·</span></>}
+                  <span className="truncate max-w-[110px]">{p.AuthorName || "-"}</span><span>·</span>
+                  <span className="tabular-nums">{dateCell(p)}</span><span>·</span><span className="whitespace-nowrap">조회 {vs.views}</span>
+                  {nf > 0 && <><span>·</span><span className="whitespace-nowrap inline-flex items-center gap-0.5"><Paperclip size={11} />{nf}</span></>}
+                  {showStatusCol && (p.RequireConfirm || (myRow(p) && myRow(p).ConfirmedAt)) && <span className="ml-auto shrink-0"><StatusCell p={p} /></span>}
+                </div>
+              </button>
+            );
+          }) : <div className="text-center text-slate-400 text-[13px] py-12">{emptyMsg}</div>}
+        </div>
+
+        {/* 쪽 번호 */}
+        {totalPages > 1 && (
+          <div className="px-4 py-3 border-t border-slate-100 flex justify-center">
+            <div className="flex items-center gap-1" data-testid="pager">
+              <button className={`${pgBtn} text-slate-500 hover:bg-slate-100`} disabled={pageSafe <= 1} onClick={() => setPage(1)} aria-label="처음"><ChevronsLeft size={15} /></button>
+              <button className={`${pgBtn} text-slate-500 hover:bg-slate-100`} disabled={pageSafe <= 1} onClick={() => setPage(pageSafe - 1)} aria-label="이전"><ChevronLeft size={15} /></button>
+              {pages.map((n) => <button key={n} onClick={() => setPage(n)} data-page={n} aria-current={n === pageSafe ? "page" : undefined} className={`${pgBtn} ${n === pageSafe ? "text-white font-semibold" : "text-slate-600 hover:bg-slate-100"}`} style={n === pageSafe ? { background: BRAND.accent } : undefined}>{n}</button>)}
+              <button className={`${pgBtn} text-slate-500 hover:bg-slate-100`} disabled={pageSafe >= totalPages} onClick={() => setPage(pageSafe + 1)} aria-label="다음"><ChevronRight size={15} /></button>
+              <button className={`${pgBtn} text-slate-500 hover:bg-slate-100`} disabled={pageSafe >= totalPages} onClick={() => setPage(totalPages)} aria-label="끝"><ChevronsRight size={15} /></button>
+            </div>
+          </div>
+        )}
       </div>
       {openId && (openOk
         ? <PostDetail key={open.id} ctx={ctx} post={open} siblings={siblings} listLabel={catKey ? (catMap[catKey] || {}).label : "전체 게시물"} onOpen={(id) => setOpenId(id)} onBack={closeModal} onEdit={() => setEditing({ post: open })} suspended={!!editing} />
@@ -1483,12 +1542,12 @@ function BoardTab({ ctx, catKey, openId, setOpenId }) {
           <PostModalShell onClose={closeModal} label="게시물 없음" narrow>
             <div className="p-10 text-center">
               <FileText size={30} className="mx-auto text-slate-300 mb-3" />
-              <div className="text-slate-600 text-sm mb-5">게시물을 찾을 수 없습니다 — 삭제되었거나 볼 수 없는 카테고리입니다.</div>
+              <div className="text-slate-600 text-sm mb-5">게시물을 찾을 수 없습니다 — 삭제되었거나 볼 수 없는 게시판입니다.</div>
               <button onClick={closeModal} className={btnCls} data-testid="btn-back"><ChevronLeft size={14} /> 목록으로</button>
             </div>
           </PostModalShell>
         ))}
-      {editing && <PostEditor ctx={ctx} post={editing.post} defaultCat={catKey || catFilter} onClose={() => setEditing(null)} onSaved={async (id) => { setEditing(null); await ctx.reload(); if (id) setOpenId(id); }} />}
+      {editing && <PostEditor ctx={ctx} post={editing.post} defaultCat={catKey || catFilter} onClose={() => setEditing(null)} onSaved={async (id) => { const wasEdit = !!(editing && editing.post); setEditing(null); await ctx.reload(); toast(wasEdit ? "게시물을 수정했습니다" : "게시물을 올렸습니다"); if (id) setOpenId(id); }} />}
     </div>
   );
 }
@@ -1558,7 +1617,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
   async function confirmRead() {
     if (busyRef.current) return;
     busyRef.current = true; setBusy(true);
-    try { const row = await t365Confirm(post, me); if (row) ctx.upsertRead(row); }
+    try { const row = await t365Confirm(post, me); if (row) { ctx.upsertRead(row); toast("조회확인을 기록했습니다"); } }
     catch (e) { uiAlert(`조회확인을 저장하지 못했습니다 — ${e.message}\n잠시 후 다시 눌러 주세요.`); }
     busyRef.current = false; setBusy(false);
   }
@@ -3210,6 +3269,7 @@ function App({ boot }) {
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [denied, setDenied] = useState(null);
   const [contactOpen, setContactOpen] = useState(false);
+  const [boardSeed, setBoardSeed] = useState(null);   // 게시판 홈 검색 · 「안 읽은 글」 · 「공지 더보기」 → 전체 게시물에 검색어 · 보기 탭을 넘긴다
 
   const me0 = boot.me;
   const myRow = users.find((u) => boot.me.ids.includes(normEmail(u.Email)) && u.Active !== false) || null;
@@ -3269,6 +3329,7 @@ function App({ boot }) {
   }
   const setOpenId = (id) => setTab(tab, id ? String(id) : null);
   const openPost = (p) => setTab(catMap[p.Category] ? "cat:" + p.Category : "all", String(p.id));
+  const openSearch = (q, filter) => { setBoardSeed({ q: q || "", filter: filter || "all", n: Date.now() }); setTab("all"); };
   useEffect(() => { const on = () => { const x = parseHash(); setTabRaw(x.tab); setOpenPostRaw(x.post); }; window.addEventListener("popstate", on); return () => window.removeEventListener("popstate", on); }, []);
   const upsertRead = (row) => setReads((prev) => { const i = prev.findIndex((x) => x.Title === row.Title); if (i < 0) return [...prev, row]; const n = prev.slice(); n[i] = { ...n[i], ...row }; return n; });
 
@@ -3322,8 +3383,8 @@ function App({ boot }) {
   const showAps = !me.isGuest && !isExternalEmail(me.email) && role !== "Agent";
   const curCat = tab.startsWith("cat:") ? catMap[tab.slice(4)] : null;
   const meta = curCat ? [curCat.icon, curCat.desc, curCat] : ({
-    overview: [LayoutDashboard, isAgent ? "새 글 · 확인이 필요한 필수 교육자료 · 게시판별 소식을 한눈에 봅니다" : "게시판 소식과 Agent 조회확인 현황을 한눈에 봅니다"],
-    all: [LayoutList, "모든 카테고리의 게시물을 한 번에 찾아봅니다 — 카테고리 · 안 읽은 글 · 중요 필터와 검색"],
+    overview: [LayoutDashboard, isAgent ? "게시판 홈 — 공지 · 확인이 필요한 필수 자료와 게시판별 새 글을 한눈에 봅니다" : "게시판 홈 — 공지 · 필수 자료와 게시판별 새 글, Agent 조회확인 현황을 한눈에 봅니다"],
+    all: [LayoutList, "모든 게시판의 글을 한 번에 찾아봅니다 — 안 읽은 글 · 공지 · 필수 보기와 검색"],
     status: [BarChart3, "게시물마다 대상 Agent 중 몇 명이 「조회확인」을 눌렀는지 봅니다 — 눌러서 누가 · 언제 확인했는지 확인"],
     users: [Users, "사용자 · 역할과 메뉴별 보기 · 편집 권한을 관리합니다. 역할이 기본값이고, 칸을 바꾸면 그 사람만 따로 적용됩니다. 변경은 활동 이력에 남습니다."],
     categories: [Tags, "게시판 7개의 이름 · 설명 · 순서 · 사용 여부를 관리합니다"],
@@ -3430,7 +3491,7 @@ function App({ boot }) {
             {!(openPostId && (tab.startsWith("cat:") || tab === "all")) && (
               <PageHeader icon={meta[0]} title={cur.label} subtitle={meta[1]} tint={meta[2]} />
             )}
-            {showSetup && <SetupNotice status={listStatus} />}
+            {showSetup && <SetupNotice status={listStatus} infoToo={tab === "overview" || T365_ADMIN_TABS.includes(tab)} />}
             {!showSetup && postsErr && (
               <div className="rounded-xl border px-4 py-3 mb-5 text-sm bg-amber-50 border-amber-200 text-amber-900 flex items-center gap-2" data-testid="board-unavailable"><AlertTriangle size={16} className="text-amber-500 shrink-0" />게시판을 준비하고 있습니다. 잠시 후 다시 확인해 주세요.</div>
             )}
@@ -3440,8 +3501,8 @@ function App({ boot }) {
               <div className="bg-white rounded-xl border p-10 text-center"><ShieldCheck size={28} className="mx-auto text-slate-300 mb-2" /><div className="text-slate-500 text-sm">이 화면에 대한 접근 권한이 없습니다.</div></div>
             ) : (
               <>
-                {tab === "overview" && <OverviewTab ctx={ctx} openPost={openPost} setTab={(t) => { if (tabAllowed(t)) setTab(t); }} accessRows={canView("access") ? accessRows : null} />}
-                {(tab === "all" || tab.startsWith("cat:")) && <BoardTab ctx={ctx} catKey={tab === "all" ? null : tab.slice(4)} openId={openPostId} setOpenId={setOpenId} />}
+                {tab === "overview" && <OverviewTab ctx={ctx} openPost={openPost} setTab={(t) => { if (tabAllowed(t)) setTab(t); }} onSearch={openSearch} accessRows={canView("access") ? accessRows : null} />}
+                {(tab === "all" || tab.startsWith("cat:")) && <BoardTab ctx={ctx} catKey={tab === "all" ? null : tab.slice(4)} openId={openPostId} setOpenId={setOpenId} seed={tab === "all" ? boardSeed : null} onSeedUsed={() => setBoardSeed(null)} />}
                 {tab === "status" && <ConfirmStatusTab ctx={ctx} openPost={openPost} />}
                 {tab === "users" && <UsersTab ctx={ctx} users={users} configAdmins={boot.configAdmins} accessRows={accessRows} listStatus={listStatus} reload={reload} />}
                 {tab === "categories" && <CategoriesTab ctx={ctx} catRows={catRows} listStatus={listStatus} reload={reload} />}
@@ -3548,7 +3609,7 @@ async function t365Boot(account) {
 }
 
 // 확인 · 알림 창(DialogHost)은 앱 · 권한 없음 화면과 따로 한 번만 붙인다 — 어느 화면에서든 uiConfirm/uiAlert 가 같은 모양으로 뜬다
-(function mountDialogs() { const el = document.createElement("div"); el.id = "t365-dialogs"; document.body.appendChild(el); createRoot(el).render(<DialogHost />); })();
+(function mountDialogs() { const el = document.createElement("div"); el.id = "t365-dialogs"; document.body.appendChild(el); createRoot(el).render(<><DialogHost /><ToastHost /></>); })();
 
 // 시험용 — 테스트 하네스가 window.T365_TEST_HOOKS 를 켰을 때만 쓰기 함수를 노출(편집 권한 없는 강제 쓰기가 막히는지 확인)
 if (window.T365_TEST_HOOKS) window.__t365 = { tCreate, tUpdate, tDelete, tUploadFile };
