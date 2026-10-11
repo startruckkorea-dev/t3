@@ -139,7 +139,7 @@ const T365_LISTS = {
 const T365_COLUMNS = {
   posts: ["Title", "Category", "Body", "IsPinned", "RequireConfirm", "VideoUrl", "VideoFileJson", "AttachmentsJson", "AuthorEmail", "AuthorName", "PublishedAt", "UpdatedAt", "UpdatedBy"],
   reads: ["Title", "PostId", "UserEmail", "UserName", "Company", "Role", "FirstViewedAt", "LastViewedAt", "ViewCount", "ConfirmedAt"],
-  users: ["Title", "Email", "Role", "Company", "WriterCategories", "Active", "Note"],
+  users: ["Title", "Email", "Role", "Company", "WriterCategories", "Active", "Note", "Permissions"],
   access: ["Title", "UserEmail", "UserName", "Role", "Company", "LoginAt", "LastActivityAt", "LogoutAt", "EndType", "Device", "UserAgent"],
   categories: ["Title", "Key", "Description", "SortOrder", "Active"],
 };
@@ -167,6 +167,70 @@ const T365_DEFAULT_CATEGORIES = [
   { key: "marketing", label: "마케팅", icon: Megaphone, color: "#B45309", soft: "#FBF1E2", desc: "캠페인 · 프로모션 · 기프트 세트 안내" },
   { key: "general", label: "일반게시판", icon: MessagesSquare, color: "#475569", soft: "#EEF1F5", desc: "공지 · 일정 · 기타 안내" },
 ];
+
+/* ---- 메뉴 권한(보기 · 편집) — 역할 기본값 + 사용자별 예외(training365_Users.Permissions 열, JSON) ----
+ * 수준: "n" 없음 · "v" 보기 · "e" 편집(보기 포함). Overview 는 항상 보기. 편집이 없는 메뉴(전체 게시물 · 조회확인 현황 · 접속 기록 · 활동 이력)는 보기까지만.
+ * Permissions 에는 역할 기본값과 다른 칸만 { "cat:crm": "e", "status": "n" } 꼴로 저장한다. 열이 없거나 비어 있으면 역할 기본값.
+ * 값이 깨져 있으면 Overview 만(fail-closed). 설정 파일 관리자(고정 IT 포함)는 전부 — 화면에서 바꿀 수 없다.
+ * 「조회확인」 버튼은 메뉴 권한이 아니라 Agent 역할에 묶여 있다. */
+const T365_PERM_GROUPS = [
+  { key: "home", label: "개요", band: "#EEF1F5", ink: "#475569", line: "#CBD5E1", items: [{ key: "overview", label: "Overview", edit: false, locked: true }, { key: "all", label: "전체 게시물", edit: false }] },
+  { key: "boards", label: "게시판", band: "#E4F1F0", ink: "#2F7B7A", line: "#9CCBC8", items: T365_DEFAULT_CATEGORIES.map((c) => ({ key: "cat:" + c.key, cat: c.key, label: c.label, edit: true })) },
+  { key: "status", label: "확인 현황", band: "#FDEEE6", ink: "#C2410C", line: "#F3B79A", items: [{ key: "status", label: "조회확인 현황", edit: false }] },
+  { key: "admin", label: "관리자 전용", band: "#ECEAF8", ink: "#5B4BA6", line: "#C4BCEB", items: [{ key: "users", label: "사용자 · 권한", edit: true }, { key: "categories", label: "카테고리 설정", edit: true }, { key: "access", label: "접속 기록", edit: false }, { key: "activity", label: "활동 이력", edit: false }] },
+];
+const T365_PERM_ITEMS = T365_PERM_GROUPS.flatMap((g) => g.items.map((it) => ({ ...it, group: g.key })));
+const T365_PERM_KEYS = new Set(T365_PERM_ITEMS.map((x) => x.key));
+const T365_LEVEL_LABEL = { n: "없음", v: "보기", e: "편집" };
+function capLevel(item, lv) { if (item.locked) return "v"; if (lv === "e" && !item.edit) return "v"; return lv === "e" || lv === "v" ? lv : "n"; }
+function noPerms() { const o = {}; T365_PERM_ITEMS.forEach((it) => { o[it.key] = it.locked ? "v" : "n"; }); return o; }
+function rolePreset(role, writerCats) {
+  if (!T365_ROLES.includes(role)) return noPerms();
+  const wc = new Set(writerCats || []);
+  const out = {};
+  T365_PERM_ITEMS.forEach((it) => {
+    let lv = "n";
+    if (role === "관리자") lv = "e";
+    else if (role === "Agent") lv = it.group === "home" || it.group === "boards" ? "v" : "n";
+    else if (role === "본사") lv = it.group === "admin" ? "n" : "v";
+    else if (role === "작성자") lv = it.group === "admin" ? "n" : it.group === "boards" && wc.has(it.cat) ? "e" : "v";
+    out[it.key] = capLevel(it, lv);
+  });
+  return out;
+}
+function parsePermJson(s) {
+  if (s == null || String(s).trim() === "") return { ok: true, map: {} };
+  try {
+    const v = JSON.parse(String(s));
+    if (!v || typeof v !== "object" || Array.isArray(v)) return { ok: false, map: {} };
+    const map = {};
+    Object.keys(v).forEach((k) => { if (T365_PERM_KEYS.has(k) && ["n", "v", "e"].includes(v[k])) map[k] = v[k]; });
+    return { ok: true, map };
+  } catch (e) { return { ok: false, map: {} }; }
+}
+// 한 사용자의 실제 권한 — { perms, source: config | preset | custom | broken | none }
+function permsOf(row, opts) {
+  if (opts && opts.cfgAdmin) { const o = {}; T365_PERM_ITEMS.forEach((it) => { o[it.key] = capLevel(it, "e"); }); return { perms: o, source: "config" }; }
+  if (!row || row.Active === false || !T365_ROLES.includes(row.Role)) return { perms: noPerms(), source: "none" };
+  const base = rolePreset(row.Role, catKeysOf(row.WriterCategories));
+  const p = parsePermJson(row.Permissions);
+  if (!p.ok) return { perms: noPerms(), source: "broken" };
+  const o = { ...base };
+  Object.entries(p.map).forEach(([k, lv]) => { o[k] = capLevel(T365_PERM_ITEMS.find((x) => x.key === k), lv); });
+  return { perms: o, source: T365_PERM_ITEMS.some((it) => o[it.key] !== base[it.key]) ? "custom" : "preset" };
+}
+function permDiff(desired, preset) { const d = {}; T365_PERM_ITEMS.forEach((it) => { if (!it.locked && (desired[it.key] || "n") !== (preset[it.key] || "n")) d[it.key] = desired[it.key] || "n"; }); return d; }
+const canSee = (P, k) => !!P && (P[k] === "v" || P[k] === "e");
+// 쓰기 지킴이 — 화면 단추를 숨기는 것과 별개로, 편집 권한 없이 게시물 · 사용자 · 카테고리 목록과 첨부 폴더에 쓰지 않는다(fail-closed).
+// 조회 · 조회확인(Reads)과 접속 기록(AccessLog)은 본인 기록이라 누구나.
+let _tPermNow = null;
+function t365AssertWrite(listName, cats) {
+  if (listName === T365_LISTS.reads || listName === T365_LISTS.access) return;
+  const P = _tPermNow;
+  const ok = !!P && (listName === T365_LISTS.posts ? cats.length > 0 && cats.every((c) => P["cat:" + c] === "e")
+    : listName === T365_LISTS.users ? P.users === "e" : listName === T365_LISTS.categories ? P.categories === "e" : false);
+  if (!ok) { const e = new Error("편집 권한이 없어 저장하지 않았습니다 — 관리자에게 권한을 요청해 주세요."); e.code = "NO_EDIT"; throw e; }
+}
 
 function showLoginErr(msg) {
   const el = document.getElementById("login-err");
@@ -230,6 +294,7 @@ async function tListAll(listName, extraQuery = "") {
   return items.map((x) => ({ id: String(x.id), ...x.fields, _created: x.createdDateTime }));
 }
 async function tCreate(listName, fields) {
+  t365AssertWrite(listName, [fields && fields.Category].filter(Boolean));
   const token = await getGraphToken();
   const listId = await tListId(listName);
   const body = await tSafeFields(listName, fields);
@@ -241,6 +306,7 @@ async function tCreate(listName, fields) {
   return { id: String(j.id), ...(j.fields || body) };
 }
 async function tUpdate(listName, itemId, fields, opts) {
+  t365AssertWrite(listName, [fields && fields.Category, opts && opts.prevCat].filter(Boolean));
   const token = await getGraphToken();
   const listId = await tListId(listName);
   const body = await tSafeFields(listName, fields);
@@ -250,7 +316,8 @@ async function tUpdate(listName, itemId, fields, opts) {
   if (!res.ok) { const d = await res.text().catch(() => ""); const e = new Error(`${listName} 수정 실패 (${res.status}): ${d.slice(0, 200)}`); e.status = res.status; throw e; }
   return res.json();
 }
-async function tDelete(listName, itemId) {
+async function tDelete(listName, itemId, opts) {
+  t365AssertWrite(listName, [opts && opts.cat].filter(Boolean));
   const token = await getGraphToken();
   const listId = await tListId(listName);
   const res = await fetch(`${GRAPH}/sites/${_siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}`, { method: "DELETE", headers: { Authorization: "Bearer " + token } });
@@ -305,6 +372,7 @@ function sanitizeFileName(name) { return String(name || "file").replace(/[\\/:*?
 function fmtSize(n) { n = Number(n) || 0; return n >= 1048576 ? `${(n / 1048576).toFixed(1)}MB` : n >= 1024 ? `${Math.round(n / 1024)}KB` : `${n}B`; }
 // 업로드 — 4MB 이하는 한 번에, 넘으면 업로드 세션(5MB 조각). 돌려주는 값만 게시물에 저장한다
 async function tUploadFile(file, onProgress) {
+  if (!_tPermNow || !Object.keys(_tPermNow).some((k) => k.startsWith("cat:") && _tPermNow[k] === "e")) throw new Error("편집 권한이 없어 파일을 올리지 않았습니다.");
   const token = await getGraphToken();
   const driveId = await tDocDriveId();
   const kst = new Date(Date.now() + 9 * 36e5);
@@ -890,7 +958,7 @@ function OverviewTab({ ctx, openPost, setTab, accessRows }) {
           <div className="lg:col-span-2 hidden md:grid grid-cols-1 gap-3">
             <Tile icon={LayoutList} title={`게시판 ${cats.length}개`} tag="자료실" tint="rgba(47,123,122,.45)" onClick={() => setTab("all")}
               desc="CRM · 제품 · 고객대응 · 트레이닝 · 마케팅 자료를 한 곳에서 — 새 글은 메뉴 옆 숫자로 알려 드립니다." />
-            <Tile icon={CheckCircle2} title="조회확인" tag={ctx.isAgent ? "읽은 뒤 확인" : "확인 현황"} tint="rgba(194,65,12,.45)" onClick={() => setTab(ctx.isAgent ? "cat:required" : "status")}
+            <Tile icon={CheckCircle2} title="조회확인" tag={ctx.isAgent ? "읽은 뒤 확인" : "확인 현황"} tint="rgba(194,65,12,.45)" onClick={() => setTab(ctx.isAgent || !ctx.canView("status") ? "cat:required" : "status")}
               desc={ctx.isAgent ? "필수 교육자료는 끝까지 읽고 「조회확인」을 눌러 주세요 — 본사에 확인 기록이 남습니다." : "Agent 가 자료를 읽고 확인했는지 게시물마다 누가 · 언제 확인했는지 확인율로 봅니다."} />
           </div>
         </div>
@@ -919,7 +987,7 @@ function OverviewTab({ ctx, openPost, setTab, accessRows }) {
         </section>
       )}
 
-      {!ctx.isAgent && (
+      {ctx.canView("status") && (
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
           <Kpi testid="kpi-rate" label="필수 자료 확인율" value={required.length ? ratePct : "–"} suffix={required.length ? "%" : ""} sub={required.length ? `확인 ${sumDone} / 대상 ${sumTotal} (${required.length}건 × Agent)` : "조회확인 필수 게시물 없음"} onClick={() => setTab("status")} warn={required.length > 0 && ratePct < 60} />
           <Kpi testid="kpi-pending" label="미확인 Agent" value={pendingAgents} suffix="명" sub={`등록 Agent ${agents.length}명 중`} onClick={() => setTab("status")} />
@@ -970,7 +1038,7 @@ function OverviewTab({ ctx, openPost, setTab, accessRows }) {
             {recent.length ? <div className="pb-1">{recent.map((p) => <PostRow key={p.id} p={p} />)}</div>
               : <div className="text-center text-slate-400 text-[13px] py-10">등록된 게시물이 없습니다.</div>}
           </section>
-          {!ctx.isAgent && (
+          {ctx.canView("status") && (
             <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden" data-testid="low-rate">
               <div className="px-5 pt-3.5 pb-2 flex items-center justify-between">
                 <span className="text-[12px] font-semibold text-slate-500">확인율 낮은 필수 자료</span>
@@ -1052,6 +1120,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId }) {
         : p.RequireConfirm ? <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 whitespace-nowrap">확인 필요</span>
         : <span className="text-[11.5px] text-slate-300">-</span>;
     }
+    if (!ctx.canView("status")) return <span className="text-[11.5px] text-slate-300">-</span>;
     const s = confirmStats(p, readIdx, ctx.agents);
     if (!s.total) return <span className="text-[11.5px] text-slate-300">-</span>;
     return (
@@ -1193,7 +1262,7 @@ function PostDetail({ ctx, post, onBack, onEdit }) {
     if (!confirm(`「${post.Title}」 게시물을 삭제할까요?\n삭제하면 되돌릴 수 없고, 이 게시물의 조회확인 기록은 확인 현황에서 빠집니다.`)) return;
     setDeleting(true);
     try {
-      await tDelete(T365_LISTS.posts, post.id);
+      await tDelete(T365_LISTS.posts, post.id, { cat: post.Category });
       t365Log("게시물", "삭제", post.Title, { info: { 카테고리: cat ? cat.label : post.Category, 게시물ID: post.id, 작성자: post.AuthorName || post.AuthorEmail || "" } });
       onBack();
       await ctx.reload();
@@ -1294,7 +1363,7 @@ function PostDetail({ ctx, post, onBack, onEdit }) {
         )}
       </article>
 
-      {!ctx.isAgent && <ConfirmPanel ctx={ctx} post={post} />}
+      {ctx.canView("status") && <ConfirmPanel ctx={ctx} post={post} />}
       {deleting && <BlockingOverlay message="삭제하고 있습니다..." />}
     </div>
   );
@@ -1356,7 +1425,7 @@ function ConfirmPanel({ ctx, post }) {
                 <td className="px-4 py-2 text-slate-600 tabular-nums whitespace-nowrap">{x.confirmedAt ? fmtDate(x.confirmedAt) : "-"}</td>
                 <td className="px-4 py-2 text-slate-400 tabular-nums whitespace-nowrap">{x.viewedAt ? fmtDate(x.viewedAt) : "열람 안 함"}</td>
               </tr>
-            )) : <tr><td colSpan={5} className="text-center text-slate-400 py-10">{s.total ? "조회 결과가 없습니다." : "등록된 Agent 가 없습니다 — 사용자 · 역할 관리에서 Agent 를 등록해 주세요."}</td></tr>}
+            )) : <tr><td colSpan={5} className="text-center text-slate-400 py-10">{s.total ? "조회 결과가 없습니다." : "등록된 Agent 가 없습니다 — 사용자 · 권한 관리에서 Agent 를 등록해 주세요."}</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1456,7 +1525,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
       };
       let id;
       if (isEdit) {
-        await tUpdate(T365_LISTS.posts, post.id, { ...fields, UpdatedAt: now, UpdatedBy: ctx.me.name });
+        await tUpdate(T365_LISTS.posts, post.id, { ...fields, UpdatedAt: now, UpdatedBy: ctx.me.name }, { prevCat: post.Category });
         id = post.id;
         const labels = { Title: "제목", Category: "카테고리", IsPinned: "중요", RequireConfirm: "조회확인 필수", VideoUrl: "동영상 링크" };
         const changes = {};
@@ -1637,23 +1706,30 @@ function ConfirmStatusTab({ ctx, openPost }) {
 /* 표에서 바꾼 값은 노란색으로 표시만 하고 「반영」을 눌러야 저장 · 이력에 남는다   */
 /* ------------------------------------------------------------------ */
 function catKeysOf(s) { return String(s || "").split(/[,;\s]+/).map((x) => x.trim()).filter((x) => T365_DEFAULT_CATEGORIES.some((c) => c.key === x)); }
-function UsersTab({ ctx, users, configAdmins, accessRows, reload }) {
+function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) {
   const [q, setQ] = useState("");
   const [roleF, setRoleF] = useState("");
-  const [overrides, setOverrides] = useState({});
+  const [overrides, setOverrides] = useState({});   // { 메일: { Role?, Company?, Active?, Perm?: {메뉴: n|v|e} } } — 「반영」 전까지 화면에만
   const [selected, setSelected] = useState(() => new Set());
   const [bulkRole, setBulkRole] = useState("Agent");
+  const [bulkItem, setBulkItem] = useState("cat:required");
+  const [bulkLevel, setBulkLevel] = useState("v");
   const [saving, setSaving] = useState("");
   const [savedPopup, setSavedPopup] = useState(null);
-  const [writerEdit, setWriterEdit] = useState(null);
   const [add, setAdd] = useState({ email: "", name: "", company: "", role: "Agent" });
   const [importRows, setImportRows] = useState(null);
   const [page, setPage] = useState(1);
   const [justAdded, setJustAdded] = useState(() => new Set());
+  const [showLegend, setShowLegend] = useState(false);
   useEffect(() => { setPage(1); }, [q, roleF]);
   const PAGE_SIZE = 20;
   const me = normEmail(ctx.me.email);
   const cfgSet = new Set(configAdmins);
+  const canEdit = ctx.canEditMenu("users");   // 보기만이면 표는 읽기 전용 — 추가 · 반영 · 삭제 · 일괄 등록 없음
+  // Permissions 열 — 없으면 역할 기본값만(작성자의 게시판 편집은 WriterCategories 로 저장되므로 그 칸만 바꿀 수 있다)
+  const usersSt = listStatus && listStatus.users;
+  const hasPermCol = !!usersSt && !usersSt.missing && !usersSt.error && !(usersSt.missingCols || []).includes("Permissions");
+  const catLabel = (it) => (it.cat ? ((ctx.catMap[it.cat] || T365_DEFAULT_CATEGORIES.find((c) => c.key === it.cat) || {}).label || it.label) : it.label);
 
   // 메일 하나에 한 사람 — 같은 메일의 행이 여럿이면 첫 행만 쓰고 표시
   const merged = [];
@@ -1665,7 +1741,17 @@ function UsersTab({ ctx, users, configAdmins, accessRows, reload }) {
   });
   const lastLogin = {};
   (accessRows || []).forEach((r) => { const e = normEmail(r.UserEmail); if (r.EndType !== "접근 차단" && (!lastLogin[e] || r.LoginAt > lastLogin[e])) lastLogin[e] = r.LoginAt; });
-  const eff = (p, k) => { const o = overrides[p.email]; return o && k in o ? o[k] : k === "Active" ? p.row.Active !== false : k === "WriterCategories" ? catKeysOf(p.row.WriterCategories).join(",") : String(p.row[k] || ""); };
+  const eff = (p, k) => { const o = overrides[p.email]; return o && k in o ? o[k] : k === "Active" ? p.row.Active !== false : String(p.row[k] || ""); };
+  const stored = (p) => permsOf({ ...p.row, Active: true }, { cfgAdmin: cfgSet.has(p.email) });   // 사용 중지는 「사용」 칸으로 따로 보이므로 권한 칸은 역할 · 예외 기준
+  // 화면에 보이는 권한 — 바꾼 칸(Perm) > 역할만 바꿨으면 새 역할 기본값 > 저장된 값
+  const curPerm = (p) => {
+    const o = overrides[p.email];
+    if (cfgSet.has(p.email)) return stored(p).perms;
+    if (o && o.Perm) return o.Perm;
+    if (o && "Role" in o) return rolePreset(o.Role, catKeysOf(p.row.WriterCategories));
+    return stored(p).perms;
+  };
+  const presetOf = (p) => rolePreset(eff(p, "Role"), catKeysOf(p.row.WriterCategories));
   const qq = q.trim().toLowerCase();
   const filtered = merged.filter((p) => !roleF || eff(p, "Role") === roleF)
     .filter((p) => !qq || [p.email, p.row.Title, eff(p, "Company"), eff(p, "Role")].some((v) => String(v || "").toLowerCase().includes(qq)));
@@ -1676,43 +1762,111 @@ function UsersTab({ ctx, users, configAdmins, accessRows, reload }) {
   const pageRows = ordered.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
   const dirtyCount = Object.keys(overrides).length;
   const counts = T365_ROLES.reduce((m, r) => { m[r] = merged.filter((p) => p.row.Role === r && p.row.Active !== false).length; return m; }, {});
-  const listAdmins = merged.filter((p) => p.row.Role === "관리자" && p.row.Active !== false);
+  const listAdmins = merged.filter((p) => p.row.Active !== false && !cfgSet.has(p.email) && permsOf(p.row).perms.users === "e");
 
   function setField(p, k, v) {
     setOverrides((prev) => {
       const n = { ...prev }; const o = { ...(n[p.email] || {}) };
-      const saved = k === "Active" ? p.row.Active !== false : k === "WriterCategories" ? catKeysOf(p.row.WriterCategories).join(",") : String(p.row[k] || "");
+      const saved = k === "Active" ? p.row.Active !== false : String(p.row[k] || "");
       if (String(v) === String(saved)) delete o[k]; else o[k] = v;
+      if (k === "Role") delete o.Perm;   // 역할을 바꾸면 그 역할의 기본값부터 다시
       if (Object.keys(o).length) n[p.email] = o; else delete n[p.email];
       return n;
     });
   }
+  // 칸 하나 바꾸기 — 보기를 끄면 편집도 꺼지고, 편집을 켜면 보기도 켜진다
+  function permNext(cur, item, col, on) {
+    const lv = cur[item.key] || "n";
+    if (col === "v") return on ? (lv === "n" ? "v" : lv) : "n";
+    return on ? "e" : (lv === "e" ? "v" : lv);
+  }
+  function setPerm(p, item, nextLv) {
+    setOverrides((prev) => {
+      const n = { ...prev }; const o = { ...(n[p.email] || {}) };
+      const base = o.Perm || (("Role" in o) ? rolePreset(o.Role, catKeysOf(p.row.WriterCategories)) : stored(p).perms);
+      const desired = { ...base, [item.key]: capLevel(item, nextLv) };
+      const roleChanged = "Role" in o;
+      const same = !roleChanged && T365_PERM_ITEMS.every((it) => desired[it.key] === stored(p).perms[it.key]);
+      if (same) delete o.Perm; else o.Perm = desired;
+      if (Object.keys(o).length) n[p.email] = o; else delete n[p.email];
+      return n;
+    });
+  }
+  const cellEditable = (p, item, col) => canEdit && !cfgSet.has(p.email) && !item.locked && (col === "v" || item.edit) && T365_ROLES.includes(eff(p, "Role")) &&
+    (hasPermCol || (eff(p, "Role") === "작성자" && item.group === "boards" && col === "e"));
   const allVisibleSelected = filtered.length > 0 && filtered.every((p) => selected.has(p.email));
   function toggleSelVisible() { setSelected((prev) => { const n = new Set(prev); filtered.forEach((p) => (allVisibleSelected ? n.delete(p.email) : n.add(p.email))); return n; }); }
   function toggleSel(email) { setSelected((prev) => { const n = new Set(prev); n.has(email) ? n.delete(email) : n.add(email); return n; }); }
-  function bulkSet(k, v) { merged.filter((p) => selected.has(p.email)).forEach((p) => setField(p, k, v)); }
+  function bulkSet(k, v) { merged.filter((p) => selected.has(p.email) && !cfgSet.has(p.email)).forEach((p) => setField(p, k, v)); }
+  function bulkPerm() {
+    const item = T365_PERM_ITEMS.find((x) => x.key === bulkItem); if (!item) return;
+    let skipped = 0;
+    merged.filter((p) => selected.has(p.email)).forEach((p) => {
+      const ok = bulkLevel === "n" || bulkLevel === "v" ? cellEditable(p, item, "v") : cellEditable(p, item, "e");
+      if (!ok) { skipped++; return; }
+      setPerm(p, item, capLevel(item, bulkLevel));
+    });
+    if (skipped) alert(`${skipped}명은 바꿀 수 없어 건너뛰었습니다 (설정 파일 관리자 · 역할 없음 · 권한 열 없음).`);
+  }
+
+  // 반영 뒤 「사용자 · 권한 편집」을 가진 사람이 목록에 한 명도 남지 않으면 막는다(마지막 관리자 보호)
+  function permAdminsAfter(rows, changes, removed) {
+    return rows.filter((r) => !removed.has(normEmail(r.Email))).map((r) => ({ ...r, ...(changes[normEmail(r.Email)] || {}) }))
+      .filter((r) => r.Active !== false && permsOf(r).perms.users === "e").length;
+  }
+  const LAST_ADMIN_MSG = "이대로 반영하면 사용자 · 권한을 편집할 수 있는 사람이 목록에 한 명도 남지 않습니다.\n다른 사람에게 먼저 「사용자 · 권한 편집」을 주거나 관리자 역할을 지정해 주세요.";
+  // 저장할 칸 — 역할 · 회사 · 사용 + 권한(역할 기본값과 다른 칸만 Permissions, 작성자 게시판 편집은 WriterCategories)
+  function buildFields(row, o) {
+    const fields = {};
+    if ("Role" in o) fields.Role = o.Role;
+    if ("Company" in o) fields.Company = String(o.Company).trim();
+    if ("Active" in o) fields.Active = !!o.Active;
+    const role = "Role" in fields ? fields.Role : row.Role;
+    if (o.Perm) {
+      let wc = catKeysOf(row.WriterCategories);
+      if (role === "작성자") { wc = T365_PERM_ITEMS.filter((it) => it.group === "boards" && o.Perm[it.key] === "e").map((it) => it.cat); fields.WriterCategories = wc.join(","); }
+      const diff = permDiff(o.Perm, rolePreset(role, wc));
+      fields.Permissions = Object.keys(diff).length ? JSON.stringify(diff) : "";
+    } else if ("Role" in fields) fields.Permissions = "";
+    if (!hasPermCol) delete fields.Permissions;
+    return fields;
+  }
+  function permChanges(before, after) {
+    const ch = {};
+    T365_PERM_ITEMS.forEach((it) => { if (before[it.key] !== after[it.key]) ch[`권한 · ${catLabel(it)}`] = [T365_LEVEL_LABEL[before[it.key]] || "없음", T365_LEVEL_LABEL[after[it.key]] || "없음"]; });
+    return ch;
+  }
 
   async function applyChanges() {
+    if (!canEdit) return;
     const emails = Object.keys(overrides);
     if (!emails.length) return;
     const meO = overrides[me];
-    if (meO && ((meO.Role && meO.Role !== "관리자") || meO.Active === false) && !cfgSet.has(me) && !confirm("본인 계정의 관리자 권한이 빠집니다 — 반영하면 이 화면을 더 볼 수 없습니다. 계속할까요?")) return;
+    const meAfterUsers = meO ? (meO.Perm ? meO.Perm.users : ("Role" in meO ? rolePreset(meO.Role, []).users : "e")) : "e";
+    if (meO && (meAfterUsers !== "e" || meO.Active === false) && !cfgSet.has(me) && !confirm("본인 계정의 사용자 · 권한 편집이 빠집니다 — 반영하면 이 화면을 더 바꿀 수 없습니다. 계속할까요?")) return;
     setSaving("반영하고 있습니다...");
     let done = 0;
     try {
       const fresh = await tListAll(T365_LISTS.users);   // 다른 관리자가 방금 바꿨을 수 있어 저장 직전 다시 읽는다
+      const plan = [];
       for (const email of emails) {
         const row = fresh.find((r) => normEmail(r.Email) === email);
         if (!row) continue;
-        const o = overrides[email]; const fields = {};
-        if ("Role" in o) fields.Role = o.Role;
-        if ("Company" in o) fields.Company = String(o.Company).trim();
-        if ("Active" in o) fields.Active = !!o.Active;
-        if ("WriterCategories" in o) fields.WriterCategories = o.WriterCategories;
+        plan.push({ email, row, fields: buildFields(row, overrides[email]) });
+      }
+      const before = permAdminsAfter(fresh, {}, new Set());
+      const after = permAdminsAfter(fresh, Object.fromEntries(plan.map((x) => [x.email, x.fields])), new Set());
+      if (before > 0 && after === 0) { alert(LAST_ADMIN_MSG); setSaving(""); return; }
+      for (const { email, row, fields } of plan) {
+        if (!Object.keys(fields).length) continue;
         await tUpdate(T365_LISTS.users, row.id, fields);
-        const lab = { Role: "역할", Company: "회사/지점", Active: "사용", WriterCategories: "작성 카테고리" };
-        const changes = {}; Object.keys(fields).forEach((k) => { changes[lab[k]] = [k === "Active" ? row.Active !== false : row[k] || "", fields[k]]; });
-        t365Log("사용자", "Role" in fields ? "역할 변경" : "Active" in fields ? (fields.Active ? "사용" : "사용 중지") : "정보 변경", row.Title && row.Title !== email ? `${row.Title} (${email})` : email, { changes });
+        const lab = { Role: "역할", Company: "회사/지점", Active: "사용" };
+        const changes = {};
+        Object.keys(lab).forEach((k) => { if (k in fields) changes[lab[k]] = [k === "Active" ? row.Active !== false : row[k] || "", fields[k]]; });
+        const pc = permChanges(permsOf({ ...row, Active: true }).perms, permsOf({ ...row, ...fields, Active: true }).perms);
+        Object.assign(changes, pc);
+        const verb = "Role" in fields ? "역할 변경" : Object.keys(pc).length ? "권한 변경" : "Active" in fields ? (fields.Active ? "사용" : "사용 중지") : "정보 변경";
+        t365Log("사용자", verb, row.Title && row.Title !== email ? `${row.Title} (${email})` : email, { changes });
         done++;
       }
       setOverrides({}); setSelected(new Set());
@@ -1722,6 +1876,7 @@ function UsersTab({ ctx, users, configAdmins, accessRows, reload }) {
     setSaving("");
   }
   async function addUser() {
+    if (!canEdit) return;
     const email = normEmail(add.email);
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || /#ext#/i.test(email)) { alert("이메일 주소를 확인해 주세요. (게스트 계정은 #EXT# 가 붙은 주소가 아니라 원래 메일 주소로 등록합니다)"); return; }
     if (!add.name.trim()) { alert("이름을 입력해 주세요."); return; }
@@ -1733,14 +1888,16 @@ function UsersTab({ ctx, users, configAdmins, accessRows, reload }) {
       const fresh = await tListAll(T365_LISTS.users);
       if (fresh.some((r) => normEmail(r.Email) === email)) { alert("이미 등록된 사용자입니다."); await reload(); return; }
       await tCreate(T365_LISTS.users, { Title: add.name.trim(), Email: email, Role: add.role, Company: add.company.trim(), WriterCategories: "", Active: true });
-      t365Log("사용자", "사용자 추가", `${add.name.trim()} (${email})`, { info: { 역할: add.role, "회사/지점": add.company.trim(), 외부계정: isExternalEmail(email) ? "예" : "아니요" } });
+      t365Log("사용자", "사용자 추가", `${add.name.trim()} (${email})`, { info: { 역할: add.role, "회사/지점": add.company.trim(), 외부계정: isExternalEmail(email) ? "예" : "아니요", 권한: "역할 기본값" } });
       setAdd({ email: "", name: "", company: "", role: add.role }); setJustAdded(new Set([email])); setQ(""); setRoleF("");
       await reload();
     } catch (e) { alert(e.message); } finally { window._t365Adding = false; setSaving(""); }
   }
   async function removeUsers(list) {
-    if (!list.length) return;
+    if (!canEdit || !list.length) return;
     if (list.some((p) => p.email === me) && !cfgSet.has(me)) { alert("본인 계정은 삭제할 수 없습니다 — 다른 관리자에게 요청해 주세요."); return; }
+    const gone = new Set(list.map((p) => p.email));
+    if (permAdminsAfter(users, {}, new Set()) > 0 && permAdminsAfter(users, {}, gone) === 0) { alert(LAST_ADMIN_MSG); return; }
     const msg = `${list.length === 1 ? `「${list[0].row.Title || list[0].email}」 (${list[0].email})` : `선택한 ${list.length}명`} 을(를) 삭제할까요?\n삭제하면 Training365 에 로그인할 수 없습니다. 지금까지의 조회확인 · 접속 기록은 남습니다.` +
       (list.length > 1 ? "\n\n" + list.slice(0, 10).map((p) => `· ${p.row.Title || ""} (${p.email}) — ${p.row.Role || "-"}`).join("\n") + (list.length > 10 ? `\n… 외 ${list.length - 10}명` : "") : "");
     if (!confirm(msg)) return;
@@ -1757,15 +1914,20 @@ function UsersTab({ ctx, users, configAdmins, accessRows, reload }) {
     await reload(); setSaving("");
   }
   function exportExcel() {
-    const data = ordered.map((p, i) => ({ 번호: i + 1, 이름: p.row.Title || "", 이메일: p.email, "회사/지점": p.row.Company || "", 역할: p.row.Role || "", "작성 카테고리": catKeysOf(p.row.WriterCategories).map((k) => (ctx.catMap[k] || T365_DEFAULT_CATEGORIES.find((c) => c.key === k) || {}).label || k).join(", "), 사용: p.row.Active !== false ? "예" : "아니요", 외부계정: isExternalEmail(p.email) ? "예" : "아니요", "마지막 접속(KST)": lastLogin[p.email] ? fmtDate(lastLogin[p.email]) : "" }));
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), "사용자");
-    XLSX.writeFile(wb, `Training365_사용자_${kstToday()}.xlsx`);
-    t365Log("사용자", "Excel 내보내기", "사용자 목록", { info: { 건수: data.length } });
+    const data = ordered.map((p, i) => {
+      const P = stored(p).perms;
+      const o = { 번호: i + 1, 이름: p.row.Title || "", 이메일: p.email, "회사/지점": p.row.Company || "", 역할: cfgSet.has(p.email) ? `${p.row.Role || ""} (설정 관리자)` : p.row.Role || "", 사용: p.row.Active !== false ? "예" : "아니요", 권한: { config: "설정 관리자(전체)", custom: "개별 설정", preset: "역할 기본값", broken: "권한 값 오류(Overview 만)", none: "-" }[stored(p).source] || "" };
+      T365_PERM_ITEMS.forEach((it) => { o[catLabel(it)] = T365_LEVEL_LABEL[P[it.key]] || "없음"; });
+      return { ...o, 외부계정: isExternalEmail(p.email) ? "예" : "아니요", "마지막 접속(KST)": lastLogin[p.email] ? fmtDate(lastLogin[p.email]) : "" };
+    });
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), "사용자 · 권한");
+    XLSX.writeFile(wb, `Training365_사용자권한_${kstToday()}.xlsx`);
+    t365Log("사용자", "Excel 내보내기", "사용자 · 권한 목록", { info: { 건수: data.length } });
   }
   function downloadTemplate() {
     const ws = XLSX.utils.aoa_to_sheet([["이메일", "이름", "회사/지점", "역할", "작성 카테고리"], ["agent.kim@example.com", "김영업", "서울모터스 강서지점", "Agent", ""], ["writer.lee@hyosung.com", "이작성", "STK Sales", "작성자", "crm,training"]]);
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "사용자");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["역할 값"], ...T365_ROLES.map((r) => [r]), [], ["카테고리 키"], ...T365_DEFAULT_CATEGORIES.map((c) => [`${c.key} = ${c.label}`])]), "안내");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["역할 값"], ...T365_ROLES.map((r) => [r]), [], ["카테고리 키"], ...T365_DEFAULT_CATEGORIES.map((c) => [`${c.key} = ${c.label}`]), [], ["메뉴별 개별 권한은 등록 후 화면 표에서 지정합니다"]]), "안내");
     XLSX.writeFile(wb, "Training365_사용자_일괄등록_양식.xlsx");
   }
   async function pickImport(e) {
@@ -1790,6 +1952,7 @@ function UsersTab({ ctx, users, configAdmins, accessRows, reload }) {
         else if (exist) {
           const same = (exist.row.Role || "") === role && (exist.row.Company || "") === company && (!name || (exist.row.Title || "") === name) && catKeysOf(exist.row.WriterCategories).join(",") === wc;
           status = same ? "동일" : "변경";
+          if (!same && (exist.row.Role || "") !== role && stored(exist).source === "custom") reason = "역할이 바뀌어 개별 권한은 기본값으로";
         }
         seen.add(email);
         return { line: i + 2, email, name, company, role, wc, status, reason, exist };
@@ -1799,16 +1962,24 @@ function UsersTab({ ctx, users, configAdmins, accessRows, reload }) {
     } catch (err) { alert(`Excel 을 읽지 못했습니다 — ${err.message}`); }
   }
   async function applyImport() {
+    if (!canEdit) return;
     const list = importRows.filter((x) => x.status === "신규" || x.status === "변경");
     setSaving("일괄 등록하고 있습니다..."); let done = 0;
     try {
       const fresh = await tListAll(T365_LISTS.users);
-      for (const x of list) {
+      const ch = {};
+      const plan = list.map((x) => {
         const row = fresh.find((r) => normEmail(r.Email) === x.email);
+        const f = { Role: x.role, Company: x.company, WriterCategories: x.wc }; if (x.name) f.Title = x.name;
+        if (row && (row.Role || "") !== x.role && hasPermCol) f.Permissions = "";   // 역할이 바뀌면 개별 권한은 새 역할 기본값으로
+        if (row) ch[x.email] = f;
+        return { x, row, f };
+      });
+      if (permAdminsAfter(fresh, {}, new Set()) > 0 && permAdminsAfter(fresh, ch, new Set()) === 0) { alert(LAST_ADMIN_MSG); setSaving(""); return; }
+      for (const { x, row, f } of plan) {
         if (row) {
-          const f = { Role: x.role, Company: x.company, WriterCategories: x.wc }; if (x.name) f.Title = x.name;
           await tUpdate(T365_LISTS.users, row.id, f);
-          t365Log("사용자", "역할 변경", `${x.name || row.Title} (${x.email})`, { changes: { 역할: [row.Role || "", x.role], "회사/지점": [row.Company || "", x.company] }, info: { 일괄: "Excel 일괄 등록" } });
+          t365Log("사용자", "역할 변경", `${x.name || row.Title} (${x.email})`, { changes: { 역할: [row.Role || "", x.role], "회사/지점": [row.Company || "", x.company], ...permChanges(permsOf({ ...row, Active: true }).perms, permsOf({ ...row, ...f, Active: true }).perms) }, info: { 일괄: "Excel 일괄 등록" } });
         } else {
           await tCreate(T365_LISTS.users, { Title: x.name, Email: x.email, Role: x.role, Company: x.company, WriterCategories: x.wc, Active: true });
           t365Log("사용자", "사용자 추가", `${x.name} (${x.email})`, { info: { 역할: x.role, "회사/지점": x.company, 일괄: "Excel 일괄 등록" } });
@@ -1821,23 +1992,39 @@ function UsersTab({ ctx, users, configAdmins, accessRows, reload }) {
 
   const selectedList = merged.filter((p) => selected.has(p.email));
   const ctrl = "h-9 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/40";
+  // 권한 표 — 묶음 띠(개요 · 게시판 · 확인 현황 · 관리자 전용) · 메뉴 · 보기/편집 3단 머리, 묶음 경계에 세로 구분선
+  const cols = [];
+  T365_PERM_GROUPS.forEach((g) => g.items.forEach((it, ii) => { const item = { ...it, group: g.key }; cols.push({ g, item, col: "v", first: ii === 0 }); if (it.edit) cols.push({ g, item, col: "e", first: false }); }));
+  const CELL_W = 44;
+  const colW = (it) => (it.edit ? 2 * CELL_W : 60);   // 보기만 있는 메뉴는 한 칸을 조금 넓게(이름이 두 줄로 덜 깨지게)
+  const groupSpan = (g) => g.items.reduce((a, it) => a + (it.edit ? 2 : 1), 0);
+  const divider = (c) => (c.first ? { borderLeft: `2px solid ${c.g.line}` } : c.col === "e" ? { borderLeft: "1px dashed #E2E8F0" } : { borderLeft: "1px solid #EEF2F6" });
+  const stickyL = "sticky left-0 z-10";
+  const th = "font-medium whitespace-nowrap border-b border-slate-200";
   return (
     <div className="w-full">
       <div className="bg-slate-50 text-slate-500 text-xs px-4 py-3 rounded-lg mb-4 flex items-start gap-2 leading-relaxed border border-slate-200">
         <KeyRound size={14} className="shrink-0 mt-0.5 text-slate-400" />
         <div>
-          <b className="text-slate-600">등록된 사용자만</b> 로그인할 수 있습니다(등록되지 않은 계정은 「권한 없음」 화면). 역할 — <b className="text-slate-600">Agent</b>: 열람 · 조회확인 / <b className="text-slate-600">본사</b>: 열람 · 확인 현황(조회확인 버튼 없음) / <b className="text-slate-600">작성자</b>: 지정한 카테고리에 글쓰기 / <b className="text-slate-600">관리자</b>: 전체 관리.
-          {" "}표에서 바꾼 값은 노란색으로 표시되고 <b className="text-slate-600">「반영」을 눌러야 저장</b>되며 활동 이력에 남습니다.
-          {" "}외부 Agent 는 IT 가 Microsoft 365 게스트로 초대한 뒤, 여기에 <b className="text-slate-600">원래 메일 주소</b>로 등록합니다.
+          <b className="text-slate-600">등록된 사용자만</b> 로그인할 수 있습니다. <b className="text-slate-600">역할</b>이 기본 권한이고(Agent: 게시판 보기 · 조회확인 / 본사: 보기 · 확인 현황 / 작성자: 보기 + 지정 게시판 편집 / 관리자: 전체), 아래 표의 <b className="text-slate-600">보기 · 편집</b> 칸을 바꾸면 그 사람에게만 따로 적용됩니다.
+          {" "}<b className="text-slate-600">보기</b> = 메뉴가 보이고 열람만, <b className="text-slate-600">편집</b> = 글쓰기 · 수정 · 삭제 · 첨부(관리 메뉴는 추가 · 변경). 「조회확인」 단추는 권한과 관계없이 Agent 역할에만 있습니다.
+          {" "}바꾼 칸은 노란색으로 표시되고 <b className="text-slate-600">「반영」을 눌러야 저장</b>되며 활동 이력에 남습니다.
         </div>
       </div>
+      {!hasPermCol && (
+        <div className="rounded-xl border px-4 py-3 mb-4 text-xs leading-relaxed bg-amber-50 border-amber-200 text-amber-900 flex items-start gap-2.5" data-testid="perm-col-missing">
+          <AlertTriangle size={15} className="shrink-0 mt-0.5 text-amber-500" />
+          <div>{usersSt ? <>사용자 목록에 <b>Permissions</b> 열(여러 줄 텍스트)이 없어 <b>역할 기본값</b>으로만 동작합니다. 사람별 보기 · 편집을 바꾸려면 열을 만든 뒤 새로고침하세요(작성자의 게시판 편집은 지금도 바꿀 수 있습니다).</> : "권한 열 확인 중입니다 — 확인이 끝날 때까지 사람별 권한 칸은 잠겨 있습니다."}</div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-4 mb-4">
-        <div className="xl:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+        <div className={`${canEdit ? "xl:col-span-2" : "xl:col-span-5"} bg-white rounded-xl border border-slate-200 shadow-sm p-4`}>
           <div className="flex items-center gap-2 mb-3 flex-wrap">
             <ShieldCheck size={15} style={{ color: BRAND.accent }} />
-            <span className="text-sm font-semibold text-slate-700">관리자</span>
+            <span className="text-sm font-semibold text-slate-700">사용자 · 권한 편집 가능</span>
             <span className="text-xs text-slate-400">설정 파일 {configAdmins.length}명 · 목록 {listAdmins.length}명</span>
+            {!canEdit && <span className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium" data-testid="users-readonly">보기 전용</span>}
           </div>
           <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto" data-testid="admin-chips">
             {configAdmins.map((e) => <span key={"c" + e} title="공용 설정 파일 · IT 고정 관리자 — 여기서는 바꿀 수 없음" className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600"><LockKeyhole size={10} />{e}</span>)}
@@ -1847,24 +2034,26 @@ function UsersTab({ ctx, users, configAdmins, accessRows, reload }) {
             {T365_ROLES.map((r) => <button key={r} onClick={() => setRoleF(roleF === r ? "" : r)} className={`text-[11.5px] px-2 py-0.5 rounded-full border ${roleF === r ? "ring-2 ring-[#2F7B7A]/40" : ""} ${ROLE_META[r].cls}`}>{r} {counts[r]}</button>)}
           </div>
         </div>
-        <div className="xl:col-span-3 bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-          <div className="flex items-center gap-2 mb-2.5 flex-wrap">
-            <UserPlus size={15} style={{ color: BRAND.accent }} />
-            <span className="text-sm font-semibold text-slate-700">사용자 추가</span>
-            <div className="ml-auto flex items-center gap-1.5">
-              <button onClick={downloadTemplate} className={`${btnCls} h-8 text-xs`}><FileSpreadsheet size={13} /> 양식</button>
-              <label className={`${btnCls} h-8 text-xs cursor-pointer`}><Upload size={13} /> Excel 일괄 등록<input type="file" accept=".xlsx,.xls,.csv" onChange={pickImport} className="hidden" data-testid="import-file" /></label>
+        {canEdit && (
+          <div className="xl:col-span-3 bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+            <div className="flex items-center gap-2 mb-2.5 flex-wrap">
+              <UserPlus size={15} style={{ color: BRAND.accent }} />
+              <span className="text-sm font-semibold text-slate-700">사용자 추가</span>
+              <div className="ml-auto flex items-center gap-1.5">
+                <button onClick={downloadTemplate} className={`${btnCls} h-8 text-xs`}><FileSpreadsheet size={13} /> 양식</button>
+                <label className={`${btnCls} h-8 text-xs cursor-pointer`}><Upload size={13} /> Excel 일괄 등록<input type="file" accept=".xlsx,.xls,.csv" onChange={pickImport} className="hidden" data-testid="import-file" /></label>
+              </div>
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,.85fr)_auto] gap-2">
+              <input value={add.email} onChange={(e) => setAdd({ ...add, email: e.target.value })} placeholder="이메일 (원래 메일 주소)" className={`${ctrl} px-3 w-full min-w-0`} data-testid="add-email" />
+              <input value={add.name} onChange={(e) => setAdd({ ...add, name: e.target.value })} placeholder="이름" className={`${ctrl} px-3 w-full min-w-0`} data-testid="add-name" />
+              <input value={add.company} onChange={(e) => setAdd({ ...add, company: e.target.value })} placeholder="회사 / 지점" className={`${ctrl} px-3 w-full min-w-0`} data-testid="add-company" />
+              <select value={add.role} onChange={(e) => setAdd({ ...add, role: e.target.value })} className={`${ctrl} px-2 w-full min-w-0`} data-testid="add-role">{T365_ROLES.map((r) => <option key={r}>{r}</option>)}</select>
+              <button onClick={addUser} disabled={!!saving} className={btnPrimaryCls} style={{ background: BRAND.accent }} data-testid="add-btn">+ 추가</button>
+            </div>
+            <p className="text-[11.5px] text-slate-400 mt-2">새 사용자는 역할 기본 권한으로 시작합니다. 작성자의 글쓰기 게시판 · 사람별 예외는 아래 표의 편집 칸에서 정합니다.</p>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,.85fr)_auto] gap-2">
-            <input value={add.email} onChange={(e) => setAdd({ ...add, email: e.target.value })} placeholder="이메일 (원래 메일 주소)" className={`${ctrl} px-3 w-full min-w-0`} data-testid="add-email" />
-            <input value={add.name} onChange={(e) => setAdd({ ...add, name: e.target.value })} placeholder="이름" className={`${ctrl} px-3 w-full min-w-0`} data-testid="add-name" />
-            <input value={add.company} onChange={(e) => setAdd({ ...add, company: e.target.value })} placeholder="회사 / 지점" className={`${ctrl} px-3 w-full min-w-0`} data-testid="add-company" />
-            <select value={add.role} onChange={(e) => setAdd({ ...add, role: e.target.value })} className={`${ctrl} px-2 w-full min-w-0`} data-testid="add-role">{T365_ROLES.map((r) => <option key={r}>{r}</option>)}</select>
-            <button onClick={addUser} disabled={!!saving} className={btnPrimaryCls} style={{ background: BRAND.accent }} data-testid="add-btn">+ 추가</button>
-          </div>
-          <p className="text-[11.5px] text-slate-400 mt-2">작성자의 글쓰기 카테고리는 추가한 뒤 표의 「작성 카테고리」 칸에서 고릅니다. 추가 · 삭제 · 변경은 활동 이력에 남습니다.</p>
-        </div>
+        )}
       </div>
 
       <div className="flex items-center gap-2 mb-3 flex-wrap">
@@ -1873,74 +2062,157 @@ function UsersTab({ ctx, users, configAdmins, accessRows, reload }) {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름 · 이메일 · 회사 · 역할 검색" className="pl-8 pr-3 py-2 border border-slate-200 rounded-lg text-sm w-full sm:w-72 bg-white focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/30" />
         </div>
         <select value={roleF} onChange={(e) => setRoleF(e.target.value)} className={`${ctrl} px-3`}><option value="">전체 역할</option>{T365_ROLES.map((r) => <option key={r}>{r}</option>)}</select>
-        <button onClick={applyChanges} disabled={!!saving || !dirtyCount} className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-40" style={{ background: BRAND.accent }} data-testid="apply-btn">{dirtyCount ? `반영 (${dirtyCount}명)` : "반영"}</button>
+        {canEdit && <button onClick={applyChanges} disabled={!!saving || !dirtyCount} className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-40" style={{ background: BRAND.accent }} data-testid="apply-btn">{dirtyCount ? `반영 (${dirtyCount}명)` : "반영"}</button>}
         {dirtyCount > 0 && <button onClick={() => setOverrides({})} className="text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 bg-white">변경 취소</button>}
+        <button onClick={() => setShowLegend((v) => !v)} className="text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 bg-white" data-testid="legend-btn">역할별 기본값 {showLegend ? "접기" : "보기"}</button>
         <button onClick={exportExcel} disabled={!merged.length} className={`${btnCls} sm:ml-auto`}><Download size={14} /> Excel 내보내기</button>
       </div>
-      {selectedList.length > 0 && (
-        <div className="mb-3 rounded-xl border px-4 py-2.5 shadow-sm flex items-center gap-x-3 gap-y-2 flex-wrap" style={{ borderColor: "rgba(47,123,122,.35)", background: "#F2F8F8" }}>
+      {showLegend && (
+        <div className="mb-3 bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto" data-testid="legend">
+          <table className="text-[12px] w-full" style={{ minWidth: 640 }}>
+            <thead className="bg-slate-50 text-slate-500"><tr><th className="text-left font-medium px-3 py-2">역할</th>{T365_PERM_GROUPS.map((g) => <th key={g.key} className="text-left font-medium px-3 py-2" style={{ color: g.ink }}>{g.label}</th>)}</tr></thead>
+            <tbody>{T365_ROLES.map((r) => (
+              <tr key={r} className="border-t border-slate-100">
+                <td className="px-3 py-2"><RoleBadge role={r} small /></td>
+                {T365_PERM_GROUPS.map((g) => {
+                  const pr = rolePreset(r, r === "작성자" ? ["__"] : []); const lv = g.items.map((it) => pr[it.key]);
+                  const txt = r === "작성자" && g.key === "boards" ? "보기 · 지정 게시판 편집" : lv.every((x) => x === "n") ? "없음" : lv.some((x) => x === "e") ? (lv.every((x, i) => x === "e" || !g.items[i].edit) ? "보기 · 편집" : "보기 · 일부 편집") : "보기";
+                  return <td key={g.key} className={`px-3 py-2 ${txt === "없음" ? "text-slate-300" : "text-slate-600"}`}>{txt}</td>;
+                })}
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+      {canEdit && selectedList.length > 0 && (
+        <div className="mb-3 rounded-xl border px-4 py-2.5 shadow-sm flex items-center gap-x-3 gap-y-2 flex-wrap" style={{ borderColor: "rgba(47,123,122,.35)", background: "#F2F8F8" }} data-testid="bulk-bar">
           <span className="text-sm font-semibold" style={{ color: BRAND.accent }}>{selectedList.length}명 선택</span>
           <button onClick={() => setSelected(new Set())} className="text-xs text-slate-500 hover:text-slate-700 underline underline-offset-2">선택 해제</button>
           <span className="w-px h-5 bg-slate-300"></span>
           <span className="text-xs text-slate-500">역할</span>
           <select value={bulkRole} onChange={(e) => setBulkRole(e.target.value)} className="h-7 border border-slate-300 rounded-lg text-xs bg-white px-2">{T365_ROLES.map((r) => <option key={r}>{r}</option>)}</select>
           <button onClick={() => bulkSet("Role", bulkRole)} className="h-7 px-3 rounded-lg text-xs font-medium text-white" style={{ background: BRAND.accent }}>역할 적용</button>
+          <span className="w-px h-5 bg-slate-300"></span>
+          <span className="text-xs text-slate-500">메뉴</span>
+          <select value={bulkItem} onChange={(e) => setBulkItem(e.target.value)} className="h-7 border border-slate-300 rounded-lg text-xs bg-white px-2" data-testid="bulk-item">{T365_PERM_GROUPS.map((g) => <optgroup key={g.key} label={g.label}>{g.items.filter((it) => !it.locked).map((it) => <option key={it.key} value={it.key}>{catLabel({ ...it })}</option>)}</optgroup>)}</select>
+          <select value={bulkLevel} onChange={(e) => setBulkLevel(e.target.value)} className="h-7 border border-slate-300 rounded-lg text-xs bg-white px-2" data-testid="bulk-level"><option value="n">없음</option><option value="v">보기</option>{(T365_PERM_ITEMS.find((x) => x.key === bulkItem) || {}).edit && <option value="e">편집</option>}</select>
+          <button onClick={bulkPerm} className="h-7 px-3 rounded-lg text-xs font-medium text-white" style={{ background: BRAND.accent }} data-testid="bulk-perm">권한 적용</button>
+          <span className="w-px h-5 bg-slate-300"></span>
           <button onClick={() => bulkSet("Active", false)} className="h-7 px-3 rounded-lg text-xs font-medium border border-slate-300 bg-white text-slate-600 hover:bg-slate-50">사용 중지</button>
           <button onClick={() => bulkSet("Active", true)} className="h-7 px-3 rounded-lg text-xs font-medium border border-slate-300 bg-white text-slate-600 hover:bg-slate-50">사용</button>
           <button onClick={() => removeUsers(selectedList)} className="ml-auto h-7 px-3 rounded-lg text-xs font-medium border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 inline-flex items-center gap-1"><Trash2 size={12} /> 선택 {selectedList.length}명 삭제</button>
         </div>
       )}
+      <div className="flex items-center gap-3 flex-wrap mb-2 text-[11px] text-slate-500">
+        <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm border border-sky-200" style={{ background: "#EAF4FB" }}></span>역할 기본값과 다른 개별 설정</span>
+        <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm border border-amber-300" style={{ background: "#FEF3C7" }}></span>반영 전 변경</span>
+        <span className="inline-flex items-center gap-1.5"><LockKeyhole size={11} />바꿀 수 없음(설정 관리자 · 항상 보임)</span>
+      </div>
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm table-fixed" style={{ minWidth: 1040 }}>
-            <colgroup><col style={{ width: "29%" }} /><col style={{ width: "17%" }} /><col style={{ width: 118 }} /><col /><col style={{ width: 64 }} /><col style={{ width: 128 }} /><col style={{ width: 56 }} /></colgroup>
-            <thead className="bg-slate-50 text-slate-500 text-xs">
+        <div className="overflow-auto max-h-[70vh]" data-testid="perm-scroll">
+          <table className="text-sm border-separate border-spacing-0" style={{ minWidth: 248 + 128 + 56 + T365_PERM_ITEMS.reduce((a, it) => a + colW(it), 0) + 140 + 110 + (canEdit ? 52 : 0) }} data-testid="perm-table">
+            <thead className="sticky top-0 z-20">
+              <tr className="text-[11px]">
+                <th rowSpan={3} className={`${stickyL} z-30 bg-slate-50 text-left text-xs text-slate-500 px-3 md:px-4 py-2 ${th} w-[150px] min-w-[150px] md:w-[248px] md:min-w-[248px]`} style={{ boxShadow: "1px 0 0 #E2E8F0" }}>
+                  <label className="inline-flex items-center gap-2.5 cursor-pointer select-none">{canEdit && <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelVisible} className="w-4 h-4" title="보이는 사용자 전체 선택" />}사용자</label>
+                </th>
+                <th rowSpan={3} className={`hidden md:table-cell bg-slate-50 text-left text-xs text-slate-500 px-3 py-2 ${th}`} style={{ minWidth: 128 }}>역할</th>
+                <th rowSpan={3} className={`hidden md:table-cell bg-slate-50 text-center text-xs text-slate-500 px-2 py-2 ${th}`} style={{ minWidth: 56 }}>사용</th>
+                {T365_PERM_GROUPS.map((g) => (
+                  <th key={g.key} colSpan={groupSpan(g)} className="px-0 py-1.5 text-[11.5px] font-semibold tracking-wide text-left whitespace-nowrap" style={{ background: g.band, color: g.ink, borderLeft: `2px solid ${g.line}`, borderBottom: `2px solid ${g.line}` }} data-band={g.key}>
+                    <span className="sticky inline-flex items-center gap-1.5 px-2.5 left-[150px] md:left-[248px]"><span className="w-1.5 h-1.5 rounded-full" style={{ background: g.ink }}></span>{g.label}</span>
+                  </th>
+                ))}
+                <th rowSpan={3} className={`bg-slate-50 text-left text-xs text-slate-500 px-3 py-2 ${th}`} style={{ minWidth: 140, borderLeft: "2px solid #CBD5E1" }}>회사/지점</th>
+                <th rowSpan={3} className={`bg-slate-50 text-left text-xs text-slate-500 px-3 py-2 ${th}`} style={{ minWidth: 110 }}>마지막 접속</th>
+                {canEdit && <th rowSpan={3} className={`bg-slate-50 text-center text-xs text-slate-500 px-2 py-2 ${th}`} style={{ minWidth: 52 }}>삭제</th>}
+              </tr>
               <tr>
-                <th className="text-left font-medium px-4 py-2.5 border-b border-slate-200"><label className="inline-flex items-center gap-2.5 cursor-pointer select-none"><input type="checkbox" checked={allVisibleSelected} onChange={toggleSelVisible} className="w-4 h-4" title="보이는 사용자 전체 선택" />사용자</label></th>
-                {["회사/지점", "역할", "작성 카테고리", "사용", "마지막 접속", "삭제"].map((h) => <th key={h} className="text-left font-medium px-3 py-2.5 border-b border-slate-200 whitespace-nowrap">{h}</th>)}
+                {T365_PERM_GROUPS.map((g) => g.items.map((it, ii) => (
+                  <th key={it.key} colSpan={it.edit ? 2 : 1} className="bg-white px-1 pt-1.5 pb-1 text-[11px] font-semibold text-slate-600 leading-tight text-center align-bottom"
+                    style={{ borderLeft: ii === 0 ? `2px solid ${g.line}` : "1px solid #EEF2F6", minWidth: colW(it), maxWidth: colW(it) + 40 }} title={catLabel({ ...it })}>
+                    <span className="block break-keep">{catLabel({ ...it })}</span>
+                  </th>
+                )))}
+              </tr>
+              <tr>
+                {cols.map((c) => (
+                  <th key={c.item.key + c.col} className="bg-white text-[10.5px] font-medium text-slate-400 py-1 border-b border-slate-200 text-center" style={{ ...divider(c), width: c.item.edit ? CELL_W : colW(c.item), minWidth: c.item.edit ? CELL_W : colW(c.item) }}>{c.item.locked ? "보기" : c.col === "v" ? "보기" : "편집"}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {pageRows.length ? pageRows.map((p) => {
-                const dirty = !!overrides[p.email]; const role = eff(p, "Role"); const active = eff(p, "Active");
-                const wc = catKeysOf(eff(p, "WriterCategories"));
+                const o = overrides[p.email]; const dirty = !!o; const role = eff(p, "Role"); const active = eff(p, "Active");
+                const cur = curPerm(p); const pre = cfgSet.has(p.email) ? cur : presetOf(p); const saved = stored(p);
+                const isCfg = cfgSet.has(p.email);
+                const rowBg = dirty ? "#FFFBEB" : "#FFFFFF";
                 return (
-                  <tr key={p.email} data-user={p.email} className={`border-t border-slate-100 ${dirty ? "bg-amber-50/70" : "hover:bg-slate-50"} ${!active ? "opacity-60" : ""}`}>
-                    <td className="px-4 py-1.5">
+                  <tr key={p.email} data-user={p.email} className={`group ${!active ? "opacity-60" : ""}`}>
+                    <td className={`${stickyL} px-3 md:px-4 py-1.5 border-b border-slate-100 w-[150px] min-w-[150px] max-w-[150px] md:w-[248px] md:min-w-[248px] md:max-w-[248px]`} style={{ background: rowBg, boxShadow: "1px 0 0 #E2E8F0" }}>
                       <div className="flex items-center gap-2 min-w-0">
-                        <input type="checkbox" checked={selected.has(p.email)} onChange={() => toggleSel(p.email)} className="w-4 h-4 shrink-0" />
-                        <div className="min-w-0 truncate text-[13px] leading-6" title={`${p.row.Title || ""} (${p.email})`}>
-                          <span className="font-medium text-slate-800">{p.row.Title || p.email}</span>{" "}<span className="text-xs text-slate-400">{p.email}</span>
+                        {canEdit && <input type="checkbox" checked={selected.has(p.email)} onChange={() => toggleSel(p.email)} className="w-4 h-4 shrink-0" />}
+                        <div className="min-w-0 flex-1 leading-tight" title={`${p.row.Title || ""} (${p.email})`}>
+                          <div className="flex items-center gap-1 min-w-0">
+                            <span className="font-medium text-[13px] text-slate-800 truncate">{p.row.Title || p.email}</span>
+                            {isExternalEmail(p.email) && <span className="shrink-0 text-[9.5px] px-1 rounded bg-blue-50 text-blue-700 font-medium leading-[15px]" title="회사 밖 메일 — Microsoft 365 게스트(B2B)">외부</span>}
+                          </div>
+                          <div className="text-[11px] text-slate-400 truncate">{p.email}</div>
+                          <div className="md:hidden mt-1 flex items-center gap-1.5">
+                            <select value={T365_ROLES.includes(role) ? role : ""} disabled={!canEdit || isCfg} onChange={(e) => setField(p, "Role", e.target.value)} data-role-select-m={p.email} aria-label="역할"
+                              className={`h-6 min-w-0 flex-1 border rounded text-[11px] px-1 font-medium disabled:opacity-90 ${ROLE_META[role] ? ROLE_META[role].cls : "bg-red-50 text-red-600 border-red-200"}`}>
+                              {!T365_ROLES.includes(role) && <option value="">미지정</option>}
+                              {T365_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                            </select>
+                            <input type="checkbox" checked={!!active} disabled={!canEdit || isCfg} onChange={() => setField(p, "Active", !active)} className="w-4 h-4 shrink-0" title="사용(해제하면 로그인 불가)" aria-label="사용" />
+                          </div>
+                          <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                            {isCfg && <span className="text-[9.5px] px-1.5 rounded-full bg-slate-100 text-slate-500 leading-[16px] inline-flex items-center gap-0.5"><LockKeyhole size={8} />설정 관리자</span>}
+                            {!isCfg && saved.source === "custom" && !(o && (o.Perm || "Role" in o)) && <span className="text-[9.5px] px-1.5 rounded-full bg-sky-50 text-sky-700 leading-[16px]" data-custom={p.email}>개별 권한</span>}
+                            {saved.source === "broken" && <span className="text-[9.5px] px-1.5 rounded-full bg-red-50 text-red-600 leading-[16px]" title="Permissions 값을 읽을 수 없어 Overview 만 허용 중 — 칸을 다시 지정해 반영하세요">권한 값 오류</span>}
+                            {dupCount[p.email] > 1 && <span className="text-[9.5px] px-1.5 rounded-full bg-red-50 text-red-600 leading-[16px]">중복 {dupCount[p.email]}행</span>}
+                            {justAdded.has(p.email) && <span className="text-[9.5px] px-1.5 rounded-full bg-emerald-50 text-emerald-700 leading-[16px] font-medium">새로 추가</span>}
+                            {dirty && <span className="text-[9.5px] px-1.5 rounded-full bg-amber-100 text-amber-700 leading-[16px]">변경</span>}
+                            {canEdit && !isCfg && hasPermCol && T365_PERM_ITEMS.some((it) => cur[it.key] !== pre[it.key]) && (
+                              <button onClick={() => setOverrides((prev) => { const n = { ...prev }; const oo = { ...(n[p.email] || {}) }; const pr = presetOf(p); const same = !("Role" in oo) && T365_PERM_ITEMS.every((it) => pr[it.key] === saved.perms[it.key]); if (same) delete oo.Perm; else oo.Perm = pr; if (Object.keys(oo).length) n[p.email] = oo; else delete n[p.email]; return n; })}
+                                className="text-[10px] text-slate-400 hover:text-slate-700 underline underline-offset-2" data-reset={p.email}>기본값으로</button>
+                            )}
+                          </div>
                         </div>
-                        {isExternalEmail(p.email) && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700 leading-none font-medium" title="회사 밖 메일 — Microsoft 365 게스트(B2B) 초대가 필요합니다">외부</span>}
-                        {cfgSet.has(p.email) && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 leading-none" title="설정 파일 관리자 — 목록 역할과 관계없이 관리자">설정 관리자</span>}
-                        {dupCount[p.email] > 1 && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 leading-none">중복 {dupCount[p.email]}행</span>}
-                        {justAdded.has(p.email) && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 leading-none font-medium">새로 추가</span>}
-                        {dirty && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 leading-none">변경</span>}
                       </div>
                     </td>
-                    <td className="px-3 py-1.5"><input value={eff(p, "Company")} onChange={(e) => setField(p, "Company", e.target.value)} className="w-full h-8 px-2 border border-transparent hover:border-slate-200 focus:border-slate-300 rounded-md text-[12.5px] bg-transparent focus:bg-white focus:outline-none" placeholder="-" /></td>
-                    <td className="px-3 py-1.5">
-                      <select value={T365_ROLES.includes(role) ? role : ""} onChange={(e) => setField(p, "Role", e.target.value)} data-role-select={p.email}
-                        className={`h-8 w-full border rounded-md text-[12.5px] px-1.5 font-medium ${ROLE_META[role] ? ROLE_META[role].cls : "bg-red-50 text-red-600 border-red-200"}`}>
+                    <td className="hidden md:table-cell px-2 py-1.5 border-b border-slate-100" style={{ background: rowBg }}>
+                      <select value={T365_ROLES.includes(role) ? role : ""} disabled={!canEdit || isCfg} onChange={(e) => setField(p, "Role", e.target.value)} data-role-select={p.email}
+                        className={`h-8 w-full border rounded-md text-[12.5px] px-1.5 font-medium disabled:opacity-90 ${ROLE_META[role] ? ROLE_META[role].cls : "bg-red-50 text-red-600 border-red-200"}`}>
                         {!T365_ROLES.includes(role) && <option value="">미지정({role || "빈 값"})</option>}
                         {T365_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                       </select>
                     </td>
-                    <td className="px-3 py-1.5">
-                      {role === "관리자" ? <span className="text-[12px] text-slate-400">전체</span>
-                        : role === "작성자" ? (
-                          <button onClick={() => setWriterEdit(p)} className="w-full text-left flex flex-wrap gap-1 min-h-[28px] items-center rounded-md hover:bg-slate-100 px-1" data-writer-edit={p.email}>
-                            {wc.length ? wc.map((k) => <CatChip key={k} cat={ctx.catMap[k] || T365_DEFAULT_CATEGORIES.find((c) => c.key === k)} />) : <span className="text-[11.5px] text-red-500">카테고리를 고르세요 ✎</span>}
-                          </button>
-                        ) : <span className="text-[12px] text-slate-300">-</span>}
-                    </td>
-                    <td className="px-3 py-1.5 text-center"><input type="checkbox" checked={!!active} onChange={() => setField(p, "Active", !active)} className="w-4 h-4" title="해제하면 로그인할 수 없습니다" /></td>
-                    <td className="px-3 py-1.5 text-[12px] text-slate-500 tabular-nums whitespace-nowrap">{lastLogin[p.email] ? fmtDate(lastLogin[p.email]).slice(2) : <span className="text-slate-300">-</span>}</td>
-                    <td className="px-3 py-1.5 text-center"><button onClick={() => removeUsers([p])} disabled={!!saving} title="삭제 — 활동 이력에 남습니다" className="w-7 h-7 inline-flex items-center justify-center rounded-lg text-slate-300 hover:text-red-600 hover:bg-red-50"><Trash2 size={14} /></button></td>
+                    <td className="hidden md:table-cell px-2 py-1.5 text-center border-b border-slate-100" style={{ background: rowBg }}><input type="checkbox" checked={!!active} disabled={!canEdit || isCfg} onChange={() => setField(p, "Active", !active)} className="w-4 h-4" title="해제하면 로그인할 수 없습니다" /></td>
+                    {cols.map((c) => {
+                      const lv = cur[c.item.key] || "n"; const on = c.col === "v" ? lv !== "n" : lv === "e";
+                      const preOn = c.col === "v" ? (pre[c.item.key] || "n") !== "n" : pre[c.item.key] === "e";
+                      const savedOn = c.col === "v" ? (saved.perms[c.item.key] || "n") !== "n" : saved.perms[c.item.key] === "e";
+                      const editable = cellEditable(p, c.item, c.col);
+                      const changed = dirty && on !== savedOn && !isCfg;
+                      const custom = !changed && !isCfg && on !== preOn;
+                      const bg = changed ? "#FEF3C7" : custom ? "#EAF4FB" : rowBg;
+                      return (
+                        <td key={c.item.key + c.col} className="text-center border-b border-slate-100 py-1.5" style={{ ...divider(c), background: bg, width: c.item.edit ? CELL_W : colW(c.item) }}
+                          title={`${catLabel(c.item)} · ${c.col === "v" ? "보기" : "편집"}${custom ? ` — 개별 설정(역할 기본: ${preOn ? "예" : "아니요"})` : ""}${c.item.locked ? " — 항상 보임" : ""}`}>
+                          {c.item.locked ? <LockKeyhole size={11} className="mx-auto text-slate-300" />
+                            : <input type="checkbox" checked={on} disabled={!editable} data-perm={`${p.email}|${c.item.key}|${c.col}`}
+                                onChange={(e) => setPerm(p, c.item, permNext(cur, c.item, c.col, e.target.checked))}
+                                className={`w-4 h-4 ${editable ? "cursor-pointer" : "cursor-not-allowed"} ${c.col === "e" ? "accent-[#B45309]" : ""}`} />}
+                        </td>
+                      );
+                    })}
+                    <td className="px-2 py-1.5 border-b border-slate-100" style={{ background: rowBg, borderLeft: "2px solid #CBD5E1" }}><input value={eff(p, "Company")} disabled={!canEdit} onChange={(e) => setField(p, "Company", e.target.value)} className="w-full h-8 px-2 border border-transparent hover:border-slate-200 focus:border-slate-300 rounded-md text-[12.5px] bg-transparent focus:bg-white focus:outline-none disabled:hover:border-transparent" placeholder="-" /></td>
+                    <td className="px-3 py-1.5 text-[12px] text-slate-500 tabular-nums whitespace-nowrap border-b border-slate-100" style={{ background: rowBg }}>{lastLogin[p.email] ? fmtDate(lastLogin[p.email]).slice(2) : <span className="text-slate-300">-</span>}</td>
+                    {canEdit && <td className="px-2 py-1.5 text-center border-b border-slate-100" style={{ background: rowBg }}><button onClick={() => removeUsers([p])} disabled={!!saving} title="삭제 — 활동 이력에 남습니다" className="w-7 h-7 inline-flex items-center justify-center rounded-lg text-slate-300 hover:text-red-600 hover:bg-red-50"><Trash2 size={14} /></button></td>}
                   </tr>
                 );
-              }) : <tr><td colSpan={7} className="text-center text-slate-400 py-10">{merged.length ? "조회 결과가 없습니다." : "등록된 사용자가 없습니다 — 위 「사용자 추가」 또는 「Excel 일괄 등록」으로 등록해 주세요."}</td></tr>}
+              }) : <tr><td colSpan={6 + cols.length} className="text-center text-slate-400 py-10">{merged.length ? "조회 결과가 없습니다." : "등록된 사용자가 없습니다 — 위 「사용자 추가」 또는 「Excel 일괄 등록」으로 등록해 주세요."}</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1950,23 +2222,6 @@ function UsersTab({ ctx, users, configAdmins, accessRows, reload }) {
         </div>
       </div>
 
-      {writerEdit && (() => {
-        const cur = new Set(catKeysOf(eff(writerEdit, "WriterCategories")));
-        return (
-          <Modal title={`작성 카테고리 — ${writerEdit.row.Title || writerEdit.email}`} onClose={() => setWriterEdit(null)}>
-            <p className="text-xs text-slate-500 -mt-1 mb-3">이 작성자가 글을 쓸 수 있는 카테고리를 고르세요. 「반영」을 눌러야 저장됩니다.</p>
-            <div className="space-y-1.5">
-              {T365_DEFAULT_CATEGORIES.map((c) => (
-                <label key={c.key} className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50">
-                  <input type="checkbox" checked={cur.has(c.key)} data-wc={c.key} onChange={() => { const n = new Set(cur); n.has(c.key) ? n.delete(c.key) : n.add(c.key); setField(writerEdit, "WriterCategories", T365_DEFAULT_CATEGORIES.map((x) => x.key).filter((k) => n.has(k)).join(",")); }} className="w-4 h-4" />
-                  <CatChip cat={ctx.catMap[c.key] || c} />
-                </label>
-              ))}
-            </div>
-            <div className="flex justify-end mt-4"><button onClick={() => setWriterEdit(null)} className="px-4 py-2 text-sm rounded-lg text-white" style={{ background: BRAND.accent }}>확인</button></div>
-          </Modal>
-        );
-      })()}
       {importRows && (
         <Modal title="Excel 일괄 등록 — 미리 보기" onClose={() => setImportRows(null)} xl>
           <div className="flex items-center gap-2 flex-wrap mb-3 text-xs">
@@ -1981,7 +2236,7 @@ function UsersTab({ ctx, users, configAdmins, accessRows, reload }) {
                   <td className="px-3 py-1.5 text-slate-400">{x.line}</td>
                   <td className="px-3 py-1.5"><span className={`px-1.5 rounded-full text-[11px] font-medium ${x.status === "오류" ? "bg-red-50 text-red-600" : x.status === "신규" ? "bg-emerald-50 text-emerald-700" : x.status === "변경" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-500"}`}>{x.status}</span></td>
                   <td className="px-3 py-1.5 text-slate-700">{x.email}</td><td className="px-3 py-1.5">{x.name}</td><td className="px-3 py-1.5">{x.company}</td><td className="px-3 py-1.5">{x.role}</td>
-                  <td className="px-3 py-1.5 text-red-600">{x.reason}</td>
+                  <td className={`px-3 py-1.5 ${x.status === "오류" ? "text-red-600" : "text-amber-700"}`}>{x.reason}</td>
                 </tr>
               ))}</tbody>
             </table>
@@ -2008,6 +2263,8 @@ function UsersTab({ ctx, users, configAdmins, accessRows, reload }) {
 /* ------------------------------------------------------------------ */
 function CategoriesTab({ ctx, catRows, listStatus, reload }) {
   const missing = !listStatus || !listStatus.categories || listStatus.categories.missing || listStatus.categories.error;
+  const canEd = ctx.canEditMenu("categories");   // 보기만이면 바꾸는 칸 · 반영 단추 없음
+  const locked = missing || !canEd;
   const base = mergeCategories(catRows, true);
   const [draft, setDraft] = useState(() => base.map((c) => ({ key: c.key, label: c.label, desc: c.desc, order: c.order, active: c.active })));
   const [saving, setSaving] = useState(false);
@@ -2060,12 +2317,12 @@ function CategoriesTab({ ctx, catRows, listStatus, reload }) {
                 const isDirty = dirty.some((x) => x.key === d.key);
                 return (
                   <tr key={d.key} className={`border-t border-slate-100 ${isDirty ? "bg-amber-50/70" : ""}`} data-catrow={d.key}>
-                    <td className="px-3 py-2 w-20"><input type="number" value={d.order} disabled={missing} onChange={(e) => set(d.key, "order", e.target.value)} className="w-16 h-8 border border-slate-200 rounded-md px-2 text-[13px] disabled:bg-slate-50" /></td>
+                    <td className="px-3 py-2 w-20"><input type="number" value={d.order} disabled={locked} onChange={(e) => set(d.key, "order", e.target.value)} className="w-16 h-8 border border-slate-200 rounded-md px-2 text-[13px] disabled:bg-slate-50" /></td>
                     <td className="px-3 py-2 w-12"><div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: def.soft }}><Icon size={16} style={{ color: def.color }} /></div></td>
                     <td className="px-3 py-2 text-[12px] text-slate-400 font-mono w-24">{d.key}</td>
-                    <td className="px-3 py-2 w-56"><input value={d.label} disabled={missing} maxLength={60} onChange={(e) => set(d.key, "label", e.target.value)} className="w-full h-8 border border-slate-200 rounded-md px-2 text-[13px] disabled:bg-slate-50" data-cat-label={d.key} /></td>
-                    <td className="px-3 py-2"><input value={d.desc} disabled={missing} maxLength={300} onChange={(e) => set(d.key, "desc", e.target.value)} className="w-full h-8 border border-slate-200 rounded-md px-2 text-[13px] disabled:bg-slate-50" /></td>
-                    <td className="px-3 py-2 w-14 text-center"><input type="checkbox" checked={d.active} disabled={missing} onChange={(e) => set(d.key, "active", e.target.checked)} className="w-4 h-4" /></td>
+                    <td className="px-3 py-2 w-56"><input value={d.label} disabled={locked} maxLength={60} onChange={(e) => set(d.key, "label", e.target.value)} className="w-full h-8 border border-slate-200 rounded-md px-2 text-[13px] disabled:bg-slate-50" data-cat-label={d.key} /></td>
+                    <td className="px-3 py-2"><input value={d.desc} disabled={locked} maxLength={300} onChange={(e) => set(d.key, "desc", e.target.value)} className="w-full h-8 border border-slate-200 rounded-md px-2 text-[13px] disabled:bg-slate-50" /></td>
+                    <td className="px-3 py-2 w-14 text-center"><input type="checkbox" checked={d.active} disabled={locked} onChange={(e) => set(d.key, "active", e.target.checked)} className="w-4 h-4" /></td>
                     <td className="px-3 py-2 w-16 text-[12.5px] text-slate-500 tabular-nums">{counts[d.key] || 0}</td>
                   </tr>
                 );
@@ -2073,10 +2330,10 @@ function CategoriesTab({ ctx, catRows, listStatus, reload }) {
             </tbody>
           </table>
         </div>
-        <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-end gap-2">
+        {canEd && <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-end gap-2">
           {dirty.length > 0 && <button onClick={() => setDraft(base.map((c) => ({ key: c.key, label: c.label, desc: c.desc, order: c.order, active: c.active })))} className="text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">변경 취소</button>}
           <button onClick={save} disabled={missing || !dirty.length || saving} className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-40" style={{ background: BRAND.accent }} data-testid="cat-save">{dirty.length ? `반영 (${dirty.length}개)` : "반영"}</button>
-        </div>
+        </div>}
       </div>
       {saving && <BlockingOverlay message="저장하고 있습니다..." />}
     </div>
@@ -2425,18 +2682,24 @@ function App({ boot }) {
   const me0 = boot.me;
   const myRow = users.find((u) => boot.me.ids.includes(normEmail(u.Email)) && u.Active !== false) || null;
   const role = boot.isCfgAdmin ? "관리자" : usersLoaded ? (myRow && T365_ROLES.includes(myRow.Role) ? myRow.Role : null) : boot.role;
-  const isAdmin = role === "관리자" && (boot.isCfgAdmin || usersLoaded);
+  const isAdmin = role === "관리자" && (boot.isCfgAdmin || usersLoaded);   // 역할이 관리자(남의 게시물도 수정 · 삭제) — 메뉴 권한과 별개
   const isAgent = role === "Agent";
+  // 메뉴 권한(보기 · 편집) — 역할 기본값 + 사용자별 예외. 사용자 목록을 못 읽은 동안은 로그인 때 읽은 내 행으로(그것도 없으면 Overview 만)
+  const permInfo = permsOf(usersLoaded ? myRow : boot.myRow, { cfgAdmin: boot.isCfgAdmin });
+  const P = role ? permInfo.perms : noPerms();
+  _tPermNow = P;   // 쓰기 지킴이(t365AssertWrite)가 읽는다
+  const canView = (k) => canSee(P, k);
+  const canEditMenu = (k) => P[k] === "e";
   const me = { ...me0, role, company: (myRow && myRow.Company) || me0.company || "", name: (myRow && myRow.Title) || me0.name };
   const myWriterCats = myRow ? catKeysOf(myRow.WriterCategories) : [];
   const allCats = mergeCategories(catRows, true);
-  const cats = allCats.filter((c) => c.active);
+  const cats = allCats.filter((c) => c.active && canView("cat:" + c.key));   // 보기 권한이 있는 게시판만
   const catMap = Object.fromEntries(cats.map((c) => [c.key, c]));
   const agents = users.filter((u) => u.Role === "Agent" && u.Active !== false && normEmail(u.Email))
     .filter((u, i, a) => a.findIndex((x) => normEmail(x.Email) === normEmail(u.Email)) === i);
   const readIdx = useMemo(() => indexReads(reads), [reads]);
-  const canWrite = (k) => !!catMap[k] && (isAdmin || (role === "작성자" && usersLoaded && myWriterCats.includes(k)));
-  const canEditPost = (p) => isAdmin || (canWrite(p.Category) && normEmail(p.AuthorEmail) === normEmail(me.email));
+  const canWrite = (k) => !!catMap[k] && P["cat:" + k] === "e";
+  const canEditPost = (p) => canWrite(p.Category) && (isAdmin || normEmail(p.AuthorEmail) === normEmail(me.email));   // 그 게시판 편집 권한 + (관리자 역할이거나 본인 글)
 
   async function reload() {
     setLoading(true);
@@ -2454,8 +2717,9 @@ function App({ boot }) {
         if (!mine || !T365_ROLES.includes(mine.Role)) setDenied(!mine ? "not-registered" : "no-role");
       }
     }
-    const adminNow = boot.isCfgAdmin || (!u.e && (u.v.find((x) => boot.me.ids.includes(normEmail(x.Email)) && x.Active !== false) || {}).Role === "관리자");
-    if (adminNow) {
+    const freshMine = !u.e ? u.v.find((x) => boot.me.ids.includes(normEmail(x.Email)) && x.Active !== false) : boot.myRow;
+    const fp = permsOf(freshMine, { cfgAdmin: boot.isCfgAdmin }).perms;
+    if (canSee(fp, "access") || canSee(fp, "users") || boot.isCfgAdmin) {
       const since = new Date(Date.now() - 45 * 864e5).toISOString();
       tListAll(T365_LISTS.access, `&$filter=fields/LoginAt ge '${since}'`).catch((e) => (isMissingListError(e) ? [] : tListAll(T365_LISTS.access)))
         .then((v) => setAccessRows(v || []), () => setAccessRows([]));
@@ -2476,11 +2740,12 @@ function App({ boot }) {
   useEffect(() => { const on = () => { const x = parseHash(); setTabRaw(x.tab); setOpenPostRaw(x.post); }; window.addEventListener("popstate", on); return () => window.removeEventListener("popstate", on); }, []);
   const upsertRead = (row) => setReads((prev) => { const i = prev.findIndex((x) => x.Title === row.Title); if (i < 0) return [...prev, row]; const n = prev.slice(); n[i] = { ...n[i], ...row }; return n; });
 
-  const ctx = { me, role, isAdmin, isAgent, canWrite, canEditPost, cats, catMap, users, agents, posts, readIdx, upsertRead, reload };
+  const ctx = { me, role, isAdmin, isAgent, canWrite, canEditPost, canView, canEditMenu, perms: P, cats, catMap, users, agents, posts, readIdx, upsertRead, reload };
 
   // 화면 접근 — 관리 화면은 관리자만, 확인 현황은 Agent 제외, 카테고리는 사용 중인 것만
-  const tabAllowed = (t) => t === "overview" || t === "all" || (t.startsWith("cat:") && !!catMap[t.slice(4)]) || (t === "status" && !isAgent && !!role) || (T365_ADMIN_TABS.includes(t) && isAdmin);
-  useEffect(() => { if (hasLoadedOnce && !tabAllowed(tab)) setTab("overview", null, false); }, [hasLoadedOnce, tab, isAdmin, catRows]);
+  const tabAllowed = (t) => !!role && (t === "overview" || (t === "all" && canView("all")) || (t.startsWith("cat:") && !!catMap[t.slice(4)]) || ((t === "status" || T365_ADMIN_TABS.includes(t)) && canView(t)));
+  const permSig = JSON.stringify(P);
+  useEffect(() => { if (hasLoadedOnce && !tabAllowed(tab)) setTab("overview", null, false); }, [hasLoadedOnce, tab, permSig, catRows]);
 
   // 사이드바 접기 · 휴대폰 서랍 — MKQR 과 같은 동작(선택은 이 브라우저에 기억)
   const [sideCollapsed, setSideCollapsed] = useState(() => { try { const v = localStorage.getItem("t365.sideCollapsed"); if (v === "1" || v === "0") return v === "1"; } catch (e) {} return window.innerWidth < 1100; });
@@ -2510,24 +2775,25 @@ function App({ boot }) {
     if (isAgent) { const todo = list.filter((p) => p.RequireConfirm && !(myRead(p) && myRead(p).ConfirmedAt)).length; if (todo) return { n: todo, color: "#C2410C" }; }
     const n = list.filter((p) => !myRead(p)).length; return n ? { n, color: "#DC2626" } : null;
   };
-  const homeNav = [{ id: "overview", label: "Overview", icon: LayoutDashboard }, { id: "all", label: "전체 게시물", icon: LayoutList }];
+  const homeNav = [{ id: "overview", label: "Overview", icon: LayoutDashboard }, { id: "all", label: "전체 게시물", icon: LayoutList }].filter((n) => n.id === "overview" || canView(n.id));
   const boardNav = cats.map((c) => ({ id: "cat:" + c.key, label: c.label, icon: c.icon || FileText, badge: badgeFor(c.key) }));
-  const statusNav = !isAgent ? [{ id: "status", label: "조회확인 현황", icon: BarChart3 }] : [];
-  const adminNav = isAdmin ? [
-    { id: "users", label: "사용자 · 역할 관리", icon: Users }, { id: "categories", label: "카테고리 관리", icon: Tags },
+  const statusNav = canView("status") ? [{ id: "status", label: "조회확인 현황", icon: BarChart3 }] : [];
+  const adminNav = [
+    { id: "users", label: "사용자 · 권한 관리", icon: Users }, { id: "categories", label: "카테고리 관리", icon: Tags },
     { id: "access", label: "접속 기록", icon: LogIn }, { id: "activity", label: "활동 이력", icon: History },
-  ] : [];
+  ].filter((n) => canView(n.id));   // 보기 권한이 있는 메뉴만
   const groups = [["TRAINING365", homeNav], ["게시판", boardNav], ...(statusNav.length ? [["확인 현황", statusNav]] : []), ...(adminNav.length ? [["관리자 전용", adminNav]] : [])];
   const nav = [...homeNav, ...boardNav, ...statusNav, ...adminNav];
   const cur = nav.find((n) => n.id === tab) || homeNav[0];
   const roleLabel = [role || "권한 확인 중", me.company].filter(Boolean).join(" · ");
+  const showSetup = boot.isCfgAdmin || isAdmin || canView("users");   // 목록 준비 안내 — 관리 쪽 사람에게만
   const showAps = !me.isGuest && !isExternalEmail(me.email) && role !== "Agent";
   const curCat = tab.startsWith("cat:") ? catMap[tab.slice(4)] : null;
   const meta = curCat ? [curCat.icon, curCat.desc, curCat] : ({
     overview: [LayoutDashboard, isAgent ? "새 글 · 확인이 필요한 필수 교육자료 · 게시판별 소식을 한눈에 봅니다" : "게시판 소식과 Agent 조회확인 현황을 한눈에 봅니다"],
     all: [LayoutList, "모든 카테고리의 게시물을 한 번에 찾아봅니다 — 카테고리 · 안 읽은 글 · 중요 필터와 검색"],
     status: [BarChart3, "게시물마다 대상 Agent 중 몇 명이 「조회확인」을 눌렀는지 봅니다 — 눌러서 누가 · 언제 확인했는지 확인"],
-    users: [Users, "로그인할 수 있는 사용자와 역할(Agent · 본사 · 작성자 · 관리자)을 등록 · 변경합니다. 변경은 활동 이력에 남습니다."],
+    users: [Users, "사용자 · 역할과 메뉴별 보기 · 편집 권한을 관리합니다. 역할이 기본값이고, 칸을 바꾸면 그 사람만 따로 적용됩니다. 변경은 활동 이력에 남습니다."],
     categories: [Tags, "게시판 7개의 이름 · 설명 · 순서 · 사용 여부를 관리합니다"],
     access: [LogIn, "계정별 로그인 · 로그아웃 시각과 세션 종료(추정)를 조회하고 Excel 로 내보냅니다"],
     activity: [History, "게시물 · 사용자 · 카테고리 관리 이력을 날짜별로 조회합니다 (기본 최근 3일)"],
@@ -2632,8 +2898,8 @@ function App({ boot }) {
             {!(openPostId && (tab.startsWith("cat:") || tab === "all")) && (
               <PageHeader icon={meta[0]} title={cur.label} subtitle={meta[1]} tint={meta[2]} />
             )}
-            {isAdmin && <SetupNotice status={listStatus} />}
-            {!isAdmin && postsErr && (
+            {showSetup && <SetupNotice status={listStatus} />}
+            {!showSetup && postsErr && (
               <div className="rounded-xl border px-4 py-3 mb-5 text-sm bg-amber-50 border-amber-200 text-amber-900 flex items-center gap-2" data-testid="board-unavailable"><AlertTriangle size={16} className="text-amber-500 shrink-0" />게시판을 준비하고 있습니다. 잠시 후 다시 확인해 주세요.</div>
             )}
             {!hasLoadedOnce ? (
@@ -2642,10 +2908,10 @@ function App({ boot }) {
               <div className="bg-white rounded-xl border p-10 text-center"><ShieldCheck size={28} className="mx-auto text-slate-300 mb-2" /><div className="text-slate-500 text-sm">이 화면에 대한 접근 권한이 없습니다.</div></div>
             ) : (
               <>
-                {tab === "overview" && <OverviewTab ctx={ctx} openPost={openPost} setTab={(t) => setTab(t)} accessRows={isAdmin ? accessRows : null} />}
+                {tab === "overview" && <OverviewTab ctx={ctx} openPost={openPost} setTab={(t) => { if (tabAllowed(t)) setTab(t); }} accessRows={canView("access") ? accessRows : null} />}
                 {(tab === "all" || tab.startsWith("cat:")) && <BoardTab ctx={ctx} catKey={tab === "all" ? null : tab.slice(4)} openId={openPostId} setOpenId={setOpenId} />}
                 {tab === "status" && <ConfirmStatusTab ctx={ctx} openPost={openPost} />}
-                {tab === "users" && <UsersTab ctx={ctx} users={users} configAdmins={boot.configAdmins} accessRows={accessRows} reload={reload} />}
+                {tab === "users" && <UsersTab ctx={ctx} users={users} configAdmins={boot.configAdmins} accessRows={accessRows} listStatus={listStatus} reload={reload} />}
                 {tab === "categories" && <CategoriesTab ctx={ctx} catRows={catRows} listStatus={listStatus} reload={reload} />}
                 {tab === "access" && <AccessLogTab ctx={ctx} />}
                 {tab === "activity" && <ActivityLogTab />}
@@ -2746,8 +3012,11 @@ async function t365Boot(account) {
   const root = createRoot(document.getElementById("root"));
   if (!role) { root.render(<AccessDenied ident={{ ...ident, email }} reason={reason} />); return; }
   T365Session.startTimers();
-  root.render(<App boot={{ me: { ...ident, email, name: (myRow && myRow.Title) || ident.shortName, company }, role, isCfgAdmin, configAdmins, users, usersLoaded: !usersR.e }} />);
+  root.render(<App boot={{ me: { ...ident, email, name: (myRow && myRow.Title) || ident.shortName, company }, role, isCfgAdmin, configAdmins, users, usersLoaded: !usersR.e, myRow }} />);
 }
+
+// 시험용 — 테스트 하네스가 window.T365_TEST_HOOKS 를 켰을 때만 쓰기 함수를 노출(편집 권한 없는 강제 쓰기가 막히는지 확인)
+if (window.T365_TEST_HOOKS) window.__t365 = { tCreate, tUpdate, tDelete, tUploadFile };
 
 (async function initMsal() {
   const btn = document.getElementById("btn-login");
