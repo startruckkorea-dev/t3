@@ -132,6 +132,7 @@ import {
   ExternalLink, Mail, ShieldCheck, AlertTriangle, ArrowLeftToLine, ArrowRightFromLine, Menu, LockKeyhole, ChevronLeft, FileText,
   Bold, List, ListOrdered, Heading2, Link2, Clock, BarChart3, Tags, HelpCircle, ListChecks, UserPlus, FileSpreadsheet, PlayCircle,
   Circle, Quote, BookOpen, LogOut, SquarePen, Truck, Container, Bus, Car, Gauge, Fuel, Wrench, Cog, HardHat, ClipboardList, Newspaper, Bell, Calendar, Gift, Star, Trophy, Award, Lightbulb, Target, Rocket, Zap, CircleDollarSign, Handshake, Briefcase, Building2, Phone, MapPin, Globe, Leaf, Flag, Camera, Sparkles, ImagePlus, Palette, GalleryHorizontal, ArrowRight, Pause, Play, AlignLeft, Rows3, ChevronRight, ChevronDown, ChevronUp, ChevronsLeft, ChevronsRight, TrendingUp, FileArchive, FileImage, FileVideo, Info, Inbox,
+  BellRing,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -1224,7 +1225,7 @@ function BoardCell({ cat, bare }) {
 const HomeColHead = ({ children }) => <div className="t365-cols px-4 h-9 flex items-stretch gap-3 bg-[#F1F4F8] border-b border-slate-200 text-[12px] font-semibold text-slate-600 select-none">{children}</div>;
 // 게시물 앞의 작은 표시 — 공지 · 필수(제목 왼쪽)
 const NoticePill = () => <span className="t365-pill bg-amber-100 text-amber-800" data-pill="pin"><Pin size={10} />공지</span>;
-const ReqPill = () => <span className="t365-pill" style={{ background: "#FDEEE6", color: "#C2410C" }} data-pill="req">필수</span>;
+const ReqPill = () => <span className="t365-pill" style={{ background: "#FDEEE6", color: "#C2410C" }} data-pill="req"><BellRing size={10} />필수</span>;
 const dateCell = (p) => fmtDay(p.PublishedAt || p._created).slice(2).replace(/-/g, ".");
 // 입력 칸에서 치는 글자(검색어 등)와 겹치지 않을 때만 「/」 로 검색 칸 열기
 const isTyping = (e) => { const t = e.target; return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable); };
@@ -1233,7 +1234,7 @@ const isTyping = (e) => { const t = e.target; return !!t && (t.tagName === "INPU
 /* Overview — 인트라넷 「게시판 홈」: 검색 · 요약 한 줄 · 공지 · 필수 ·           */
 /* 게시판별 최근 글 상자(7개) · 오른쪽 작은 상자(확인 대기 / 확인율 · 많이 본 글 · 안내) */
 /* ------------------------------------------------------------------ */
-function OverviewTab({ ctx, openPost, setTab, onSearch, banners, onManageBanners }) {
+function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banners, onManageBanners }) {
   const { posts, cats, catMap, readIdx, me } = ctx;
   // Overview 는 Agent 가 정보를 얻는 첫 화면 — 확인율 · 미확인 Agent · 활성 사용자 같은 관리 숫자는 넣지 않는다(조회확인 현황 · 접속 기록 화면에서)
   const myRow = (p) => (readIdx.get(String(p.id)) || new Map()).get(normEmail(me.email));
@@ -1245,6 +1246,8 @@ function OverviewTab({ ctx, openPost, setTab, onSearch, banners, onManageBanners
   const NOTICE_MAX = 6;
   const popular = vis.map((p) => ({ p, v: viewStats(readIdx, p.id).views })).filter((x) => x.v > 0).sort((a, b) => b.v - a.v || byNewest(a.p, b.p)).slice(0, 5);
   const [q, setQ] = useState("");
+  const [editing, setEditing] = useState(null);
+  const open = openId ? vis.find((p) => String(p.id) === String(openId)) : null;
   const searchRef = useRef(null);
   useEffect(() => {
     const k = (e) => { if (e.key === "/" && !isTyping(e) && !e.ctrlKey && !e.metaKey && searchRef.current) { e.preventDefault(); searchRef.current.focus(); } };
@@ -1283,14 +1286,14 @@ function OverviewTab({ ctx, openPost, setTab, onSearch, banners, onManageBanners
               {notice.length > NOTICE_MAX && <button onClick={() => onSearch("", "notice")} className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 whitespace-nowrap shrink-0" data-testid="notice-more">더보기 <ChevronRight size={12} className="inline -mt-0.5" /></button>}
             </div>
             {notice.length > 0 && <HomeColHead>
-              <span className="w-[46px] shrink-0 flex items-center">구분</span><span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
+              <span className="w-[104px] shrink-0 flex items-center">구분</span><span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
               <span className="w-[68px] shrink-0 hidden md:flex items-center justify-end">작성일</span>{ctx.isAgent && <span className="w-[96px] shrink-0 flex items-center justify-end">조회확인</span>}
             </HomeColHead>}
             {notice.length ? notice.slice(0, NOTICE_MAX).map((p) => {
               const c = catMap[p.Category]; const r = myRow(p);
               return (
                 <button key={p.id} onClick={() => openPost(p)} data-notice={p.id} title={p.Title} className="t365-cols w-full text-left px-4 h-11 flex items-stretch gap-3 border-t border-[#E9EEF3] first:border-t-0 even:bg-slate-50/70 hover:!bg-[#EEF6F5] min-w-0">
-                  <span className="w-[46px] shrink-0 flex items-center">{p.RequireConfirm ? <ReqPill /> : <NoticePill />}</span>
+                  <span className="w-[104px] shrink-0 flex items-center gap-1">{p.IsPinned && <NoticePill />}{p.RequireConfirm && <ReqPill />}</span>
                   <BoardCell cat={c} />
                   <span className="min-w-0 flex-1 flex items-center gap-1.5">
                     <span className={`min-w-0 truncate text-[13.5px] ${r ? "text-slate-600" : "font-semibold text-slate-900"}`}>{p.Title}</span>
@@ -1326,9 +1329,9 @@ function OverviewTab({ ctx, openPost, setTab, onSearch, banners, onManageBanners
                 <button key={p.id} onClick={() => openPost(p)} data-wpost={p.id} title={p.Title} className="t365-cols w-full text-left px-4 h-11 flex items-stretch gap-3 border-t border-[#E9EEF3] first:border-t-0 even:bg-slate-50/70 hover:!bg-[#EEF6F5] min-w-0">
                   <BoardCell cat={c} />
                   <span className="min-w-0 flex-1 flex items-center gap-1.5">
-                    {p.IsPinned && <NoticePill />}
+                    {p.IsPinned && <NoticePill />}{p.RequireConfirm && <ReqPill />}
                     <span className={`min-w-0 truncate text-[13.5px] ${rd ? "text-slate-600" : "font-semibold text-slate-900"}`}>{p.Title}</span>
-                    <PostMarks p={p} />
+                    <PostMarks p={p} compact />
                   </span>
                   <span className="w-[108px] text-[12px] text-slate-500 shrink-0 hidden md:flex items-center min-w-0"><span className="truncate">{p.AuthorName || ""}</span></span>
                   <span className="w-[68px] text-[11.5px] text-slate-400 tabular-nums shrink-0 flex items-center justify-end">{shortDate(p.PublishedAt || p._created)}</span>
@@ -1368,6 +1371,22 @@ function OverviewTab({ ctx, openPost, setTab, onSearch, banners, onManageBanners
           </WidgetCard>
         </aside>
       </div>
+      {/* 홈에서 누른 글은 홈 위 팝업으로(게시판으로 옮겨 가지 않음) — 위 · 아래 단추는 홈 목록(최신순) 기준 */}
+      {openId && (open
+        ? <PostDetail key={open.id} ctx={ctx} post={open} siblings={vis} listLabel="Overview" onOpen={(id) => setOpenId(id)} onBack={() => setOpenId(null)} onEdit={() => setEditing({ post: open })} suspended={!!editing} />
+        : (
+          <PostModalShell onClose={() => setOpenId(null)} label="게시물 없음" narrow>
+            <div className="p-10 text-center">
+              <FileText size={30} className="mx-auto text-slate-300 mb-3" />
+              <div className="text-slate-600 text-sm mb-5">게시물을 찾을 수 없습니다 — 삭제되었거나 볼 수 없는 게시판입니다.</div>
+              <button onClick={() => setOpenId(null)} className={btnCls} data-testid="btn-back"><ChevronLeft size={14} /> 닫기</button>
+            </div>
+          </PostModalShell>
+        ))}
+      {editing && <PostEditor ctx={ctx} post={editing.post} defaultCat={editing.post.Category} onClose={() => setEditing(null)} onSaved={async (id) => {
+        setEditing(null); await ctx.reload(); toast("게시물을 수정했습니다");
+        if (id) setOpenId(String(id));
+      }} />}
     </div>
   );
 }
@@ -1716,7 +1735,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
               {(post.IsPinned || post.RequireConfirm) && (
                 <span className="shrink-0 flex items-center gap-1 mt-[3px]">
                   {post.IsPinned && <NoticePill />}
-                  {post.RequireConfirm && <span className="t365-pill" style={{ background: "#FDEEE6", color: "#C2410C" }}>조회확인 필수</span>}
+                  {post.RequireConfirm && <span className="t365-pill" style={{ background: "#FDEEE6", color: "#C2410C" }}><BellRing size={10} />조회확인 필수</span>}
                 </span>
               )}
               <h1 className="min-w-0 text-[18px] md:text-[20px] font-bold text-slate-900 leading-[1.4] tracking-[-0.015em] break-words" data-testid="post-title">{post.Title}</h1>
@@ -3554,7 +3573,7 @@ function AccessLogTab({ ctx }) {
   function preset(days) { const f = days === 1 ? today : dayAdd(today, -(days - 1)); setFrom(f); setTo(today); load(f, today); }
   const ctrl = "h-9 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/40";
   const td = "px-3 py-[6px] text-[12.5px] leading-5 whitespace-nowrap overflow-hidden text-ellipsis";
-  const td2 = "px-3 py-2 align-middle overflow-hidden";   // 세션 표 — 사용자 칸은 이름 · 메일 두 줄, 나머지는 한 줄 가운데
+  const td2 = "px-3 h-10 align-middle overflow-hidden whitespace-nowrap";   // 세션 표 — 한 줄(사용자는 이름만, 메일은 말풍선)
   const dtShort = (v) => { const t = fmtDate(v); return t && t.length > 5 && t.slice(0, 4) === String(new Date().getFullYear()) ? t.slice(5) : t; };   // 올해면 연도 생략(말풍선에 전체)
   const curLen = Math.round((new Date(to + "T00:00:00Z") - new Date(from + "T00:00:00Z")) / 864e5) + 1;
   return (
@@ -3590,14 +3609,14 @@ function AccessLogTab({ ctx }) {
         <div className="overflow-x-auto">
           {mode === "session" ? (
             <table className="w-full table-fixed" style={{ minWidth: 1000 }} data-testid="access-table">
-              <colgroup><col style={{ width: 250 }} /><col style={{ width: 84 }} /><col style={{ width: 160 }} /><col style={{ width: 118 }} /><col style={{ width: 118 }} /><col style={{ width: 92 }} /><col style={{ width: 120 }} /><col /></colgroup>
+              <colgroup><col style={{ width: 170 }} /><col style={{ width: 84 }} /><col style={{ width: 160 }} /><col style={{ width: 118 }} /><col style={{ width: 118 }} /><col style={{ width: 92 }} /><col style={{ width: 120 }} /><col /></colgroup>
               <thead className="bg-slate-50 text-slate-500 text-[11.5px]"><tr>{[["사용자"], ["역할"], ["회사/지점"], ["로그인"], ["로그아웃 · 종료"], ["접속 시간", "r"], ["상태", "c"], ["기기"]].map(([h, a]) => <th key={h} className={`px-3 h-9 font-medium whitespace-nowrap border-b border-slate-200 ${a === "r" ? "text-right" : a === "c" ? "text-center" : "text-left"}`}>{h}</th>)}</tr></thead>
               <tbody>
                 {loading ? <tr><td colSpan={8} className="text-center text-slate-400 text-sm py-14"><div className="w-6 h-6 mx-auto mb-2 rounded-full border-2 border-slate-200 animate-spin" style={{ borderTopColor: BRAND.accent }}></div>접속 기록을 불러오는 중입니다...</td></tr>
                   : error ? <tr><td colSpan={8} className="text-center text-red-500 text-sm py-12">{error}</td></tr>
                   : pageRows.length ? pageRows.map((r) => (
                     <tr key={r.id} onClick={() => setDetail(r)} className="border-t border-slate-100 first:border-t-0 hover:bg-slate-50 cursor-pointer" data-session={r.Title}>
-                      <td className={td2} title={`${r.UserName || ""} (${r.UserEmail})`}><div className="text-[13px] text-slate-800 font-medium truncate">{r.UserName || r.UserEmail}</div><div className="text-[11px] text-slate-400 truncate">{r.UserEmail}</div></td>
+                      <td className={`${td2} text-[13px] text-slate-800 font-medium truncate`} title={r.UserEmail}>{r.UserName || r.UserEmail}</td>
                       <td className={td2}><RoleBadge role={r.Role} small /></td>
                       <td className={`${td2} text-[12.5px] text-slate-600 truncate`} title={r.Company || ""}>{r.Company || <span className="text-slate-300">-</span>}</td>
                       <td className={`${td2} text-[12.5px] text-slate-700 tabular-nums whitespace-nowrap`} title={fmtDate(r.LoginAt)}>{dtShort(r.LoginAt)}</td>
@@ -3611,12 +3630,12 @@ function AccessLogTab({ ctx }) {
             </table>
           ) : (
             <table className="w-full table-fixed" style={{ minWidth: 900 }} data-testid="access-users">
-              <colgroup><col style={{ width: 250 }} /><col style={{ width: 84 }} /><col style={{ width: 160 }} /><col style={{ width: 70 }} /><col style={{ width: 84 }} /><col style={{ width: 120 }} /><col style={{ width: 130 }} /><col /></colgroup>
+              <colgroup><col style={{ width: 170 }} /><col style={{ width: 84 }} /><col style={{ width: 160 }} /><col style={{ width: 70 }} /><col style={{ width: 84 }} /><col style={{ width: 120 }} /><col style={{ width: 130 }} /><col /></colgroup>
               <thead className="bg-slate-50 text-slate-500 text-[11.5px]"><tr>{[["사용자"], ["역할"], ["회사/지점"], ["접속", "r"], ["로그아웃", "r"], ["세션 종료(추정)", "r"], ["마지막 로그인"], ["접속 시간 합", "r"]].map(([h, a]) => <th key={h} className={`px-3 h-9 font-medium whitespace-nowrap border-b border-slate-200 ${a === "r" ? "text-right" : "text-left"}`}>{h}</th>)}</tr></thead>
               <tbody>
                 {pageRows.length ? pageRows.map((u) => (
                   <tr key={u.email} className="border-t border-slate-100 first:border-t-0">
-                    <td className={td2} title={`${u.name} (${u.email})`}><div className="text-[13px] text-slate-800 font-medium truncate">{u.name}</div><div className="text-[11px] text-slate-400 truncate">{u.email}</div></td>
+                    <td className={`${td2} text-[13px] text-slate-800 font-medium truncate`} title={u.email}>{u.name}</td>
                     <td className={td2}><RoleBadge role={u.role} small /></td><td className={`${td2} text-[12.5px] text-slate-600 truncate`}>{u.company || <span className="text-slate-300">-</span>}</td>
                     <td className={`${td2} text-[12.5px] tabular-nums text-right`}>{u.n}</td><td className={`${td2} text-[12.5px] tabular-nums text-right text-emerald-700`}>{u.logouts}</td><td className={`${td2} text-[12.5px] tabular-nums text-right text-amber-700`}>{u.inferred}</td>
                     <td className={`${td2} text-[12.5px] tabular-nums text-slate-700 whitespace-nowrap`} title={fmtDate(u.last.LoginAt)}>{dtShort(u.last.LoginAt)}</td><td className={`${td2} text-[12.5px] tabular-nums text-right text-slate-600`}>{fmtDuration(u.total)}</td>
@@ -3845,12 +3864,14 @@ function parseHash() {
   const h = String(window.location.hash || "").replace(/^#\/?/, "").split("/").map((x) => { try { return decodeURIComponent(x); } catch (e) { return ""; } });
   if (h[0] === "cat" && /^[a-z]+$/.test(h[1] || "")) return { tab: "cat:" + h[1], post: /^\d+$/.test(h[2] || "") ? h[2] : null };
   if (h[0] === "all") return { tab: "all", post: /^\d+$/.test(h[1] || "") ? h[1] : null };
+  if (h[0] === "overview") return { tab: "overview", post: /^\d+$/.test(h[1] || "") ? h[1] : null };   // Overview 위 팝업(#/overview/번호)
   if (["overview", "status", ...T365_ADMIN_TABS].includes(h[0])) return { tab: h[0], post: null };
   return { tab: "overview", post: null };
 }
 function hashOf(tab, post) {
   if (tab.startsWith("cat:")) return `#/cat/${tab.slice(4)}${post ? "/" + post : ""}`;
   if (tab === "all") return `#/all${post ? "/" + post : ""}`;
+  if (tab === "overview" && post) return `#/overview/${post}`;
   return `#/${tab}`;
 }
 
@@ -4109,7 +4130,7 @@ function App({ boot }) {
               <div className="bg-white rounded-xl border p-10 text-center"><ShieldCheck size={28} className="mx-auto text-slate-300 mb-2" /><div className="text-slate-500 text-sm">이 화면에 대한 접근 권한이 없습니다.</div></div>
             ) : (
               <>
-                {tab === "overview" && <OverviewTab ctx={ctx} openPost={openPost} setTab={(t) => { if (tabAllowed(t)) setTab(t); }} onSearch={openSearch} banners={parseBanners(bannerRows)} onManageBanners={canEditMenu("categories") ? () => setTab("categories") : null} />}
+                {tab === "overview" && <OverviewTab ctx={ctx} openPost={(p) => setTab("overview", String(p.id))} openId={openPostId} setOpenId={setOpenId} setTab={(t) => { if (tabAllowed(t)) setTab(t); }} onSearch={openSearch} banners={parseBanners(bannerRows)} onManageBanners={canEditMenu("categories") ? () => setTab("categories") : null} />}
                 {(tab === "all" || tab.startsWith("cat:")) && <BoardTab ctx={ctx} catKey={tab === "all" ? null : tab.slice(4)} openId={openPostId} setOpenId={setOpenId} seed={tab === "all" ? boardSeed : null} onSeedUsed={() => setBoardSeed(null)} />}
                 {tab === "status" && <ConfirmStatusTab ctx={ctx} openPost={openPost} />}
                 {tab === "users" && <UsersTab ctx={ctx} users={users} bootstrap={boot.isBootAdmin} accessRows={accessRows} listStatus={listStatus} reload={reload} />}
