@@ -2293,6 +2293,23 @@ function ConfirmStatusTab({ ctx, openPost }) {
 /* 표에서 바꾼 값은 노란색으로 표시만 하고 「반영」을 눌러야 저장 · 이력에 남는다   */
 /* ------------------------------------------------------------------ */
 function catKeysOf(s) { return String(s || "").split(/[,;\s]+/).map((x) => x.trim()).filter((x) => T365_DEFAULT_CATEGORIES.some((c) => c.key === x)); }
+// 사용자 표(간단히) — 메뉴 권한 한 줄 요약: 역할 기본값 + 다른 칸만(+ 켬 / − 끔)
+function PermSummary({ isCfg, role, dirOnly, cur, pre, active, catLabel }) {
+  if (isCfg) return <span className="text-slate-500 inline-flex items-center gap-1"><LockKeyhole size={11} />전체 — 설정 파일 관리자</span>;
+  if (!T365_ROLES.includes(role)) return <span className="text-slate-400">{dirOnly ? "미등록 — 로그인 불가" : "역할 없음 — 로그인 불가"}</span>;
+  if (!active) return <span className="text-slate-400">사용 중지 — 로그인 불가</span>;
+  const diffs = T365_PERM_ITEMS.filter((it) => !it.locked && (cur[it.key] || "n") !== (pre[it.key] || "n"));
+  const lvTxt = { n: "없음", v: "보기", e: "편집" };
+  return (
+    <span className="inline-flex items-center gap-1 flex-wrap">
+      <span className="text-slate-600">역할 기본값</span>
+      {diffs.slice(0, 3).map((it) => { const up = ["n", "v", "e"].indexOf(cur[it.key] || "n") > ["n", "v", "e"].indexOf(pre[it.key] || "n"); return (
+        <span key={it.key} className={`px-1.5 rounded leading-[18px] text-[11px] ${up ? "bg-sky-50 text-sky-700" : "bg-rose-50 text-rose-600"}`} data-diff={it.key}>{up ? "+" : "−"} {catLabel(it)} {lvTxt[cur[it.key] || "n"]}</span>
+      ); })}
+      {diffs.length > 3 && <span className="text-[11px] text-slate-400">외 {diffs.length - 3}</span>}
+    </span>
+  );
+}
 function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) {
   const [q, setQ] = useState("");
   const [roleF, setRoleF] = useState("");
@@ -2310,7 +2327,11 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
   const [showLegend, setShowLegend] = useState(false);
   // 직원 명부 대조(ICS · MKQR 카테고리 접근 권한과 같은 방식) — 보기: 전체 · 권한 있음(등록) · 명부에만 있음 · 명부 없음
   const [dir, setDir] = useState({ status: "loading", list: [], error: "" });
-  const [view, setView] = useState("all");
+  const [view, setView] = useState("registered");   // 기본은 권한 있는 사람만 — 명부 직원은 「명부 직원」 보기에서 골라 등록
+  const [matrix, setMatrix] = usePref("usersMatrix", "0", ["0", "1"]);   // 메뉴별 보기 · 편집 칸 표 — 필요할 때만 펼친다(이 브라우저에 기억)
+  const showMatrix = matrix === "1";
+  const [showHelp, setShowHelp] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
   useEffect(() => { let alive = true; loadEmployeeDirectory().then((list) => alive && setDir({ status: "ok", list, error: "" }), (e) => alive && setDir({ status: "error", list: [], error: e.message })); return () => { alive = false; }; }, []);
   useEffect(() => { setPage(1); }, [q, roleF, view]);
   const PAGE_SIZE = 50;
@@ -2658,7 +2679,7 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
   const ctrl = "h-9 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/40";
   // 권한 표 — 묶음 띠(개요 · 게시판 · 확인 현황 · 관리자 전용) · 메뉴 · 보기/편집 3단 머리, 묶음 경계에 세로 구분선
   const cols = [];
-  T365_PERM_GROUPS.forEach((g) => g.items.forEach((it, ii) => { const item = { ...it, group: g.key }; cols.push({ g, item, col: "v", first: ii === 0 }); if (it.edit) cols.push({ g, item, col: "e", first: false }); }));
+  if (showMatrix) T365_PERM_GROUPS.forEach((g) => g.items.forEach((it, ii) => { const item = { ...it, group: g.key }; cols.push({ g, item, col: "v", first: ii === 0 }); if (it.edit) cols.push({ g, item, col: "e", first: false }); }));
   const CELL_W = 44;
   const colW = (it) => (it.edit ? 2 * CELL_W : 60);   // 보기만 있는 메뉴는 한 칸을 조금 넓게(이름이 두 줄로 덜 깨지게)
   const groupSpan = (g) => g.items.reduce((a, it) => a + (it.edit ? 2 : 1), 0);
@@ -2667,14 +2688,16 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
   const th = "font-medium whitespace-nowrap border-b border-slate-200";
   return (
     <div className="w-full">
-      <div className="bg-slate-50 text-slate-500 text-xs px-4 py-3 rounded-lg mb-4 flex items-start gap-2 leading-relaxed border border-slate-200">
-        <KeyRound size={14} className="shrink-0 mt-0.5 text-slate-400" />
-        <div>
+      {showHelp && (
+        <div className="bg-slate-50 text-slate-500 text-xs px-4 py-3 rounded-lg mb-3 flex items-start gap-2 leading-relaxed border border-slate-200" data-testid="users-help">
+          <KeyRound size={14} className="shrink-0 mt-0.5 text-slate-400" />
+          <div>
           <b className="text-slate-600">등록된 사용자만</b> 로그인할 수 있습니다. <b className="text-slate-600">역할</b>이 기본 권한이고(Agent: 게시판 보기 · 조회확인 / 본사: 보기 · 확인 현황 / 작성자: 보기 + 지정 게시판 편집 / 관리자: 전체), 아래 표의 <b className="text-slate-600">보기 · 편집</b> 칸을 바꾸면 그 사람에게만 따로 적용됩니다.
           {" "}<b className="text-slate-600">보기</b> = 메뉴가 보이고 열람만, <b className="text-slate-600">편집</b> = 글쓰기 · 수정 · 삭제 · 첨부(관리 메뉴는 추가 · 변경). 「조회확인」 단추는 권한과 관계없이 Agent 역할에만 있습니다.
           {" "}바꾼 칸은 노란색으로 표시되고 <b className="text-slate-600">「반영」을 눌러야 저장</b>되며 활동 이력에 남습니다.
         </div>
-      </div>
+        </div>
+      )}
       {!hasPermCol && (
         <div className="rounded-xl border px-4 py-3 mb-4 text-xs leading-relaxed bg-amber-50 border-amber-200 text-amber-900 flex items-start gap-2.5" data-testid="perm-col-missing">
           <AlertTriangle size={15} className="shrink-0 mt-0.5 text-amber-500" />
@@ -2682,32 +2705,28 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-5 gap-4 mb-4">
-        <div className={`${canEdit ? "xl:col-span-2" : "xl:col-span-5"} bg-white rounded-xl border border-slate-200 shadow-sm p-4`}>
-          <div className="flex items-center gap-2 mb-3 flex-wrap">
-            <ShieldCheck size={15} style={{ color: BRAND.accent }} />
-            <span className="text-sm font-semibold text-slate-700">사용자 · 권한 편집 가능</span>
-            <span className="text-xs text-slate-400">설정 파일 {configAdmins.length}명 · 목록 {listAdmins.length}명</span>
-            {!canEdit && <span className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium" data-testid="users-readonly">보기 전용</span>}
-          </div>
-          <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto" data-testid="admin-chips">
-            {configAdmins.map((e) => <span key={"c" + e} title="공용 설정 파일 · IT 고정 관리자 — 여기서는 바꿀 수 없음" className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600"><LockKeyhole size={10} />{e}</span>)}
-            {listAdmins.map((p) => <span key={p.email} className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium" style={{ background: BRAND.accentSoft, color: BRAND.accent }}>{p.row.Title || p.email}</span>)}
-          </div>
-          <div className="flex items-center gap-1.5 mt-3 flex-wrap">
-            {T365_ROLES.map((r) => <button key={r} onClick={() => setRoleF(roleF === r ? "" : r)} className={`text-[11.5px] px-2 py-0.5 rounded-full border ${roleF === r ? "ring-2 ring-[#2F7B7A]/40" : ""} ${ROLE_META[r].cls}`}>{r} {counts[r]}</button>)}
-          </div>
+      {/* 요약 한 줄 — 관리자(설정 파일) · 역할별 인원 · 도구 */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-4 py-2.5 mb-3 flex items-center gap-x-4 gap-y-2 flex-wrap" data-testid="users-summary">
+        <div className="flex items-center gap-1.5 min-w-0 flex-wrap" data-testid="admin-chips" title={`설정 파일 · IT 고정 관리자 — 여기서는 바꿀 수 없음\n${configAdmins.join("\n")}`}>
+          <ShieldCheck size={14} style={{ color: BRAND.accent }} />
+          <span className="text-[12.5px] font-semibold text-slate-700">관리자</span>
+          {configAdmins.map((e) => <span key={"c" + e} className="inline-flex items-center gap-1 px-2 h-6 rounded-full text-[11.5px] bg-slate-100 text-slate-600"><LockKeyhole size={9} />{e.split("@")[0]}</span>)}
+          {listAdmins.map((p) => <span key={p.email} className="inline-flex items-center px-2 h-6 rounded-full text-[11.5px]" style={{ background: BRAND.accentSoft, color: BRAND.accent }}>{p.row.Title || p.email}</span>)}
         </div>
-        {canEdit && (
-          <div className="xl:col-span-3 bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-            <div className="flex items-center gap-2 mb-2.5 flex-wrap">
-              <UserPlus size={15} style={{ color: BRAND.accent }} />
-              <span className="text-sm font-semibold text-slate-700">사용자 추가</span>
-              <div className="ml-auto flex items-center gap-1.5">
-                <button onClick={downloadTemplate} className={`${btnCls} h-8 text-xs`}><FileSpreadsheet size={13} /> 양식</button>
-                <label className={`${btnCls} h-8 text-xs cursor-pointer`}><Upload size={13} /> Excel 일괄 등록<input type="file" accept=".xlsx,.xls,.csv" onChange={pickImport} className="hidden" data-testid="import-file" /></label>
-              </div>
-            </div>
+        <span className="w-px h-5 bg-slate-200 hidden sm:block"></span>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {T365_ROLES.map((r) => <button key={r} onClick={() => { setRoleF(roleF === r ? "" : r); setView("all"); }} className={`text-[11.5px] px-2 h-6 rounded-full border ${roleF === r ? "ring-2 ring-[#2F7B7A]/40" : ""} ${ROLE_META[r].cls}`}>{r} <b className="tabular-nums">{counts[r]}</b></button>)}
+          {!canEdit && <span className="text-[11px] px-2 h-6 inline-flex items-center rounded-full bg-slate-100 text-slate-500 font-medium" data-testid="users-readonly">보기 전용</span>}
+        </div>
+        <div className="ml-auto flex items-center gap-1.5 flex-wrap">
+          <button onClick={() => setShowHelp((v) => !v)} className={`${btnCls} h-8 text-xs`} data-testid="help-btn"><HelpCircle size={13} />도움말</button>
+          {canEdit && <button onClick={downloadTemplate} className={`${btnCls} h-8 text-xs`}><FileSpreadsheet size={13} />양식</button>}
+          {canEdit && <label className={`${btnCls} h-8 text-xs cursor-pointer`}><Upload size={13} />Excel 일괄 등록<input type="file" accept=".xlsx,.xls,.csv" onChange={pickImport} className="hidden" data-testid="import-file" /></label>}
+          <button onClick={exportExcel} disabled={!merged.length} className={`${btnCls} h-8 text-xs`}><Download size={13} />내보내기</button>
+          {canEdit && <button onClick={() => setShowAdd((v) => !v)} className={`${btnPrimaryCls} h-8 text-xs`} style={{ background: BRAND.accent }} data-testid="add-toggle"><UserPlus size={13} />사용자 추가</button>}
+        </div>
+        {canEdit && showAdd && (
+          <div className="w-full pt-2.5 mt-0.5 border-t border-slate-100" data-testid="add-panel">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,.85fr)_auto] gap-2">
               <input value={add.email} onChange={(e) => setAdd({ ...add, email: e.target.value })} placeholder="이메일 (원래 메일 주소)" className={`${ctrl} px-3 w-full min-w-0`} data-testid="add-email" />
               <input value={add.name} onChange={(e) => setAdd({ ...add, name: e.target.value })} placeholder="이름" className={`${ctrl} px-3 w-full min-w-0`} data-testid="add-name" />
@@ -2715,14 +2734,14 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
               <select value={add.role} onChange={(e) => setAdd({ ...add, role: e.target.value })} className={`${ctrl} px-2 w-full min-w-0`} data-testid="add-role">{T365_ROLES.map((r) => <option key={r}>{r}</option>)}</select>
               <button onClick={addUser} disabled={!!saving} className={btnPrimaryCls} style={{ background: BRAND.accent }} data-testid="add-btn">+ 추가</button>
             </div>
-            <p className="text-[11.5px] text-slate-400 mt-2">새 사용자는 역할 기본 권한으로 시작합니다. 작성자의 글쓰기 게시판 · 사람별 예외는 아래 표의 편집 칸에서 정합니다.</p>
+            <p className="text-[11px] text-slate-400 mt-1.5">외부 Agent 는 원래 메일 주소로 · 사내 직원은 「명부 직원」 보기에서 골라 등록하면 이름 · 부서가 자동으로 들어갑니다.</p>
           </div>
         )}
       </div>
 
       <div className="flex items-center gap-2 mb-3 flex-wrap" data-testid="dir-bar">
         <div className="flex items-center rounded-lg border border-slate-300 overflow-x-auto h-9 max-w-full bg-white">
-          {[["all", "전체", viewCounts.all], ["registered", "권한 있음", viewCounts.registered], ...(dirOk ? [["dirOnly", "명부에만 있음", viewCounts.dirOnly], ["missing", "명부 없음", viewCounts.missing]] : [])].map(([k, label, n], i) => (
+          {[["registered", "권한 있음", viewCounts.registered], ...(dirOk ? [["dirOnly", "명부 직원(미등록)", viewCounts.dirOnly], ["missing", "명부 없음", viewCounts.missing]] : []), ["all", "전체", viewCounts.all]].map(([k, label, n], i) => (
             <button key={k} onClick={() => setView(k)} data-view-chip={k}
               className={`px-3 h-full text-[13px] whitespace-nowrap inline-flex items-center gap-1.5 ${i ? "border-l border-slate-300" : ""} ${view === k ? "text-white" : "text-slate-600 hover:bg-slate-50"}`}
               style={view === k ? { background: BRAND.accent } : undefined}>
@@ -2746,7 +2765,9 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
         {canEdit && <button onClick={applyChanges} disabled={!!saving || !dirtyCount} className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-40" style={{ background: BRAND.accent }} data-testid="apply-btn">{dirtyCount ? `반영 (${dirtyCount}명)` : "반영"}</button>}
         {dirtyCount > 0 && <button onClick={() => setOverrides({})} className="text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 bg-white">변경 취소</button>}
         <button onClick={() => setShowLegend((v) => !v)} className="text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 bg-white" data-testid="legend-btn">역할별 기본값 {showLegend ? "접기" : "보기"}</button>
-        <button onClick={exportExcel} disabled={!merged.length} className={`${btnCls} sm:ml-auto`}><Download size={14} /> Excel 내보내기</button>
+        <div className="sm:ml-auto flex items-center rounded-lg border border-slate-300 overflow-hidden h-9 bg-white" role="group" aria-label="표 보기" data-testid="matrix-toggle">
+          {[["0", "간단히"], ["1", "메뉴별 권한 칸"]].map(([k, l], i) => <button key={k} onClick={() => setMatrix(k)} aria-pressed={matrix === k} data-matrix={k} className={`px-3 h-full text-[12.5px] whitespace-nowrap ${i ? "border-l border-slate-300" : ""} ${matrix === k ? "text-white" : "text-slate-600 hover:bg-slate-50"}`} style={matrix === k ? { background: BRAND.accent } : undefined}>{l}</button>)}
+        </div>
       </div>
       {showLegend && (
         <div className="mb-3 bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto" data-testid="legend">
@@ -2784,39 +2805,40 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
           {selectedReg.length > 0 && <button onClick={() => removeUsers(selectedReg)} className="ml-auto h-7 px-3 rounded-lg text-xs font-medium border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 inline-flex items-center gap-1"><Trash2 size={12} /> 등록 {selectedReg.length}명 삭제</button>}
         </div>
       )}
-      <div className="flex items-center gap-3 flex-wrap mb-2 text-[11px] text-slate-500">
+      {showMatrix && <div className="flex items-center gap-3 flex-wrap mb-2 text-[11px] text-slate-500">
         <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm border border-sky-200" style={{ background: "#EAF4FB" }}></span>역할 기본값과 다른 개별 설정</span>
         <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm border border-amber-300" style={{ background: "#FEF3C7" }}></span>반영 전 변경</span>
         <span className="inline-flex items-center gap-1.5"><LockKeyhole size={11} />바꿀 수 없음(설정 관리자 · 항상 보임)</span>
-      </div>
+      </div>}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-auto max-h-[70vh]" data-testid="perm-scroll">
-          <table className="text-sm border-separate border-spacing-0" style={{ minWidth: 248 + 128 + 56 + T365_PERM_ITEMS.reduce((a, it) => a + colW(it), 0) + 140 + 110 + (canEdit ? 72 : 0) }} data-testid="perm-table">
+          <table className="text-sm border-separate border-spacing-0" style={{ minWidth: showMatrix ? 248 + 128 + 56 + T365_PERM_ITEMS.reduce((a, it) => a + colW(it), 0) + 140 + 110 + (canEdit ? 72 : 0) : 760, width: showMatrix ? undefined : "100%" }} data-testid="perm-table">
             <thead className="sticky top-0 z-20">
               <tr className="text-[11px]">
-                <th rowSpan={3} className={`${stickyL} z-30 bg-slate-50 text-left text-xs text-slate-500 px-3 md:px-4 py-2 ${th} w-[150px] min-w-[150px] md:w-[248px] md:min-w-[248px]`} style={{ boxShadow: "1px 0 0 #E2E8F0" }}>
+                <th rowSpan={showMatrix ? 3 : 1} className={`${stickyL} z-30 bg-slate-50 text-left text-xs text-slate-500 px-3 md:px-4 py-2 ${th} w-[150px] min-w-[150px] md:w-[248px] md:min-w-[248px]`} style={{ boxShadow: "1px 0 0 #E2E8F0" }}>
                   <label className="inline-flex items-center gap-2.5 cursor-pointer select-none">{canEdit && <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelVisible} className="w-4 h-4" title="보이는 사용자 전체 선택" />}사용자</label>
                 </th>
-                <th rowSpan={3} className={`hidden md:table-cell bg-slate-50 text-left text-xs text-slate-500 px-3 py-2 ${th}`} style={{ minWidth: 128 }}>역할</th>
-                <th rowSpan={3} className={`hidden md:table-cell bg-slate-50 text-center text-xs text-slate-500 px-2 py-2 ${th}`} style={{ minWidth: 56 }}>사용</th>
-                {T365_PERM_GROUPS.map((g) => (
+                <th rowSpan={showMatrix ? 3 : 1} className={`hidden md:table-cell bg-slate-50 text-left text-xs text-slate-500 px-3 py-2 ${th}`} style={{ minWidth: 128 }}>역할</th>
+                <th rowSpan={showMatrix ? 3 : 1} className={`hidden md:table-cell bg-slate-50 text-center text-xs text-slate-500 px-2 py-2 ${th}`} style={{ minWidth: 56 }}>사용</th>
+                {!showMatrix && <th className={`bg-slate-50 text-left text-xs text-slate-500 px-3 py-2 ${th}`} style={{ minWidth: 240 }}>메뉴 권한</th>}
+                {showMatrix && T365_PERM_GROUPS.map((g) => (
                   <th key={g.key} colSpan={groupSpan(g)} className="px-0 py-1.5 text-[11.5px] font-semibold tracking-wide text-left whitespace-nowrap" style={{ background: g.band, color: g.ink, borderLeft: `2px solid ${g.line}`, borderBottom: `2px solid ${g.line}` }} data-band={g.key}>
                     <span className="sticky inline-flex items-center gap-1.5 px-2.5 left-[150px] md:left-[248px]"><span className="w-1.5 h-1.5 rounded-full" style={{ background: g.ink }}></span>{g.label}</span>
                   </th>
                 ))}
-                <th rowSpan={3} className={`bg-slate-50 text-left text-xs text-slate-500 px-3 py-2 ${th}`} style={{ minWidth: 140, borderLeft: "2px solid #CBD5E1" }}>회사/지점</th>
-                <th rowSpan={3} className={`bg-slate-50 text-left text-xs text-slate-500 px-3 py-2 ${th}`} style={{ minWidth: 110 }}>마지막 접속</th>
-                {canEdit && <th rowSpan={3} className={`bg-slate-50 text-center text-xs text-slate-500 px-2 py-2 ${th}`} style={{ minWidth: 72 }}>관리</th>}
+                <th rowSpan={showMatrix ? 3 : 1} className={`bg-slate-50 text-left text-xs text-slate-500 px-3 py-2 ${th}`} style={{ minWidth: 140, borderLeft: "2px solid #CBD5E1" }}>회사/지점</th>
+                <th rowSpan={showMatrix ? 3 : 1} className={`bg-slate-50 text-left text-xs text-slate-500 px-3 py-2 ${th}`} style={{ minWidth: 110 }}>마지막 접속</th>
+                {canEdit && <th rowSpan={showMatrix ? 3 : 1} className={`bg-slate-50 text-center text-xs text-slate-500 px-2 py-2 ${th}`} style={{ minWidth: 72 }}>관리</th>}
               </tr>
-              <tr>
+              {showMatrix && <tr>
                 {T365_PERM_GROUPS.map((g) => g.items.map((it, ii) => (
                   <th key={it.key} colSpan={it.edit ? 2 : 1} className="bg-white px-1 pt-1.5 pb-1 text-[11px] font-semibold text-slate-600 leading-tight text-center align-bottom"
                     style={{ borderLeft: ii === 0 ? `2px solid ${g.line}` : "1px solid #EEF2F6", minWidth: colW(it), maxWidth: colW(it) + 40 }} title={catLabel({ ...it })}>
                     <span className="block break-keep">{catLabel({ ...it })}</span>
                   </th>
                 )))}
-              </tr>
-              <tr>
+              </tr>}
+              {showMatrix && <tr>
                 {cols.map((c) => {
                   const st = canEdit && !c.item.locked && selectedList.length ? colState(c.item, c.col) : null;
                   return (
@@ -2832,7 +2854,7 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
                     </th>
                   );
                 })}
-              </tr>
+              </tr>}
             </thead>
             <tbody>
               {pageRows.length ? pageRows.map((p) => {
@@ -2853,7 +2875,7 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
                               ? <span className="shrink-0 text-[9.5px] px-1 rounded bg-blue-50 text-blue-700 font-medium leading-[15px]" title="외부 Agent(게스트) — 직원 명부에 없는 것이 정상입니다" data-dir={p.email}>외부(Agent)</span>
                               : <span className="shrink-0 text-[9.5px] px-1 rounded bg-amber-50 text-amber-700 font-medium leading-[15px]" title="직원 명부에 없는 내부 메일 — 퇴사 · 이동 여부를 확인해 주세요" data-dir={p.email}>명부 없음</span>)}
                             {p.dirStatus === "alt" && <span className="shrink-0 text-[9.5px] px-1 rounded bg-amber-50 text-amber-700 font-medium leading-[15px]" title={`직원 명부에는 ${p.altDir.email} 로 있습니다 — 같은 사람이면 그 메일로 다시 등록해 주세요`} data-dir={p.email}>메일 다름</span>}
-                            {p.dirOnly && <span className="shrink-0 text-[9.5px] px-1 rounded bg-slate-100 text-slate-500 font-medium leading-[15px]" title="직원 명부에만 있고 아직 등록되지 않은 직원 — 역할을 골라 「반영」 하거나 「추가」" data-dir={p.email}>명부에만</span>}
+                            {p.dirOnly && !isCfg && <span className="shrink-0 text-[9.5px] px-1 rounded bg-slate-100 text-slate-500 font-medium leading-[15px]" title="직원 명부에만 있고 아직 등록되지 않은 직원 — 역할을 골라 「반영」 하거나 「추가」" data-dir={p.email}>명부에만</span>}
                           </div>
                           <div className="text-[11px] text-slate-400 truncate">{p.email}{p.dir && p.dir.dept ? <span className="text-slate-300"> · {p.dir.dept}</span> : null}</div>
                           <div className="md:hidden mt-1 flex items-center gap-1.5">
@@ -2880,13 +2902,15 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
                       </div>
                     </td>
                     <td className="hidden md:table-cell px-2 py-1.5 border-b border-slate-100" style={{ background: rowBg }}>
+                      {isCfg && !T365_ROLES.includes(role) ? <span className="h-8 px-2 inline-flex items-center gap-1 rounded-md text-[12.5px] font-medium bg-[#E4F1F0] text-[#2F7B7A]" data-cfg-role={p.email}><LockKeyhole size={11} />관리자(설정)</span> :
                       <select value={T365_ROLES.includes(role) ? role : ""} disabled={!canEdit || isCfg} onChange={(e) => setField(p, "Role", e.target.value)} data-role-select={p.email}
                         className={`h-8 w-full border rounded-md text-[12.5px] px-1.5 font-medium disabled:opacity-90 ${ROLE_META[role] ? ROLE_META[role].cls : p.dirOnly ? "bg-white text-slate-400 border-slate-200 border-dashed" : "bg-red-50 text-red-600 border-red-200"}`}>
                         {!T365_ROLES.includes(role) && <option value="">{p.dirOnly ? "— 역할 선택 —" : `미지정(${role || "빈 값"})`}</option>}
                         {T365_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-                      </select>
+                      </select>}
                     </td>
                     <td className="hidden md:table-cell px-2 py-1.5 text-center border-b border-slate-100" style={{ background: rowBg }}>{p.dirOnly ? <span className="text-slate-300 text-xs">-</span> : <input type="checkbox" checked={!!active} disabled={!canEdit || isCfg} onChange={() => setField(p, "Active", !active)} className="w-4 h-4" title="해제하면 로그인할 수 없습니다" />}</td>
+                    {!showMatrix && <td className="px-3 py-1.5 border-b border-slate-100 text-[12px]" style={{ background: rowBg }} data-perm-sum={p.email}><PermSummary isCfg={isCfg} role={role} dirOnly={p.dirOnly} cur={cur} pre={pre} active={active} catLabel={catLabel} /></td>}
                     {cols.map((c) => {
                       const lv = cur[c.item.key] || "n"; const on = c.col === "v" ? lv !== "n" : lv === "e";
                       const preOn = c.col === "v" ? (pre[c.item.key] || "n") !== "n" : pre[c.item.key] === "e";
@@ -2907,11 +2931,12 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
                     })}
                     <td className="px-2 py-1.5 border-b border-slate-100" style={{ background: rowBg, borderLeft: "2px solid #CBD5E1" }}><input value={eff(p, "Company")} disabled={!canEdit} onChange={(e) => setField(p, "Company", e.target.value)} className="w-full h-8 px-2 border border-transparent hover:border-slate-200 focus:border-slate-300 rounded-md text-[12.5px] bg-transparent focus:bg-white focus:outline-none disabled:hover:border-transparent" placeholder="-" /></td>
                     <td className="px-3 py-1.5 text-[12px] text-slate-500 tabular-nums whitespace-nowrap border-b border-slate-100" style={{ background: rowBg }}>{lastLogin[p.email] ? fmtDate(lastLogin[p.email]).slice(2) : <span className="text-slate-300">-</span>}</td>
-                    {canEdit && p.dirOnly && <td className="px-2 py-1.5 text-center border-b border-slate-100" style={{ background: rowBg }}><button onClick={() => addFromDir(p)} disabled={!!saving} data-add-dir={p.email} title={`바로 등록 — 역할 ${T365_ROLES.includes(role) ? role : "본사"}${o && o.Perm ? " · 고른 권한" : ""}`} className="h-7 px-2.5 inline-flex items-center gap-1 rounded-lg text-[11.5px] font-medium border border-[#9CCBC8] text-[#2F7B7A] bg-white hover:bg-[#E4F1F0] whitespace-nowrap"><UserPlus size={12} />추가</button></td>}
+                    {canEdit && p.dirOnly && isCfg && <td className="px-2 py-1.5 text-center border-b border-slate-100" style={{ background: rowBg }}><span className="text-slate-300 text-xs">-</span></td>}
+                    {canEdit && p.dirOnly && !isCfg && <td className="px-2 py-1.5 text-center border-b border-slate-100" style={{ background: rowBg }}><button onClick={() => addFromDir(p)} disabled={!!saving} data-add-dir={p.email} title={`바로 등록 — 역할 ${T365_ROLES.includes(role) ? role : "본사"}${o && o.Perm ? " · 고른 권한" : ""}`} className="h-7 px-2.5 inline-flex items-center gap-1 rounded-lg text-[11.5px] font-medium border border-[#9CCBC8] text-[#2F7B7A] bg-white hover:bg-[#E4F1F0] whitespace-nowrap"><UserPlus size={12} />추가</button></td>}
                     {canEdit && !p.dirOnly && <td className="px-2 py-1.5 text-center border-b border-slate-100" style={{ background: rowBg }}><button onClick={() => removeUsers([p])} disabled={!!saving} title="삭제 — 활동 이력에 남습니다" className="w-7 h-7 inline-flex items-center justify-center rounded-lg text-slate-300 hover:text-red-600 hover:bg-red-50"><Trash2 size={14} /></button></td>}
                   </tr>
                 );
-              }) : <tr><td colSpan={6 + cols.length} className="text-center text-slate-400 py-10">{merged.length ? "조회 결과가 없습니다." : "등록된 사용자가 없습니다 — 위 「사용자 추가」 또는 「Excel 일괄 등록」으로 등록해 주세요."}</td></tr>}
+              }) : <tr><td colSpan={(showMatrix ? 6 : 7) + cols.length} className="text-center text-slate-400 py-10">{merged.length ? "조회 결과가 없습니다." : "등록된 사용자가 없습니다 — 위 「사용자 추가」 또는 「Excel 일괄 등록」으로 등록해 주세요."}</td></tr>}
             </tbody>
           </table>
         </div>
