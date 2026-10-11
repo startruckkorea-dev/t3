@@ -522,6 +522,21 @@ async function tDownload(f) {
   } catch (e) { uiAlert(`파일을 열 수 없습니다 — ${e.message}\n권한이 없으면 관리자에게 문의해 주세요.`); }
 }
 
+/* ---- system_config_final.xlsx — 문의 메일(TRAINING365_CONTACT)만 읽는다. 권한 판정에는 쓰지 않는다 ----
+ * A열 KEY · B열 이름 · C열 메일(ICS_CONTACT 와 같은 방식). 게스트(Agent)는 파일을 못 읽을 수 있다 → IT 메일로 대신 */
+const T365_ITSM_URL = "https://itsm-ticket.startruckkorea.com";
+async function loadContactMail() {
+  const token = await getGraphToken();
+  const driveId = await tDocDriveId();
+  const res = await fetch(`${GRAPH}/drives/${driveId}/root:/system_config_final.xlsx:/content`, { headers: { Authorization: "Bearer " + token }, cache: "no-cache" });
+  if (!res.ok) throw new Error(`설정 파일 조회 실패 (${res.status})`);
+  const wb = XLSX.read(await res.arrayBuffer(), { type: "array" });
+  const sheet = wb.Sheets["SystemConfig"] || wb.Sheets[wb.SheetNames[0]];
+  const row = XLSX.utils.sheet_to_json(sheet, { header: 1 }).find((r) => String((r || [])[0] || "").trim().toUpperCase() === "TRAINING365_CONTACT");
+  const mail = row ? String(row[2] || "").trim().toLowerCase() : "";
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail) ? mail : "";
+}
+
 /* ---- 직원 명부(employee_search.xlsx) — MKQR · ICS 와 같은 공용 파일 · 같은 열(Company · Department · Team · EngName · EMail) ----
  * 문서 라이브러리 루트. 사용자 · 권한 관리 화면에서 「명부에만 있음」 · 「명부 없음」 대조에만 쓴다(읽기 전용).
  * 게스트(Agent)는 읽을 권한이 없어도 된다 — 관리 화면에서만 부른다. 못 읽으면 등록된 사용자만 보인다. */
@@ -4047,35 +4062,36 @@ function App({ boot }) {
 }
 
 // 권한 없음 — MKQR · SSC 와 같은 카드. 등록되지 않은 계정은 관리자에게 등록 요청, 목록을 못 읽으면 다시 시도
-function AccessDenied({ ident, reason }) {
+// 권한 없음 화면 — ICS · MKQR 과 같은 카드(아이콘 · 이름 · 부제 · 안내 상자 · 문의 메일 · 돌아가기)
+function AccessDenied({ ident, reason, contact }) {
   const retry = reason === "users-error";
   const internal = ident && !ident.isGuest && !isExternalEmail(ident.email);
-  const msg = {
-    "not-registered": <>Training365 는 <strong>등록된 Sales Agent 와 본사 담당자</strong>만<br />이용할 수 있습니다.<br /><br />관리자에게 계정 등록을 요청해 주세요.<br />등록되면 같은 계정으로 다시 로그인하면 됩니다.</>,
-    "inactive": <>이 계정은 <strong>사용 중지</strong> 상태입니다.<br /><br />다시 사용하려면 관리자에게 요청해 주세요.</>,
-    "no-role": <>이 계정에 <strong>역할이 지정되지 않았습니다</strong>.<br /><br />관리자에게 역할(Agent · 본사 등) 지정을 요청해 주세요.</>,
-    "users-error": <>권한 정보를 불러오지 못했습니다.<br />잠시 후 다시 시도해 주세요.<br /><br />계속되면 관리자 또는 IT 에 알려 주세요.</>,
-  }[reason] || <>접근 권한이 없습니다. 관리자에게 요청해 주세요.</>;
+  const mail = contact || T365_IT_MAIL;
+  const lead = {
+    "inactive": <>이 계정은 <strong>사용 중지</strong> 상태입니다.</>,
+    "users-error": <>권한 정보를 불러오지 못했습니다.<br />잠시 후 다시 시도해 주세요.</>,
+  }[reason] || <>Training365 는 <strong>허가받은 Sales Agent 와 본사 담당자</strong>만 접근 가능합니다.</>;
+  const btn = { textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 8, background: "#0078d4", color: "#fff", border: "none", borderRadius: 10, padding: "12px 34px", fontSize: ".95rem", fontWeight: 700, cursor: "pointer", fontFamily: "inherit" };
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 16, boxSizing: "border-box", background: "linear-gradient(145deg,#0f2744 0%,#0078d4 100%)" }} data-testid="access-denied">
-      <div style={{ background: "#fff", borderRadius: 20, padding: "44px 36px", textAlign: "center", boxShadow: "0 24px 60px rgba(0,0,0,.22)", maxWidth: 420, width: "100%", boxSizing: "border-box" }}>
-        <div style={{ fontSize: "3rem", marginBottom: 14 }}>📚</div>
-        <div style={{ fontSize: "1.15rem", fontWeight: 800, color: "#0f2744", marginBottom: 6 }}>Training365</div>
-        <div style={{ fontSize: ".82rem", color: "#0078d4", fontWeight: 600, marginBottom: 20 }}>Star Truck Korea</div>
-        <div style={{ background: "#f8faff", borderRadius: 10, padding: "16px 18px", marginBottom: 18, textAlign: "left", border: "1px solid #e0eaff" }}>
-          <div style={{ fontSize: ".85rem", fontWeight: 700, color: "#1e3a5f", marginBottom: 6 }}>{retry ? "⚠️ 권한 확인 실패" : "🔒 권한 없음 — 관리자에게 요청"}</div>
-          <div style={{ fontSize: ".8rem", color: "#374151", lineHeight: 1.8 }}>{msg}</div>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 16, boxSizing: "border-box", background: "linear-gradient(145deg,#0f2744 0%,#0078d4 100%)" }} data-testid="access-denied" data-reason={reason}>
+      <div style={{ background: "#fff", borderRadius: 20, padding: "48px 40px 40px", textAlign: "center", boxShadow: "0 24px 60px rgba(0,0,0,.22)", maxWidth: 440, width: "100%", boxSizing: "border-box" }}>
+        <div style={{ fontSize: "3rem", lineHeight: 1, marginBottom: 18 }}>📚</div>
+        <div style={{ fontSize: "1.3rem", fontWeight: 800, color: "#0f2744", marginBottom: 8 }}>Training365</div>
+        <div style={{ fontSize: ".88rem", color: "#0078d4", fontWeight: 600, marginBottom: 24 }}>Sales Training Portal · Star Truck Korea</div>
+        <div style={{ background: "#f8faff", borderRadius: 12, padding: "20px 22px", marginBottom: 22, textAlign: "left", border: "1px solid #e0eaff" }}>
+          <div style={{ fontSize: ".95rem", fontWeight: 700, color: "#1e3a5f", marginBottom: 10 }}>{retry ? "⚠️ 권한 확인 실패" : "🔒 접근 권한 없음"}</div>
+          <div style={{ fontSize: ".86rem", color: "#374151", lineHeight: 1.8, wordBreak: "keep-all" }}>
+            {lead}
+            {!retry && (internal
+              ? <><br /><br />권한 신청은 아래 시스템을 이용해 주세요.<br /><a href={T365_ITSM_URL} target="_blank" rel="noopener noreferrer" style={{ color: "#0078d4", fontWeight: 600, textDecoration: "none" }} data-testid="denied-itsm">{T365_ITSM_URL.replace(/^https:\/\//, "")}</a></>
+              : <><br /><br />권한 신청은 아래 문의 메일로 요청해 주세요.</>)}
+          </div>
         </div>
-        {ident && ident.email && <div style={{ fontSize: ".75rem", color: "#64748b", marginBottom: 6, wordBreak: "break-all" }}>현재 계정: <b>{ident.email}</b></div>}
-        <div style={{ fontSize: ".75rem", color: "#94a3b8", marginBottom: 20 }}>문의: <a href={`mailto:${T365_IT_MAIL}`} style={{ color: "#0078d4", textDecoration: "none" }}>{T365_IT_MAIL}</a></div>
-        <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-          {retry ? (
-            <button onClick={() => window.location.reload()} style={{ background: "#0078d4", color: "#fff", border: "none", borderRadius: 10, padding: "10px 24px", fontSize: ".85rem", fontWeight: 600, cursor: "pointer" }}>다시 시도</button>
-          ) : internal ? (
-            <a href="https://aps.startruckkorea.com/" target="_self" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 7, background: "#0078d4", color: "#fff", borderRadius: 10, padding: "10px 24px", fontSize: ".85rem", fontWeight: 600 }}><span style={{ fontSize: "1rem", lineHeight: 1 }}>📬</span><span>돌아가기</span></a>
-          ) : null}
-          <button onClick={t365Logout} data-testid="denied-logout" style={{ background: "#fff", color: "#0f2744", border: "1px solid #cbd5e1", borderRadius: 10, padding: "10px 20px", fontSize: ".85rem", fontWeight: 600, cursor: "pointer" }}>다른 계정으로 로그인</button>
-        </div>
+        <div style={{ fontSize: ".8rem", color: "#94a3b8", marginBottom: 22 }}>문의: <a href={`mailto:${mail}`} style={{ color: "#0078d4", textDecoration: "none" }} data-testid="denied-contact">{mail}</a></div>
+        {retry ? <button onClick={() => window.location.reload()} style={btn}>다시 시도</button>
+          : internal ? <a href="https://aps.startruckkorea.com/" target="_self" style={btn} data-testid="denied-back"><span style={{ fontSize: "1.05rem", lineHeight: 1 }}>📬</span><span>돌아가기</span></a>
+          : <button onClick={t365Logout} data-testid="denied-logout" style={btn}>다른 계정으로 로그인</button>}
+        {internal && !retry && <div style={{ marginTop: 14 }}><button onClick={t365Logout} data-testid="denied-logout" style={{ background: "none", border: "none", color: "#94a3b8", fontSize: ".75rem", cursor: "pointer", fontFamily: "inherit" }}>다른 계정으로 로그인</button></div>}
       </div>
     </div>
   );
@@ -4084,8 +4100,8 @@ function AccessDenied({ ident, reason }) {
 /* ------------------------------------------------------------------ */
 /* 시작 — 로그인 → 「권한 확인」 화면 → /me · 사이트 · 설정 · 사용자 목록 → 판정 → 통과한 계정에만 앱    */
 /* 판정 전에는 아무 내용도 보이지 않는다(SSC · MKQR 과 같음). 판정 규칙(fail-closed):                       */
-/*  · 설정 파일 관리자(TRAINING365_ADMIN_N · ADMIN_SP · ADMIN_SP_N · IT_MANAGER) + IT 고정 계정 → 관리자       */
-/*  · 그 밖에는 training365_Users 에 등록 · 사용 중 · 역할이 4개 중 하나여야만. 목록을 못 읽으면 막는다      */
+/*  · training365_Users 에 등록 · 사용 중 · 역할이 4개 중 하나여야만. 목록을 못 읽으면 막는다                */
+/*  · 설정 파일은 문의 메일(TRAINING365_CONTACT)만 읽는다 · 목록에 관리자가 없을 때만 비상 관리자          */
 /* ------------------------------------------------------------------ */
 async function t365Boot(account) {
   document.getElementById("login-screen").style.display = "none";
@@ -4104,7 +4120,8 @@ async function t365Boot(account) {
     return;
   }
   const wrap = (pr) => pr.then((v) => ({ v }), (e) => ({ e }));
-  const usersR = await wrap(tListAll(T365_LISTS.users));
+  const [usersR, contactR] = await Promise.all([wrap(tListAll(T365_LISTS.users)), wrap(loadContactMail())]);
+  if (contactR.e) console.warn("[Training365] 문의 메일(TRAINING365_CONTACT) 읽기 실패 — IT 메일로 대신:", contactR.e.message);
   const users = usersR.v || [];
   // 비상 관리자 — 목록을 읽었고 사용 중인 「관리자」 가 아무도 없을 때만(목록을 못 읽으면 fail-closed)
   const listHasAdmin = users.some((u) => u.Role === "관리자" && u.Active !== false && normEmail(u.Email));
@@ -4126,7 +4143,7 @@ async function t365Boot(account) {
   catch (e) { console.warn("[Training365] 접속 기록 실패:", e.message); }
   const loadingEl = document.getElementById("loading"); if (loadingEl) loadingEl.remove();
   const root = createRoot(document.getElementById("root"));
-  if (!role) { root.render(<AccessDenied ident={{ ...ident, email }} reason={reason} />); return; }
+  if (!role) { root.render(<AccessDenied ident={{ ...ident, email }} reason={reason} contact={contactR.v || ""} />); return; }
   T365Session.startTimers();
   root.render(<App boot={{ me: { ...ident, email, name: (myRow && myRow.Title) || ident.shortName, company }, role, isBootAdmin, users, usersLoaded: !usersR.e, myRow }} />);
 }
