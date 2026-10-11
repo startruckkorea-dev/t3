@@ -1254,8 +1254,8 @@ function OverviewTab({ ctx, openPost, setTab, accessRows, onSearch, banners, onM
     <div className="w-full">
       <BannerCarousel ctx={ctx} banners={banners || []} onManage={onManageBanners} />
       {/* 인사 · 요약 · 전체 검색 */}
-      <section className="bg-white rounded-xl border border-slate-200 shadow-sm mb-5 overflow-hidden" data-testid="welcome">
-        <div className="px-4 md:px-5 py-4 flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-6">
+      <section className="bg-white rounded-xl border border-slate-200 shadow-sm mb-4 overflow-hidden" data-testid="welcome">
+        <div className="px-4 md:px-5 py-3 flex flex-col lg:flex-row lg:items-center gap-2.5 lg:gap-6">
           <div className="min-w-0 flex-1">
             <div className="text-[15.5px] font-semibold text-slate-900">안녕하세요, {firstName}님</div>
             <p className="text-[13px] text-slate-500 mt-0.5" data-testid="headline">{headline}</p>
@@ -1277,7 +1277,7 @@ function OverviewTab({ ctx, openPost, setTab, accessRows, onSearch, banners, onM
               { k: "kpi-active", label: "활성 사용자 · 7일", value: active7 ? `${active7.size}` : "–", unit: active7 ? "명" : "", sub: `사용자 ${users.filter((u) => u.Active !== false).length}명`, go: ctx.canView("access") ? "access" : null },
               { k: "kpi-new", label: "최근 7일 새 글", value: `${newWeek}`, unit: "건", sub: `전체 ${vis.length}건`, go: "all" },
             ].map((x, i) => (
-              <button key={x.k} data-testid={x.k} onClick={() => x.go && setTab(x.go)} className={`text-left px-4 md:px-5 py-2.5 min-w-0 border-slate-100 ${i % 2 ? "border-l" : ""} ${i === 2 ? "md:border-l" : ""} ${i >= 2 ? "border-t md:border-t-0" : ""} ${x.go ? "hover:bg-slate-50" : "cursor-default"}`}>
+              <button key={x.k} data-testid={x.k} onClick={() => x.go && setTab(x.go)} className={`text-left px-4 md:px-5 py-2 min-w-0 border-slate-100 ${i % 2 ? "border-l" : ""} ${i === 2 ? "md:border-l" : ""} ${i >= 2 ? "border-t md:border-t-0" : ""} ${x.go ? "hover:bg-slate-50" : "cursor-default"}`}>
                 <div className="text-[11px] text-slate-500 truncate">{x.label}</div>
                 <div className="flex items-baseline gap-2 min-w-0">
                   <span className="text-[18px] font-bold text-slate-800 tabular-nums leading-tight">{x.value}<span className="text-[12px] font-normal text-slate-400 ml-0.5">{x.unit || ""}</span></span>
@@ -1290,11 +1290,11 @@ function OverviewTab({ ctx, openPost, setTab, accessRows, onSearch, banners, onM
         )}
       </section>
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
-        <div className="xl:col-span-8 min-w-0 space-y-5">
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+        <div className="xl:col-span-8 min-w-0 space-y-4">
           {/* 공지 · 필수 */}
           <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" data-testid="notice-strip">
-            <div className="flex items-center gap-2 px-4 h-11 border-b border-slate-100">
+            <div className="flex items-center gap-2 px-4 h-10 border-b border-slate-100">
               <Megaphone size={15} style={{ color: "#C2410C" }} />
               <h2 className="text-[14px] font-semibold text-slate-800">공지 · 필수</h2>
               {ctx.isAgent && (todo.length
@@ -1306,7 +1306,7 @@ function OverviewTab({ ctx, openPost, setTab, accessRows, onSearch, banners, onM
             {notice.length ? notice.slice(0, NOTICE_MAX).map((p) => {
               const c = catMap[p.Category]; const r = myRow(p); const s = stats.get(p.id);
               return (
-                <button key={p.id} onClick={() => openPost(p)} data-notice={p.id} title={p.Title} className="w-full text-left px-4 h-11 flex items-center gap-2.5 border-t border-slate-100 first:border-t-0 hover:bg-slate-50 min-w-0">
+                <button key={p.id} onClick={() => openPost(p)} data-notice={p.id} title={p.Title} className="w-full text-left px-4 h-10 flex items-center gap-2.5 border-t border-slate-100 first:border-t-0 hover:bg-slate-50 min-w-0">
                   <span className="w-[46px] shrink-0 flex">{p.RequireConfirm ? <ReqPill /> : <NoticePill />}</span>
                   <span className="hidden sm:inline-block w-[112px] shrink-0 truncate"><CatTag cat={c} /></span>
                   <span className={`min-w-0 flex-1 truncate text-[13.5px] ${r ? "text-slate-600" : "font-semibold text-slate-900"}`}>{p.Title}</span>
@@ -1324,7 +1324,7 @@ function OverviewTab({ ctx, openPost, setTab, accessRows, onSearch, banners, onM
           </section>
 
           {/* 게시판별 최근 글 — 인트라넷 게시판 홈 */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-testid="board-boxes">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="board-boxes">
             {cats.map((c) => {
               const list = vis.filter((p) => p.Category === c.key);
               const rows = list.slice(0, 5);
@@ -1333,19 +1333,19 @@ function OverviewTab({ ctx, openPost, setTab, accessRows, onSearch, banners, onM
               const I = c.icon || FileText;
               return (
                 <section key={c.key} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-w-0" data-box={c.key}>
-                  <button onClick={() => setTab("cat:" + c.key)} className="flex items-center gap-2.5 px-4 h-12 border-b border-slate-100 text-left hover:bg-slate-50/70 group" data-box-head={c.key}>
-                    <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: c.soft }}><I size={14} style={{ color: c.color }} /></span>
-                    <span className="text-[14px] font-semibold text-slate-800 truncate">{c.label}</span>
+                  <button onClick={() => setTab("cat:" + c.key)} className="flex items-center gap-2 px-3.5 h-10 border-b border-slate-100 text-left hover:bg-slate-50/70 group" data-box-head={c.key}>
+                    <span className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: c.soft }}><I size={13} style={{ color: c.color }} /></span>
+                    <span className="text-[13.5px] font-semibold text-slate-800 truncate">{c.label}</span>
                     <span className="text-[11.5px] text-slate-400 tabular-nums shrink-0">{list.length}</span>
                     {td ? <span className="text-[10.5px] font-bold px-1.5 rounded-full leading-[18px] text-white shrink-0" style={{ background: "#C2410C" }}>확인 {td}</span>
                       : un ? <span className="text-[10.5px] font-semibold px-1.5 rounded-full leading-[18px] bg-rose-50 text-rose-600 shrink-0" data-unread={c.key}>새 글 {un}</span> : null}
                     <span className="ml-auto text-[12px] text-slate-400 group-hover:text-slate-700 inline-flex items-center shrink-0">더보기<ChevronRight size={13} /></span>
                   </button>
-                  <div className="flex-1 py-1">
+                  <div className="flex-1 py-0.5">
                     {rows.length ? rows.map((p) => {
                       const rd = !!myRow(p);
                       return (
-                        <button key={p.id} onClick={() => openPost(p)} data-wpost={p.id} title={p.Title} className="w-full text-left px-4 h-9 flex items-center gap-2 hover:bg-slate-50 min-w-0">
+                        <button key={p.id} onClick={() => openPost(p)} data-wpost={p.id} title={p.Title} className="w-full text-left px-3.5 h-8 flex items-center gap-2 hover:bg-slate-50 min-w-0">
                           <span className={`w-1 h-1 rounded-full shrink-0 ${rd ? "bg-slate-300" : ""}`} style={rd ? undefined : { background: c.color }}></span>
                           {p.IsPinned && <Pin size={11} className="text-amber-500 shrink-0" />}
                           <span className={`truncate text-[13px] ${rd ? "text-slate-600" : "font-semibold text-slate-900"}`}>{p.Title}</span>
@@ -1354,8 +1354,8 @@ function OverviewTab({ ctx, openPost, setTab, accessRows, onSearch, banners, onM
                         </button>
                       );
                     }) : (
-                      <div className="px-4 py-3 text-[12.5px] text-slate-400 flex items-center gap-2">
-                        <Inbox size={14} className="text-slate-300 shrink-0" />아직 글이 없습니다.
+                      <div className="px-3.5 h-9 text-[12px] text-slate-400 flex items-center gap-2">
+                        <Inbox size={13} className="text-slate-300 shrink-0" />아직 글이 없습니다.
                         {ctx.canWrite(c.key) && <button onClick={() => setTab("cat:" + c.key)} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>첫 글 쓰기</button>}
                       </div>
                     )}
@@ -1367,7 +1367,7 @@ function OverviewTab({ ctx, openPost, setTab, accessRows, onSearch, banners, onM
         </div>
 
         {/* 오른쪽 작은 상자 */}
-        <aside className="xl:col-span-4 space-y-4 min-w-0">
+        <aside className="xl:col-span-4 space-y-3 min-w-0">
           {ctx.isAgent && (
             <WidgetCard icon={BookOpenCheck} tint="#C2410C" title="내 확인 대기" testid="w-todo" right={todo.length ? <span className="text-[11px] font-bold px-1.5 rounded-full leading-[18px] text-white" style={{ background: "#C2410C" }}>{todo.length}</span> : null}>
               {todo.length ? todo.slice(0, 5).map((p) => (
@@ -1394,10 +1394,10 @@ function OverviewTab({ ctx, openPost, setTab, accessRows, onSearch, banners, onM
               </ol>
             ) : <SmallEmpty icon={Eye}>아직 조회 기록이 없습니다.</SmallEmpty>}
           </WidgetCard>
-          <section className="rounded-xl border border-slate-200 bg-white shadow-sm px-4 py-3.5" data-testid="intro">
-            <div className="flex items-center gap-2 text-[13.5px] font-semibold text-slate-800"><BookOpen size={15} style={{ color: BRAND.accent }} />Training365 이용 안내</div>
-            <p className="text-[12.5px] text-slate-500 leading-relaxed mt-1.5">{T365_INTRO_SHORT}</p>
-            <button onClick={() => ctx.openContact && ctx.openContact()} className={`${btnCls} h-8 mt-3 text-[12.5px]`} data-testid="link-contact"><HelpCircle size={13} /> 문의하기 · 담당자 연락처</button>
+          <section className="rounded-xl border border-slate-200 bg-white shadow-sm px-4 py-3" data-testid="intro">
+            <div className="flex items-center gap-2"><HelpCircle size={15} style={{ color: BRAND.accent }} /><span className="text-[13.5px] font-semibold text-slate-800">도움이 필요하세요?</span></div>
+            <p className="text-[12px] text-slate-500 leading-relaxed mt-1">자료 · 권한 · 사용법은 게시판별 담당자에게, 로그인 · 시스템 오류는 IT 에 문의해 주세요.</p>
+            <button onClick={() => ctx.openContact && ctx.openContact()} className={`${btnCls} h-8 mt-2.5 text-[12.5px]`} data-testid="link-contact"><Mail size={13} /> 문의하기 · 담당자 연락처</button>
           </section>
         </aside>
       </div>
@@ -1627,7 +1627,12 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
             </div>
           </PostModalShell>
         ))}
-      {editing && <PostEditor ctx={ctx} post={editing.post} defaultCat={catKey || catFilter} onClose={() => setEditing(null)} onSaved={async (id) => { const wasEdit = !!(editing && editing.post); setEditing(null); await ctx.reload(); toast(wasEdit ? "게시물을 수정했습니다" : "게시물을 올렸습니다"); if (id) setOpenId(id); }} />}
+      {editing && <PostEditor ctx={ctx} post={editing.post} defaultCat={catKey || catFilter} onClose={() => setEditing(null)} onSaved={async (id, savedCat) => {
+        const wasEdit = !!(editing && editing.post); setEditing(null); await ctx.reload(); toast(wasEdit ? "게시물을 수정했습니다" : "게시물을 올렸습니다");
+        if (!id) return;
+        if (catKey && savedCat && savedCat !== catKey) ctx.goPost(savedCat, id);   // CRM 에서 글쓰기 → 일반게시판에 올린 경우(10-11 「게시물을 찾을 수 없습니다」)
+        else setOpenId(id);
+      }} />}
     </div>
   );
 }
@@ -2049,7 +2054,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
       }
       setSaving(""); savingRef.current = false;
       if (failed.length) uiAlert(`게시물은 저장됐지만 첨부 ${failed.length}개를 올리지 못했습니다 — 「수정」에서 다시 첨부해 주세요.\n\n${failed.join("\n")}`);
-      onSaved(id);
+      onSaved(id, cat);   // 고른 게시판(cat)을 함께 — 다른 게시판에 올렸으면 그 게시판으로 가서 연다
     } catch (e) { setSaving(""); savingRef.current = false; uiAlert(e.message); }
   }
   const closingRef = useRef(false);
@@ -2353,7 +2358,7 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
     .map((d) => ({ email: d.email, dirOnly: true, dir: d, dirStatus: "dirOnly", row: { Title: d.name, Email: d.email, Company: d.dept || d.company || "", Role: "", Active: true } })) : [];
   const everyone = merged.concat(dirRows);
   const missingRows = merged.filter((p) => p.dirStatus === "missing" || p.dirStatus === "alt");
-  const viewCounts = { all: everyone.length, registered: merged.length, dirOnly: dirRows.length, missing: missingRows.length };
+  const viewCounts = { all: everyone.length, registered: merged.length + dirRows.filter((p) => cfgSet.has(p.email)).length, dirOnly: dirRows.filter((p) => !cfgSet.has(p.email)).length, missing: missingRows.length };
   const lastLogin = {};
   (accessRows || []).forEach((r) => { const e = normEmail(r.UserEmail); if (r.EndType !== "접근 차단" && (!lastLogin[e] || r.LoginAt > lastLogin[e])) lastLogin[e] = r.LoginAt; });
   const eff = (p, k) => { const o = overrides[p.email]; return o && k in o ? o[k] : k === "Active" ? p.row.Active !== false : String(p.row[k] || ""); };
@@ -2369,11 +2374,13 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
   const presetOf = (p) => rolePreset(eff(p, "Role"), catKeysOf(p.row.WriterCategories));
   const qq = q.trim().toLowerCase();
   const filtered = everyone
-    .filter((p) => view === "all" || (view === "registered" ? !p.dirOnly : view === "dirOnly" ? p.dirOnly : (p.dirStatus === "missing" || p.dirStatus === "alt")))
+    .filter((p) => view === "all" || (view === "registered" ? (!p.dirOnly || cfgSet.has(p.email)) : view === "dirOnly" ? (p.dirOnly && !cfgSet.has(p.email)) : (p.dirStatus === "missing" || p.dirStatus === "alt")))
     .filter((p) => !roleF || eff(p, "Role") === roleF)
     .filter((p) => !qq || [p.email, p.row.Title, eff(p, "Company"), eff(p, "Role"), p.dir && p.dir.dept, p.dir && p.dir.team, p.dir && p.dir.name].some((v) => String(v || "").toLowerCase().includes(qq)));
   const roleRank = { "관리자": 0, "작성자": 1, "본사": 2, "Agent": 3 };
-  const ordered = [...filtered].sort((a, b) => (justAdded.has(b.email) ? 1 : 0) - (justAdded.has(a.email) ? 1 : 0) || (a.dirOnly ? 1 : 0) - (b.dirOnly ? 1 : 0) || (a.dirOnly && b.dirOnly ? String(a.row.Title || "").localeCompare(String(b.row.Title || "")) : 0) || (roleRank[a.row.Role] ?? 9) - (roleRank[b.row.Role] ?? 9) || String(a.row.Company || "").localeCompare(String(b.row.Company || "")) || String(a.row.Title || "").localeCompare(String(b.row.Title || "")));
+  // 권한 있는 사람 먼저 — 설정 파일 관리자(명부에만 있어도) → 등록 사용자 → 명부 직원(이름순)
+  const permRank = (p) => (cfgSet.has(p.email) ? 0 : p.dirOnly ? 2 : 1);
+  const ordered = [...filtered].sort((a, b) => (justAdded.has(b.email) ? 1 : 0) - (justAdded.has(a.email) ? 1 : 0) || permRank(a) - permRank(b) || (a.dirOnly && b.dirOnly ? String(a.row.Title || "").localeCompare(String(b.row.Title || "")) : 0) || (roleRank[a.row.Role] ?? 9) - (roleRank[b.row.Role] ?? 9) || String(a.row.Company || "").localeCompare(String(b.row.Company || "")) || String(a.row.Title || "").localeCompare(String(b.row.Title || "")));
   const totalPages = Math.max(1, Math.ceil(ordered.length / PAGE_SIZE));
   const pageSafe = Math.min(page, totalPages);
   const pageRows = ordered.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
@@ -2425,6 +2432,21 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
       setPerm(p, item, capLevel(item, bulkLevel));
     });
     if (skipped) uiAlert(`${skipped}명은 바꿀 수 없어 건너뛰었습니다 (설정 파일 관리자 · 역할 없음 · 권한 열 없음).`);
+  }
+
+  // 표 머리 칸 체크 — 선택한 사람에게만 그 메뉴의 보기 / 편집을 한 번에 켜고 끈다(바꿀 수 없는 사람은 건너뜀)
+  function colTargets(item, col) { return everyone.filter((p) => selected.has(p.email) && cellEditable(p, item, col)); }
+  function colState(item, col) {
+    const t = colTargets(item, col); if (!t.length) return { n: 0, on: 0 };
+    const on = t.filter((p) => { const lv = curPerm(p)[item.key] || "n"; return col === "v" ? lv !== "n" : lv === "e"; }).length;
+    return { n: t.length, on };
+  }
+  function colBulk(item, col, on) {
+    const sel = everyone.filter((p) => selected.has(p.email));
+    const t = colTargets(item, col);
+    t.forEach((p) => setPerm(p, item, permNext(curPerm(p), item, col, on)));
+    const skipped = sel.length - t.length;
+    toast(`${catLabel(item)} ${col === "v" ? "보기" : "편집"} ${on ? "켬" : "끔"} — ${t.length}명${skipped ? ` (바꿀 수 없는 ${skipped}명 건너뜀)` : ""} · 「반영」을 눌러 저장`);
   }
 
   // 반영 뒤 「사용자 · 권한 편집」을 가진 사람이 목록에 한 명도 남지 않으면 막는다(마지막 관리자 보호)
@@ -2805,9 +2827,21 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
                 )))}
               </tr>
               <tr>
-                {cols.map((c) => (
-                  <th key={c.item.key + c.col} className="bg-white text-[10.5px] font-medium text-slate-400 py-1 border-b border-slate-200 text-center" style={{ ...divider(c), width: c.item.edit ? CELL_W : colW(c.item), minWidth: c.item.edit ? CELL_W : colW(c.item) }}>{c.item.locked ? "보기" : c.col === "v" ? "보기" : "편집"}</th>
-                ))}
+                {cols.map((c) => {
+                  const st = canEdit && !c.item.locked && selectedList.length ? colState(c.item, c.col) : null;
+                  return (
+                    <th key={c.item.key + c.col} className="bg-white text-[10.5px] font-medium text-slate-400 py-1 border-b border-slate-200 text-center" style={{ ...divider(c), width: c.item.edit ? CELL_W : colW(c.item), minWidth: c.item.edit ? CELL_W : colW(c.item) }}>
+                      <div>{c.item.locked ? "보기" : c.col === "v" ? "보기" : "편집"}</div>
+                      {canEdit && !c.item.locked && (
+                        <input type="checkbox" className="w-3.5 h-3.5 mt-0.5 disabled:opacity-30" data-colbulk={c.item.key + ":" + c.col}
+                          disabled={!st || !st.n} checked={!!st && st.n > 0 && st.on === st.n}
+                          ref={(el) => { if (el) el.indeterminate = !!st && st.on > 0 && st.on < st.n; }}
+                          onChange={(e) => colBulk(c.item, c.col, e.target.checked)}
+                          title={!selectedList.length ? "먼저 왼쪽에서 사용자를 선택하세요 — 선택한 사람에게만 한 번에 적용합니다" : st && st.n ? `선택한 ${st.n}명에게 ${catLabel(c.item)} ${c.col === "v" ? "보기" : "편집"} 켜기/끄기` : "선택한 사람 중 바꿀 수 있는 사람이 없습니다"} />
+                      )}
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
@@ -2950,7 +2984,7 @@ function BannerImg({ file, className, alt }) {
 }
 function DefaultHero({ ctx, onManage }) {
   return (
-    <section className="t365-hero relative overflow-hidden rounded-2xl text-white mb-5 h-[150px] md:h-[188px]" data-testid="hero-default">
+    <section className="t365-hero relative overflow-hidden rounded-2xl text-white mb-4 h-[132px] md:h-[164px]" data-testid="hero-default">
       <div className="absolute inset-0 t365-hero-lines"></div>
       <Truck className="absolute right-0 md:right-10 -bottom-8 md:-bottom-10 text-white/[0.07] t365-hero-truck" size={230} strokeWidth={1.2} aria-hidden="true" />
       <div className="relative h-full flex flex-col justify-center px-6 md:px-10">
@@ -2978,7 +3012,7 @@ function BannerCarousel({ ctx, banners, onManage }) {
   if (!n) return <DefaultHero ctx={ctx} onManage={onManage} />;
   const go = (k) => setI(((k % n) + n) % n);
   return (
-    <section className="relative overflow-hidden rounded-2xl mb-5 h-[170px] md:h-[230px] bg-[#101B34] group" data-testid="banner" aria-roledescription="carousel" aria-label="Training365 배너"
+    <section className="relative overflow-hidden rounded-2xl mb-4 h-[156px] md:h-[210px] bg-[#101B34] group" data-testid="banner" aria-roledescription="carousel" aria-label="Training365 배너"
       onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}>
       {list.map((b, k) => {
         const on = k === cur;
@@ -3796,7 +3830,7 @@ function App({ boot }) {
   useEffect(() => { const on = () => { const x = parseHash(); setTabRaw(x.tab); setOpenPostRaw(x.post); }; window.addEventListener("popstate", on); return () => window.removeEventListener("popstate", on); }, []);
   const upsertRead = (row) => setReads((prev) => { const i = prev.findIndex((x) => x.Title === row.Title); if (i < 0) return [...prev, row]; const n = prev.slice(); n[i] = { ...n[i], ...row }; return n; });
 
-  const ctx = { openContact: () => setContactOpen(true), me, role, isAdmin, isAgent, canWrite, canEditPost, canView, canEditMenu, perms: P, cats, catMap, users, agents, posts, readIdx, upsertRead, reload };
+  const ctx = { goPost: (cat, id) => setTab(catMap[cat] ? "cat:" + cat : "all", String(id)), openContact: () => setContactOpen(true), me, role, isAdmin, isAgent, canWrite, canEditPost, canView, canEditMenu, perms: P, cats, catMap, users, agents, posts, readIdx, upsertRead, reload };
 
   // 화면 접근 — 관리 화면은 관리자만, 확인 현황은 Agent 제외, 카테고리는 사용 중인 것만
   const tabAllowed = (t) => !!role && (t === "overview" || (t === "all" && canView("all")) || (t.startsWith("cat:") && !!catMap[t.slice(4)]) || ((t === "status" || T365_ADMIN_TABS.includes(t)) && canView(t)));
@@ -3951,7 +3985,7 @@ function App({ boot }) {
         </div>
         <main className="t365-main-scroll flex-1 p-4 md:p-6 overflow-y-auto">
           <div className="max-w-[1600px] mx-auto">
-            {!(openPostId && (tab.startsWith("cat:") || tab === "all")) && (
+            {tab !== "overview" && !(openPostId && (tab.startsWith("cat:") || tab === "all")) && (
               <PageHeader icon={meta[0]} title={cur.label} subtitle={meta[1]} tint={meta[2]} right={curCat && curCat.contacts && curCat.contacts.length ? (
                 <div className="hidden sm:flex items-center gap-1.5 text-[12px] text-slate-500" data-testid="board-contacts">
                   <span className="text-slate-400">문의</span>
