@@ -59,6 +59,8 @@
   .t365-body blockquote { margin: 0 0 .9em; padding: .6em .9em; border-left: 3px solid #2F7B7A; background: #F2F8F8; border-radius: 0 8px 8px 0; color: #334155; white-space: pre-wrap; }
   .t365-body a { color: #1D6F8F; text-decoration: underline; text-underline-offset: 2px; }
   .t365-body strong { font-weight: 700; color: #0F172A; }
+  .t365-dlg-in { animation: t365-dlg .16s ease-out; }
+  @keyframes t365-dlg { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
   .t365-clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 html, * { scrollbar-width: thin; scrollbar-color: #CBD5E1 transparent; }
@@ -422,7 +424,7 @@ async function tDownload(f) {
     const url = await tFileUrl(f);
     const a = document.createElement("a");
     a.href = url; a.download = f.name; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
-  } catch (e) { alert(`파일을 열 수 없습니다 — ${e.message}\n권한이 없으면 관리자에게 문의해 주세요.`); }
+  } catch (e) { uiAlert(`파일을 열 수 없습니다 — ${e.message}\n권한이 없으면 관리자에게 문의해 주세요.`); }
 }
 
 /* ---- system_config_final.xlsx — APS 공용 설정(A열 KEY · B열 이름 · C열 메일). 게스트(Agent)는 읽을 권한이 없을 수 있다 ---- */
@@ -449,10 +451,45 @@ function cfgSeqKeys(cfg, prefix) {
 }
 // 관리자 — TRAINING365_ADMIN_N · ADMIN_SP · ADMIN_SP_N · IT_MANAGER + IT 고정 계정
 function configAdminEmails(cfg) {
-  const keys = [...cfgSeqKeys(cfg, "TRAINING365_ADMIN_"), "ADMIN_SP", ...cfgSeqKeys(cfg, "ADMIN_SP_"), "IT_MANAGER"];
+  // TRAINING365_ADMIN 으로 시작하는 키는 꼬리가 번호든 이름이든 모두(예: TRAINING365_ADMIN_1 · _IT · _System — 10-11 운영 설정)
+  const t365Keys = Object.keys(cfg || {}).filter((k) => /^TRAINING365_ADMIN(_|$)/i.test(k)).sort();
+  const keys = [...t365Keys, "ADMIN_SP", ...cfgSeqKeys(cfg, "ADMIN_SP_"), "IT_MANAGER"];
   const fromCfg = keys.map((k) => (cfg && cfg[k] ? String(cfg[k].email || "").trim().toLowerCase() : "")).filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
   return [...new Set([...T365_IT_ADMINS, ...fromCfg])];
 }
+
+/* ---- 직원 명부(employee_search.xlsx) — MKQR · ICS 와 같은 공용 파일 · 같은 열(Company · Department · Team · EngName · EMail) ----
+ * 문서 라이브러리 루트(system_config_final.xlsx 옆). 사용자 · 권한 관리 화면에서 「명부에만 있음」 · 「명부 없음」 대조에만 쓴다(읽기 전용).
+ * 게스트(Agent)는 읽을 권한이 없어도 된다 — 관리 화면에서만 부른다. 못 읽으면 등록된 사용자만 보인다. */
+let _tEmpDirP = null;
+function loadEmployeeDirectory(force) {
+  if (_tEmpDirP && !force) return _tEmpDirP;
+  _tEmpDirP = (async () => {
+    const token = await getGraphToken();
+    const driveId = await tDocDriveId();
+    const res = await fetch(`${GRAPH}/drives/${driveId}/root:/employee_search.xlsx:/content`, { headers: { Authorization: "Bearer " + token }, cache: "no-cache" });
+    if (!res.ok) throw new Error(`직원 명부를 읽지 못했습니다 (${res.status})`);
+    const wb = XLSX.read(await res.arrayBuffer(), { type: "array" });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
+    const header = (rows[0] || []).map((h) => String(h || "").trim().toLowerCase());
+    const ix = (n) => header.indexOf(n);
+    const eI = ix("email") >= 0 ? ix("email") : ix("e-mail"), nI = ix("engname"), dI = ix("department"), tI = ix("team"), cI = ix("company");
+    if (eI < 0) throw new Error("직원 명부에 EMail 열이 없습니다.");
+    const by = new Map();
+    rows.slice(1).forEach((r) => {
+      r = r || [];
+      const email = normEmail(r[eI]);
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || by.has(email)) return;
+      const cell = (i) => (i >= 0 ? String(r[i] == null ? "" : r[i]).trim().slice(0, 120) : "");
+      by.set(email, { email, name: cell(nI) || email, dept: cell(dI), team: cell(tI), company: cell(cI) });
+    });
+    return [...by.values()].sort((a, b) => a.name.localeCompare(b.name));
+  })();
+  _tEmpDirP.catch(() => { _tEmpDirP = null; });   // 실패는 기억하지 않는다(다시 열면 다시 시도)
+  return _tEmpDirP;
+}
+// 메일 표기만 다른 같은 사람(bum-joo.lee ↔ bumjoo.lee) — ICS · MKQR 「메일 다름」 과 같은 규칙
+const mailKey = (e) => { const [id, dom] = String(e || "").toLowerCase().split("@"); return `${(id || "").replace(/[.\-_]/g, "")}@${dom || ""}`; };
 
 /* ---- 내 신원 — 게스트(B2B) 계정은 mail 이 비거나 UPN 이 x_domain.com#EXT#@tenant 꼴이라 여러 값을 모두 비교(SSC sscMyIds 와 같음) ---- */
 function buildIdentity(account, me) {
@@ -707,6 +744,82 @@ function BlockingOverlay({ message }) {
     </div>
   );
 }
+/* ------------------------------------------------------------------ */
+/* 확인 · 알림 · 입력 창 — 브라우저 기본 alert/confirm/prompt 대신(ICS 확인 창과 같은 모양)          */
+/* uiConfirm(문구, { title, okText, cancelText, danger }) → true/false · uiAlert(문구) → 닫히면 끝 ·        */
+/* uiPrompt(문구, 기본값) → 문자열 또는 null. 여러 개가 겹치면 차례대로. Enter = 확인 · Esc = 취소,          */
+/* 창 안에서만 Tab 이동(포커스 가둠), 닫히면 원래 자리로 포커스. 위험한 작업(danger)은 빨간 확인 단추.      */
+/* ------------------------------------------------------------------ */
+const _dlgQ = []; let _dlgNotify = null; let _dlgSeq = 0;
+function uiDialog(opts) { return new Promise((resolve) => { _dlgQ.push({ id: ++_dlgSeq, ...opts, resolve }); if (_dlgNotify) _dlgNotify(); }); }
+function uiConfirm(message, opts) { return uiDialog({ kind: "confirm", message, ...(opts || {}) }); }
+function uiAlert(message, opts) { return uiDialog({ kind: "alert", message, ...(opts || {}) }); }
+function uiPrompt(message, defaultValue, opts) { return uiDialog({ kind: "prompt", message, defaultValue: defaultValue || "", ...(opts || {}) }); }
+function DialogHost() {
+  const [, force] = useState(0);
+  useEffect(() => { _dlgNotify = () => force((n) => n + 1); force((n) => n + 1); return () => { _dlgNotify = null; }; }, []);
+  const d = _dlgQ[0];
+  return d ? <UiDialog key={d.id} d={d} onDone={(v) => { _dlgQ.shift(); d.resolve(v); force((n) => n + 1); }} /> : null;
+}
+function UiDialog({ d, onDone }) {
+  const boxRef = useRef(null), okRef = useRef(null), inRef = useRef(null);
+  const prevFocus = useRef(typeof document !== "undefined" ? document.activeElement : null);
+  const [val, setVal] = useState(d.defaultValue || "");
+  const isConfirm = d.kind !== "alert";
+  const finish = (ok) => {
+    const v = d.kind === "confirm" ? !!ok : d.kind === "prompt" ? (ok ? val : null) : undefined;
+    const pf = prevFocus.current;
+    onDone(v);
+    setTimeout(() => { try { if (pf && pf.focus && document.contains(pf)) pf.focus(); } catch (e) {} }, 0);
+  };
+  useEffect(() => {
+    const t = setTimeout(() => { const el = d.kind === "prompt" ? inRef.current : okRef.current; if (el) { el.focus(); if (el.select) el.select(); } }, 20);
+    // 창 위에서는 키를 먼저 받는다(capture) — 밑에 깔린 글쓰기 창의 Esc 닫기 등이 함께 돌지 않게
+    const k = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(false); return; }
+      if (e.key === "Enter" && !e.isComposing && !(e.target && e.target.tagName === "TEXTAREA")) {
+        if (e.target && e.target.tagName === "BUTTON" && e.target !== okRef.current) return;   // 취소 단추에서 Enter → 취소
+        e.preventDefault(); e.stopPropagation(); finish(true); return;
+      }
+      if (e.key === "Tab" && boxRef.current) {
+        const f = [...boxRef.current.querySelectorAll("button, input, [tabindex]:not([tabindex='-1'])")].filter((x) => !x.disabled);
+        if (!f.length) return;
+        const i = f.indexOf(document.activeElement);
+        e.preventDefault(); e.stopPropagation();
+        f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus();
+      }
+    };
+    window.addEventListener("keydown", k, true);
+    return () => { clearTimeout(t); window.removeEventListener("keydown", k, true); };
+  });
+  const title = d.title || (d.kind === "alert" ? "알림" : d.kind === "prompt" ? "입력" : "확인");
+  const okText = d.okText || "확인";
+  const okColor = d.danger ? "#DC2626" : BRAND.accent;
+  const Icon = d.danger ? AlertTriangle : d.kind === "alert" ? AlertTriangle : d.kind === "prompt" ? Link2 : HelpCircle;
+  const tone = d.danger ? ["#FEF2F2", "#DC2626"] : d.kind === "alert" ? ["#FFFBEB", "#D97706"] : [BRAND.accentSoft, BRAND.accent];
+  return (
+    <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-slate-900/40 p-3 sm:p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) finish(false); }} data-testid="ui-dialog-backdrop">
+      <div ref={boxRef} role="alertdialog" aria-modal="true" aria-labelledby={`dlg-t-${d.id}`} aria-describedby={`dlg-m-${d.id}`} data-testid="ui-dialog" data-kind={d.kind} data-danger={d.danger ? "1" : undefined}
+        className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] overflow-y-auto t365-dlg-in">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <h3 id={`dlg-t-${d.id}`} className="font-semibold text-slate-800 min-w-0 truncate flex items-center gap-2.5">
+            <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: tone[0] }}><Icon size={15} style={{ color: tone[1] }} /></span>{title}
+          </h3>
+          <button onClick={() => finish(false)} aria-label="닫기" tabIndex={-1} className="text-slate-400 hover:text-slate-600 shrink-0"><X size={20} /></button>
+        </div>
+        <div className="px-6 py-5">
+          <p id={`dlg-m-${d.id}`} className="text-sm text-slate-600 leading-relaxed whitespace-pre-line break-words" data-testid="ui-dialog-msg">{d.message}</p>
+          {d.kind === "prompt" && <input ref={inRef} value={val} onChange={(e) => setVal(e.target.value)} className={`${inputCls} mt-3`} data-testid="ui-dialog-input" />}
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-5">
+            {isConfirm && <button onClick={() => finish(false)} className="px-4 py-2.5 sm:py-2 text-sm text-slate-500 rounded-lg hover:bg-slate-50 border border-slate-200 sm:border-transparent" data-testid="ui-dialog-cancel">{d.cancelText || "취소"}</button>}
+            <button ref={okRef} onClick={() => finish(true)} className="px-5 py-2.5 sm:py-2 text-sm font-medium text-white rounded-lg hover:opacity-90" style={{ background: okColor }} data-testid="ui-dialog-ok">{okText}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Modal({ title, onClose, children, wide, xl }) {
   useEffect(() => { const k = (e) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
   return (
@@ -1255,22 +1368,22 @@ function PostDetail({ ctx, post, onBack, onEdit }) {
     try {
       const row = await t365Confirm(post, me);
       if (row) ctx.upsertRead(row);
-    } catch (e) { alert(`조회확인을 저장하지 못했습니다 — ${e.message}\n잠시 후 다시 눌러 주세요.`); }
+    } catch (e) { uiAlert(`조회확인을 저장하지 못했습니다 — ${e.message}\n잠시 후 다시 눌러 주세요.`); }
     busyRef.current = false; setBusy(false);
   }
   async function remove() {
-    if (!confirm(`「${post.Title}」 게시물을 삭제할까요?\n삭제하면 되돌릴 수 없고, 이 게시물의 조회확인 기록은 확인 현황에서 빠집니다.`)) return;
+    if (!(await uiConfirm(`「${post.Title}」 게시물을 삭제할까요?\n삭제하면 되돌릴 수 없고, 이 게시물의 조회확인 기록은 확인 현황에서 빠집니다.`, { title: "게시물 삭제", okText: "삭제", danger: true }))) return;
     setDeleting(true);
     try {
       await tDelete(T365_LISTS.posts, post.id, { cat: post.Category });
       t365Log("게시물", "삭제", post.Title, { info: { 카테고리: cat ? cat.label : post.Category, 게시물ID: post.id, 작성자: post.AuthorName || post.AuthorEmail || "" } });
       onBack();
       await ctx.reload();
-    } catch (e) { alert(e.message); }
+    } catch (e) { uiAlert(e.message); }
     setDeleting(false);
   }
   async function playVideo() {
-    try { setVideoSrc(await tFileUrl(vfile)); } catch (e) { alert(`동영상을 열 수 없습니다 — ${e.message}`); }
+    try { setVideoSrc(await tFileUrl(vfile)); } catch (e) { uiAlert(`동영상을 열 수 없습니다 — ${e.message}`); }
   }
 
   return (
@@ -1472,39 +1585,39 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
     setBody(body.slice(0, ls) + seg + body.slice(e));
     setTimeout(() => el.focus(), 0);
   }
-  function addLink() {
-    const u = prompt("연결할 주소를 입력하세요 (https:// 로 시작)", "https://");
+  async function addLink() {
+    const u = await uiPrompt("연결할 주소를 입력하세요 (https:// 로 시작)", "https://", { title: "링크 넣기", okText: "넣기" });
     if (u == null) return;
-    if (!safeHttpsUrl(u)) { alert("https:// 로 시작하는 주소만 넣을 수 있습니다."); return; }
+    if (!safeHttpsUrl(u)) { uiAlert("https:// 로 시작하는 주소만 넣을 수 있습니다."); return; }
     wrap("[", `](${safeHttpsUrl(u)})`, "링크 글자");
   }
   function pickFiles(e) {
     const list = Array.from(e.target.files || []); e.target.value = "";
     const bad = list.filter((f) => T365_BLOCKED_EXT.includes(fileExt(f.name)));
     const big = list.filter((f) => f.size > T365_ATTACH_MAX);
-    if (bad.length) alert(`실행 파일 · 웹 문서 형식은 올릴 수 없습니다: ${bad.map((f) => f.name).join(", ")}`);
-    if (big.length) alert(`파일 하나는 ${fmtSize(T365_ATTACH_MAX)} 까지 올릴 수 있습니다: ${big.map((f) => f.name).join(", ")}`);
+    if (bad.length) uiAlert(`실행 파일 · 웹 문서 형식은 올릴 수 없습니다: ${bad.map((f) => f.name).join(", ")}`);
+    if (big.length) uiAlert(`파일 하나는 ${fmtSize(T365_ATTACH_MAX)} 까지 올릴 수 있습니다: ${big.map((f) => f.name).join(", ")}`);
     const ok = list.filter((f) => !bad.includes(f) && !big.includes(f));
-    if (files.length + newFiles.length + ok.length > 10) { alert("첨부는 한 게시물에 10개까지입니다."); return; }
+    if (files.length + newFiles.length + ok.length > 10) { uiAlert("첨부는 한 게시물에 10개까지입니다."); return; }
     setNewFiles((prev) => [...prev, ...ok]);
   }
   function pickVideo(e) {
     const f = (e.target.files || [])[0]; e.target.value = "";
     if (!f) return;
-    if (!T365_VIDEO_EXT.includes(fileExt(f.name))) { alert(`동영상은 ${T365_VIDEO_EXT.join(" · ")} 형식만 올릴 수 있습니다.`); return; }
-    if (f.size > T365_VIDEO_MAX) { alert(`동영상은 ${fmtSize(T365_VIDEO_MAX)} 까지 올릴 수 있습니다. 더 큰 영상은 링크로 넣어 주세요.`); return; }
+    if (!T365_VIDEO_EXT.includes(fileExt(f.name))) { uiAlert(`동영상은 ${T365_VIDEO_EXT.join(" · ")} 형식만 올릴 수 있습니다.`); return; }
+    if (f.size > T365_VIDEO_MAX) { uiAlert(`동영상은 ${fmtSize(T365_VIDEO_MAX)} 까지 올릴 수 있습니다. 더 큰 영상은 링크로 넣어 주세요.`); return; }
     setNewVideo(f);
   }
   async function save() {
     const t = title.trim();
-    if (!cat || !ctx.canWrite(cat)) { alert("글을 쓸 수 있는 카테고리를 골라 주세요."); return; }
-    if (!t) { alert("제목을 입력해 주세요."); return; }
-    if (t.length > 200) { alert("제목은 200자까지 입력할 수 있습니다."); return; }
-    if (!body.trim() && !files.length && !newFiles.length) { alert("본문을 입력하거나 파일을 첨부해 주세요."); return; }
-    if (body.length > 60000) { alert("본문이 너무 깁니다(6만 자까지). 긴 자료는 파일로 첨부해 주세요."); return; }
+    if (!cat || !ctx.canWrite(cat)) { uiAlert("글을 쓸 수 있는 카테고리를 골라 주세요."); return; }
+    if (!t) { uiAlert("제목을 입력해 주세요."); return; }
+    if (t.length > 200) { uiAlert("제목은 200자까지 입력할 수 있습니다."); return; }
+    if (!body.trim() && !files.length && !newFiles.length) { uiAlert("본문을 입력하거나 파일을 첨부해 주세요."); return; }
+    if (body.length > 60000) { uiAlert("본문이 너무 깁니다(6만 자까지). 긴 자료는 파일로 첨부해 주세요."); return; }
     const vu = videoUrl.trim();
-    if (vu && !safeHttpsUrl(vu)) { alert("동영상 링크는 https:// 로 시작하는 주소만 넣을 수 있습니다."); return; }
-    if (vu.length > 255) { alert("동영상 링크는 255자까지 넣을 수 있습니다 — 짧은 공유 주소를 써 주세요."); return; }
+    if (vu && !safeHttpsUrl(vu)) { uiAlert("동영상 링크는 https:// 로 시작하는 주소만 넣을 수 있습니다."); return; }
+    if (vu.length > 255) { uiAlert("동영상 링크는 255자까지 넣을 수 있습니다 — 짧은 공유 주소를 써 주세요."); return; }
     try {
       const uploaded = [];
       const all = [...newFiles, ...(newVideo ? [newVideo] : [])];
@@ -1541,12 +1654,23 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
       }
       setSaving("");
       onSaved(id);
-    } catch (e) { setSaving(""); alert(e.message); }
+    } catch (e) { setSaving(""); uiAlert(e.message); }
   }
 
+  // 닫기(✕ · 바깥 · Esc) — 쓰던 내용이 있으면 확인 창. 확인 창이 떠 있는 동안 다시 눌러도 하나만
+  const closingRef = useRef(false);
+  async function requestClose() {
+    if (saving || closingRef.current) return;
+    const touched = isEdit ? (title !== (post.Title || "") || body !== (post.Body || "") || newFiles.length || newVideo) : (title.trim() || body.trim() || newFiles.length || newVideo || videoUrl.trim());
+    if (!touched) { onClose(); return; }
+    closingRef.current = true;
+    const ok = await uiConfirm("작성 중인 내용을 닫을까요? 저장하지 않은 내용은 사라집니다.", { title: "작성 중인 글 닫기", okText: "닫기", cancelText: "계속 쓰기", danger: true });
+    closingRef.current = false;
+    if (ok) onClose();
+  }
   const tb = "w-8 h-8 rounded-md flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-800";
   return (
-    <Modal title={isEdit ? "게시물 수정" : "글쓰기"} onClose={() => { if (!saving && confirm("작성 중인 내용을 닫을까요? 저장하지 않은 내용은 사라집니다.")) onClose(); }} xl>
+    <Modal title={isEdit ? "게시물 수정" : "글쓰기"} onClose={requestClose} xl>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-3">
         <Field label="카테고리" required>
           <select value={cat} onChange={(e) => setCat(e.target.value)} className={inputCls} data-testid="ed-cat">
@@ -1721,8 +1845,12 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
   const [page, setPage] = useState(1);
   const [justAdded, setJustAdded] = useState(() => new Set());
   const [showLegend, setShowLegend] = useState(false);
-  useEffect(() => { setPage(1); }, [q, roleF]);
-  const PAGE_SIZE = 20;
+  // 직원 명부 대조(ICS · MKQR 카테고리 접근 권한과 같은 방식) — 보기: 전체 · 권한 있음(등록) · 명부에만 있음 · 명부 없음
+  const [dir, setDir] = useState({ status: "loading", list: [], error: "" });
+  const [view, setView] = useState("all");
+  useEffect(() => { let alive = true; loadEmployeeDirectory().then((list) => alive && setDir({ status: "ok", list, error: "" }), (e) => alive && setDir({ status: "error", list: [], error: e.message })); return () => { alive = false; }; }, []);
+  useEffect(() => { setPage(1); }, [q, roleF, view]);
+  const PAGE_SIZE = 50;
   const me = normEmail(ctx.me.email);
   const cfgSet = new Set(configAdmins);
   const canEdit = ctx.canEditMenu("users");   // 보기만이면 표는 읽기 전용 — 추가 · 반영 · 삭제 · 일괄 등록 없음
@@ -1739,6 +1867,23 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
     dupCount[email] = (dupCount[email] || 0) + 1;
     if (!merged.some((p) => p.email === email)) merged.push({ email, row: r });
   });
+  // 명부 대조 — 등록된 사람에 명부 정보를 붙이고, 명부에만 있는 사람은 역할 없는 행으로 덧붙인다
+  const dirOk = dir.status === "ok" && dir.list.length > 0;
+  const dirMap = new Map(dir.list.map((d) => [d.email, d]));
+  const dirNorm = new Map(); dir.list.forEach((d) => { const k = mailKey(d.email); dirNorm.set(k, dirNorm.has(k) ? null : d); });
+  merged.forEach((p) => {
+    p.dir = dirMap.get(p.email) || null;
+    p.dirStatus = !dirOk ? "" : p.dir ? "in" : dirNorm.get(mailKey(p.email)) ? "alt" : "missing";
+    if (p.dirStatus === "alt") p.altDir = dirNorm.get(mailKey(p.email));
+    p.extAgent = p.row.Role === "Agent" || isExternalEmail(p.email);
+  });
+  const regSet = new Set(merged.map((p) => p.email));
+  const regNorm = new Set(merged.map((p) => mailKey(p.email)));
+  const dirRows = dirOk ? dir.list.filter((d) => !regSet.has(d.email) && !regNorm.has(mailKey(d.email)))
+    .map((d) => ({ email: d.email, dirOnly: true, dir: d, dirStatus: "dirOnly", row: { Title: d.name, Email: d.email, Company: d.dept || d.company || "", Role: "", Active: true } })) : [];
+  const everyone = merged.concat(dirRows);
+  const missingRows = merged.filter((p) => p.dirStatus === "missing" || p.dirStatus === "alt");
+  const viewCounts = { all: everyone.length, registered: merged.length, dirOnly: dirRows.length, missing: missingRows.length };
   const lastLogin = {};
   (accessRows || []).forEach((r) => { const e = normEmail(r.UserEmail); if (r.EndType !== "접근 차단" && (!lastLogin[e] || r.LoginAt > lastLogin[e])) lastLogin[e] = r.LoginAt; });
   const eff = (p, k) => { const o = overrides[p.email]; return o && k in o ? o[k] : k === "Active" ? p.row.Active !== false : String(p.row[k] || ""); };
@@ -1753,10 +1898,12 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
   };
   const presetOf = (p) => rolePreset(eff(p, "Role"), catKeysOf(p.row.WriterCategories));
   const qq = q.trim().toLowerCase();
-  const filtered = merged.filter((p) => !roleF || eff(p, "Role") === roleF)
-    .filter((p) => !qq || [p.email, p.row.Title, eff(p, "Company"), eff(p, "Role")].some((v) => String(v || "").toLowerCase().includes(qq)));
+  const filtered = everyone
+    .filter((p) => view === "all" || (view === "registered" ? !p.dirOnly : view === "dirOnly" ? p.dirOnly : (p.dirStatus === "missing" || p.dirStatus === "alt")))
+    .filter((p) => !roleF || eff(p, "Role") === roleF)
+    .filter((p) => !qq || [p.email, p.row.Title, eff(p, "Company"), eff(p, "Role"), p.dir && p.dir.dept, p.dir && p.dir.team, p.dir && p.dir.name].some((v) => String(v || "").toLowerCase().includes(qq)));
   const roleRank = { "관리자": 0, "작성자": 1, "본사": 2, "Agent": 3 };
-  const ordered = [...filtered].sort((a, b) => (justAdded.has(b.email) ? 1 : 0) - (justAdded.has(a.email) ? 1 : 0) || (roleRank[a.row.Role] ?? 9) - (roleRank[b.row.Role] ?? 9) || String(a.row.Company || "").localeCompare(String(b.row.Company || "")) || String(a.row.Title || "").localeCompare(String(b.row.Title || "")));
+  const ordered = [...filtered].sort((a, b) => (justAdded.has(b.email) ? 1 : 0) - (justAdded.has(a.email) ? 1 : 0) || (a.dirOnly ? 1 : 0) - (b.dirOnly ? 1 : 0) || (a.dirOnly && b.dirOnly ? String(a.row.Title || "").localeCompare(String(b.row.Title || "")) : 0) || (roleRank[a.row.Role] ?? 9) - (roleRank[b.row.Role] ?? 9) || String(a.row.Company || "").localeCompare(String(b.row.Company || "")) || String(a.row.Title || "").localeCompare(String(b.row.Title || "")));
   const totalPages = Math.max(1, Math.ceil(ordered.length / PAGE_SIZE));
   const pageSafe = Math.min(page, totalPages);
   const pageRows = ordered.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
@@ -1783,6 +1930,7 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
   function setPerm(p, item, nextLv) {
     setOverrides((prev) => {
       const n = { ...prev }; const o = { ...(n[p.email] || {}) };
+      if (p.dirOnly && !T365_ROLES.includes(o.Role)) o.Role = "본사";   // 명부에만 있는 직원 — 권한부터 고르면 본사 역할로 시작
       const base = o.Perm || (("Role" in o) ? rolePreset(o.Role, catKeysOf(p.row.WriterCategories)) : stored(p).perms);
       const desired = { ...base, [item.key]: capLevel(item, nextLv) };
       const roleChanged = "Role" in o;
@@ -1792,21 +1940,21 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
       return n;
     });
   }
-  const cellEditable = (p, item, col) => canEdit && !cfgSet.has(p.email) && !item.locked && (col === "v" || item.edit) && T365_ROLES.includes(eff(p, "Role")) &&
+  const cellEditable = (p, item, col) => canEdit && !cfgSet.has(p.email) && !item.locked && (col === "v" || item.edit) && (T365_ROLES.includes(eff(p, "Role")) || p.dirOnly) &&
     (hasPermCol || (eff(p, "Role") === "작성자" && item.group === "boards" && col === "e"));
   const allVisibleSelected = filtered.length > 0 && filtered.every((p) => selected.has(p.email));
   function toggleSelVisible() { setSelected((prev) => { const n = new Set(prev); filtered.forEach((p) => (allVisibleSelected ? n.delete(p.email) : n.add(p.email))); return n; }); }
   function toggleSel(email) { setSelected((prev) => { const n = new Set(prev); n.has(email) ? n.delete(email) : n.add(email); return n; }); }
-  function bulkSet(k, v) { merged.filter((p) => selected.has(p.email) && !cfgSet.has(p.email)).forEach((p) => setField(p, k, v)); }
+  function bulkSet(k, v) { everyone.filter((p) => !(p.dirOnly && k === "Active")).filter((p) => selected.has(p.email) && !cfgSet.has(p.email)).forEach((p) => setField(p, k, v)); }
   function bulkPerm() {
     const item = T365_PERM_ITEMS.find((x) => x.key === bulkItem); if (!item) return;
     let skipped = 0;
-    merged.filter((p) => selected.has(p.email)).forEach((p) => {
+    everyone.filter((p) => selected.has(p.email)).forEach((p) => {
       const ok = bulkLevel === "n" || bulkLevel === "v" ? cellEditable(p, item, "v") : cellEditable(p, item, "e");
       if (!ok) { skipped++; return; }
       setPerm(p, item, capLevel(item, bulkLevel));
     });
-    if (skipped) alert(`${skipped}명은 바꿀 수 없어 건너뛰었습니다 (설정 파일 관리자 · 역할 없음 · 권한 열 없음).`);
+    if (skipped) uiAlert(`${skipped}명은 바꿀 수 없어 건너뛰었습니다 (설정 파일 관리자 · 역할 없음 · 권한 열 없음).`);
   }
 
   // 반영 뒤 「사용자 · 권한 편집」을 가진 사람이 목록에 한 명도 남지 않으면 막는다(마지막 관리자 보호)
@@ -1837,26 +1985,57 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
     return ch;
   }
 
+  // 명부 직원 → 사용자 목록 새 행(이름 · 메일 · 부서는 명부 값, 역할 · 권한은 고른 값)
+  function newUserFields(dp, o) {
+    const base = { Title: dp.row.Title, Email: dp.email, Role: o.Role, Company: String("Company" in o ? o.Company : dp.row.Company || "").trim(), WriterCategories: "", Active: true };
+    const f = buildFields(base, { ...o, Role: o.Role });
+    delete f.Active;
+    return { ...base, ...f };
+  }
+  async function createFromDir(c) {
+    await tCreate(T365_LISTS.users, c.fields);
+    t365Log("사용자", "사용자 추가", `${c.fields.Title} (${c.email})`, { info: { 역할: c.fields.Role, "회사/지점": c.fields.Company, 출처: "직원 명부" }, changes: permChanges(noPerms(), permsOf(c.fields).perms) });
+  }
+  // 한 사람 바로 추가 — 고른 역할(없으면 본사)과 고른 권한으로 곧바로 등록
+  async function addFromDir(p) {
+    if (!canEdit || saving) return;
+    const o0 = overrides[p.email] || {};
+    const o = { ...o0, Role: T365_ROLES.includes(o0.Role) ? o0.Role : "본사" };
+    setSaving("사용자를 추가하고 있습니다...");
+    try {
+      const fresh = await tListAll(T365_LISTS.users);
+      if (fresh.some((r) => normEmail(r.Email) === p.email)) { uiAlert("이미 등록된 사용자입니다."); await reload(); return; }
+      await createFromDir({ email: p.email, dp: p, fields: newUserFields(p, o) });
+      setOverrides((prev) => { const n = { ...prev }; delete n[p.email]; return n; });
+      setSelected((prev) => { const n = new Set(prev); n.delete(p.email); return n; });
+      setJustAdded(new Set([p.email]));
+      await reload();
+    } catch (e) { uiAlert(e.message); } finally { setSaving(""); }
+  }
   async function applyChanges() {
     if (!canEdit) return;
     const emails = Object.keys(overrides);
     if (!emails.length) return;
     const meO = overrides[me];
     const meAfterUsers = meO ? (meO.Perm ? meO.Perm.users : ("Role" in meO ? rolePreset(meO.Role, []).users : "e")) : "e";
-    if (meO && (meAfterUsers !== "e" || meO.Active === false) && !cfgSet.has(me) && !confirm("본인 계정의 사용자 · 권한 편집이 빠집니다 — 반영하면 이 화면을 더 바꿀 수 없습니다. 계속할까요?")) return;
+    if (meO && (meAfterUsers !== "e" || meO.Active === false) && !cfgSet.has(me) && !(await uiConfirm("본인 계정의 사용자 · 권한 편집이 빠집니다 — 반영하면 이 화면을 더 바꿀 수 없습니다. 계속할까요?", { title: "본인 권한 변경", okText: "반영", danger: true }))) return;
     setSaving("반영하고 있습니다...");
     let done = 0;
     try {
       const fresh = await tListAll(T365_LISTS.users);   // 다른 관리자가 방금 바꿨을 수 있어 저장 직전 다시 읽는다
-      const plan = [];
+      const plan = [], creates = []; let noRole = 0;
       for (const email of emails) {
         const row = fresh.find((r) => normEmail(r.Email) === email);
-        if (!row) continue;
-        plan.push({ email, row, fields: buildFields(row, overrides[email]) });
+        if (row) { plan.push({ email, row, fields: buildFields(row, overrides[email]) }); continue; }
+        // 명부에만 있던 직원 — 역할(또는 권한)을 고른 사람만 새로 등록
+        const dp = dirRows.find((x) => x.email === email); const o = overrides[email];
+        if (!dp || !o) continue;
+        if (!T365_ROLES.includes(o.Role)) { noRole++; continue; }
+        creates.push({ email, dp, fields: newUserFields(dp, o) });
       }
       const before = permAdminsAfter(fresh, {}, new Set());
-      const after = permAdminsAfter(fresh, Object.fromEntries(plan.map((x) => [x.email, x.fields])), new Set());
-      if (before > 0 && after === 0) { alert(LAST_ADMIN_MSG); setSaving(""); return; }
+      const after = permAdminsAfter(fresh.concat(creates.map((c) => c.fields)), Object.fromEntries(plan.map((x) => [x.email, x.fields])), new Set());
+      if (before > 0 && after === 0) { uiAlert(LAST_ADMIN_MSG); setSaving(""); return; }
       for (const { email, row, fields } of plan) {
         if (!Object.keys(fields).length) continue;
         await tUpdate(T365_LISTS.users, row.id, fields);
@@ -1869,38 +2048,40 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
         t365Log("사용자", verb, row.Title && row.Title !== email ? `${row.Title} (${email})` : email, { changes });
         done++;
       }
+      for (const c of creates) { await createFromDir(c); done++; }
+      if (noRole) uiAlert(`역할을 고르지 않은 명부 직원 ${noRole}명은 등록하지 않았습니다.`);
       setOverrides({}); setSelected(new Set());
       await reload();
       setSavedPopup(done);
-    } catch (e) { alert(`${done}명 반영 후 오류: ${e.message}`); await reload(); }
+    } catch (e) { uiAlert(`${done}명 반영 후 오류: ${e.message}`); await reload(); }
     setSaving("");
   }
   async function addUser() {
     if (!canEdit) return;
     const email = normEmail(add.email);
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || /#ext#/i.test(email)) { alert("이메일 주소를 확인해 주세요. (게스트 계정은 #EXT# 가 붙은 주소가 아니라 원래 메일 주소로 등록합니다)"); return; }
-    if (!add.name.trim()) { alert("이름을 입력해 주세요."); return; }
-    if (!T365_ROLES.includes(add.role)) { alert("역할을 골라 주세요."); return; }
-    if (merged.some((p) => p.email === email)) { alert("이미 등록된 사용자입니다."); return; }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || /#ext#/i.test(email)) { uiAlert("이메일 주소를 확인해 주세요. (게스트 계정은 #EXT# 가 붙은 주소가 아니라 원래 메일 주소로 등록합니다)"); return; }
+    if (!add.name.trim()) { uiAlert("이름을 입력해 주세요."); return; }
+    if (!T365_ROLES.includes(add.role)) { uiAlert("역할을 골라 주세요."); return; }
+    if (merged.some((p) => p.email === email)) { uiAlert("이미 등록된 사용자입니다."); return; }
     if (window._t365Adding) return;
     window._t365Adding = true; setSaving("사용자를 추가하고 있습니다...");
     try {
       const fresh = await tListAll(T365_LISTS.users);
-      if (fresh.some((r) => normEmail(r.Email) === email)) { alert("이미 등록된 사용자입니다."); await reload(); return; }
+      if (fresh.some((r) => normEmail(r.Email) === email)) { uiAlert("이미 등록된 사용자입니다."); await reload(); return; }
       await tCreate(T365_LISTS.users, { Title: add.name.trim(), Email: email, Role: add.role, Company: add.company.trim(), WriterCategories: "", Active: true });
       t365Log("사용자", "사용자 추가", `${add.name.trim()} (${email})`, { info: { 역할: add.role, "회사/지점": add.company.trim(), 외부계정: isExternalEmail(email) ? "예" : "아니요", 권한: "역할 기본값" } });
       setAdd({ email: "", name: "", company: "", role: add.role }); setJustAdded(new Set([email])); setQ(""); setRoleF("");
       await reload();
-    } catch (e) { alert(e.message); } finally { window._t365Adding = false; setSaving(""); }
+    } catch (e) { uiAlert(e.message); } finally { window._t365Adding = false; setSaving(""); }
   }
   async function removeUsers(list) {
     if (!canEdit || !list.length) return;
-    if (list.some((p) => p.email === me) && !cfgSet.has(me)) { alert("본인 계정은 삭제할 수 없습니다 — 다른 관리자에게 요청해 주세요."); return; }
+    if (list.some((p) => p.email === me) && !cfgSet.has(me)) { uiAlert("본인 계정은 삭제할 수 없습니다 — 다른 관리자에게 요청해 주세요."); return; }
     const gone = new Set(list.map((p) => p.email));
-    if (permAdminsAfter(users, {}, new Set()) > 0 && permAdminsAfter(users, {}, gone) === 0) { alert(LAST_ADMIN_MSG); return; }
+    if (permAdminsAfter(users, {}, new Set()) > 0 && permAdminsAfter(users, {}, gone) === 0) { uiAlert(LAST_ADMIN_MSG); return; }
     const msg = `${list.length === 1 ? `「${list[0].row.Title || list[0].email}」 (${list[0].email})` : `선택한 ${list.length}명`} 을(를) 삭제할까요?\n삭제하면 Training365 에 로그인할 수 없습니다. 지금까지의 조회확인 · 접속 기록은 남습니다.` +
       (list.length > 1 ? "\n\n" + list.slice(0, 10).map((p) => `· ${p.row.Title || ""} (${p.email}) — ${p.row.Role || "-"}`).join("\n") + (list.length > 10 ? `\n… 외 ${list.length - 10}명` : "") : "");
-    if (!confirm(msg)) return;
+    if (!(await uiConfirm(msg, { title: list.length > 1 ? "선택한 사용자 삭제" : "사용자 삭제", okText: list.length > 1 ? `${list.length}명 삭제` : "삭제", danger: true }))) return;
     setSaving("삭제하고 있습니다...");
     let done = 0;
     try {
@@ -1909,14 +2090,14 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
         t365Log("사용자", "사용자 삭제", p.row.Title && p.row.Title !== p.email ? `${p.row.Title} (${p.email})` : p.email, { info: { "삭제 전 역할": p.row.Role || "", "회사/지점": p.row.Company || "", ...(list.length > 1 ? { 일괄: `${list.length}명 중 ${done + 1}` } : {}) } });
         done++;
       }
-    } catch (e) { alert(`${done}명 삭제 후 오류: ${e.message}`); }
+    } catch (e) { uiAlert(`${done}명 삭제 후 오류: ${e.message}`); }
     setSelected(new Set()); setOverrides((prev) => { const n = { ...prev }; list.forEach((p) => delete n[p.email]); return n; });
     await reload(); setSaving("");
   }
   function exportExcel() {
     const data = ordered.map((p, i) => {
       const P = stored(p).perms;
-      const o = { 번호: i + 1, 이름: p.row.Title || "", 이메일: p.email, "회사/지점": p.row.Company || "", 역할: cfgSet.has(p.email) ? `${p.row.Role || ""} (설정 관리자)` : p.row.Role || "", 사용: p.row.Active !== false ? "예" : "아니요", 권한: { config: "설정 관리자(전체)", custom: "개별 설정", preset: "역할 기본값", broken: "권한 값 오류(Overview 만)", none: "-" }[stored(p).source] || "" };
+      const o = { 번호: i + 1, 이름: p.row.Title || "", 이메일: p.email, "회사/지점": p.row.Company || "", 등록: p.dirOnly ? "미등록(명부에만 있음)" : "등록", "직원 명부": !dirOk ? "" : { in: "있음", alt: "메일 다름", missing: p.extAgent ? "외부(Agent)" : "명부 없음", dirOnly: "있음" }[p.dirStatus] || "", 역할: cfgSet.has(p.email) ? `${p.row.Role || ""} (설정 관리자)` : p.row.Role || "", 사용: p.dirOnly ? "" : p.row.Active !== false ? "예" : "아니요", 권한: { config: "설정 관리자(전체)", custom: "개별 설정", preset: "역할 기본값", broken: "권한 값 오류(Overview 만)", none: "-" }[stored(p).source] || "" };
       T365_PERM_ITEMS.forEach((it) => { o[catLabel(it)] = T365_LEVEL_LABEL[P[it.key]] || "없음"; });
       return { ...o, 외부계정: isExternalEmail(p.email) ? "예" : "아니요", "마지막 접속(KST)": lastLogin[p.email] ? fmtDate(lastLogin[p.email]) : "" };
     });
@@ -1957,9 +2138,9 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
         seen.add(email);
         return { line: i + 2, email, name, company, role, wc, status, reason, exist };
       }).filter((x) => x.email || x.name);
-      if (!out.length) { alert("읽을 행이 없습니다 — 양식의 머리글(이메일 · 이름 · 회사/지점 · 역할)을 확인해 주세요."); return; }
+      if (!out.length) { uiAlert("읽을 행이 없습니다 — 양식의 머리글(이메일 · 이름 · 회사/지점 · 역할)을 확인해 주세요."); return; }
       setImportRows(out);
-    } catch (err) { alert(`Excel 을 읽지 못했습니다 — ${err.message}`); }
+    } catch (err) { uiAlert(`Excel 을 읽지 못했습니다 — ${err.message}`); }
   }
   async function applyImport() {
     if (!canEdit) return;
@@ -1975,7 +2156,7 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
         if (row) ch[x.email] = f;
         return { x, row, f };
       });
-      if (permAdminsAfter(fresh, {}, new Set()) > 0 && permAdminsAfter(fresh, ch, new Set()) === 0) { alert(LAST_ADMIN_MSG); setSaving(""); return; }
+      if (permAdminsAfter(fresh, {}, new Set()) > 0 && permAdminsAfter(fresh, ch, new Set()) === 0) { uiAlert(LAST_ADMIN_MSG); setSaving(""); return; }
       for (const { x, row, f } of plan) {
         if (row) {
           await tUpdate(T365_LISTS.users, row.id, f);
@@ -1986,11 +2167,12 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
         }
         done++;
       }
-    } catch (e) { alert(`${done}건 반영 후 오류: ${e.message}`); }
+    } catch (e) { uiAlert(`${done}건 반영 후 오류: ${e.message}`); }
     setImportRows(null); setJustAdded(new Set(list.map((x) => x.email))); await reload(); setSaving(""); setSavedPopup(done);
   }
 
-  const selectedList = merged.filter((p) => selected.has(p.email));
+  const selectedList = everyone.filter((p) => selected.has(p.email));
+  const selectedReg = selectedList.filter((p) => !p.dirOnly);
   const ctrl = "h-9 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/40";
   // 권한 표 — 묶음 띠(개요 · 게시판 · 확인 현황 · 관리자 전용) · 메뉴 · 보기/편집 3단 머리, 묶음 경계에 세로 구분선
   const cols = [];
@@ -2056,10 +2238,27 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
         )}
       </div>
 
+      <div className="flex items-center gap-2 mb-3 flex-wrap" data-testid="dir-bar">
+        <div className="flex items-center rounded-lg border border-slate-300 overflow-x-auto h-9 max-w-full bg-white">
+          {[["all", "전체", viewCounts.all], ["registered", "권한 있음", viewCounts.registered], ...(dirOk ? [["dirOnly", "명부에만 있음", viewCounts.dirOnly], ["missing", "명부 없음", viewCounts.missing]] : [])].map(([k, label, n], i) => (
+            <button key={k} onClick={() => setView(k)} data-view-chip={k}
+              className={`px-3 h-full text-[13px] whitespace-nowrap inline-flex items-center gap-1.5 ${i ? "border-l border-slate-300" : ""} ${view === k ? "text-white" : "text-slate-600 hover:bg-slate-50"}`}
+              style={view === k ? { background: BRAND.accent } : undefined}>
+              {label}<span className={`text-[11px] tabular-nums px-1.5 rounded-full ${view === k ? "bg-white/20" : "bg-slate-100 text-slate-500"}`}>{n}</span>
+            </button>
+          ))}
+        </div>
+        <span className="text-[11.5px] text-slate-400" data-testid="dir-status">
+          {dir.status === "loading" ? "직원 명부를 불러오는 중…"
+            : dir.status === "error" ? <span className="text-amber-700">직원 명부를 불러오지 못해 등록된 사용자만 표시합니다 — 사용자 추가는 그대로 됩니다</span>
+            : dirOk ? <>직원 명부 {dir.list.length}명과 대조 · 명부 없음 중 외부(Agent) {missingRows.filter((p) => p.extAgent && p.dirStatus === "missing").length}명은 정상{canEdit && viewCounts.dirOnly > 0 ? " · 명부 직원은 역할을 골라 「반영」 또는 「추가」" : ""}</>
+            : "직원 명부가 비어 있습니다"}
+        </span>
+      </div>
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <div className="relative w-full sm:w-auto">
           <Search size={15} className="absolute left-2.5 top-2.5 text-slate-400" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름 · 이메일 · 회사 · 역할 검색" className="pl-8 pr-3 py-2 border border-slate-200 rounded-lg text-sm w-full sm:w-72 bg-white focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/30" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름 · 이메일 · 부서 · 회사 · 역할 검색" className="pl-8 pr-3 py-2 border border-slate-200 rounded-lg text-sm w-full sm:w-72 bg-white focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/30" />
         </div>
         <select value={roleF} onChange={(e) => setRoleF(e.target.value)} className={`${ctrl} px-3`}><option value="">전체 역할</option>{T365_ROLES.map((r) => <option key={r}>{r}</option>)}</select>
         {canEdit && <button onClick={applyChanges} disabled={!!saving || !dirtyCount} className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-40" style={{ background: BRAND.accent }} data-testid="apply-btn">{dirtyCount ? `반영 (${dirtyCount}명)` : "반영"}</button>}
@@ -2100,7 +2299,7 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
           <span className="w-px h-5 bg-slate-300"></span>
           <button onClick={() => bulkSet("Active", false)} className="h-7 px-3 rounded-lg text-xs font-medium border border-slate-300 bg-white text-slate-600 hover:bg-slate-50">사용 중지</button>
           <button onClick={() => bulkSet("Active", true)} className="h-7 px-3 rounded-lg text-xs font-medium border border-slate-300 bg-white text-slate-600 hover:bg-slate-50">사용</button>
-          <button onClick={() => removeUsers(selectedList)} className="ml-auto h-7 px-3 rounded-lg text-xs font-medium border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 inline-flex items-center gap-1"><Trash2 size={12} /> 선택 {selectedList.length}명 삭제</button>
+          {selectedReg.length > 0 && <button onClick={() => removeUsers(selectedReg)} className="ml-auto h-7 px-3 rounded-lg text-xs font-medium border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 inline-flex items-center gap-1"><Trash2 size={12} /> 등록 {selectedReg.length}명 삭제</button>}
         </div>
       )}
       <div className="flex items-center gap-3 flex-wrap mb-2 text-[11px] text-slate-500">
@@ -2110,7 +2309,7 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
       </div>
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-auto max-h-[70vh]" data-testid="perm-scroll">
-          <table className="text-sm border-separate border-spacing-0" style={{ minWidth: 248 + 128 + 56 + T365_PERM_ITEMS.reduce((a, it) => a + colW(it), 0) + 140 + 110 + (canEdit ? 52 : 0) }} data-testid="perm-table">
+          <table className="text-sm border-separate border-spacing-0" style={{ minWidth: 248 + 128 + 56 + T365_PERM_ITEMS.reduce((a, it) => a + colW(it), 0) + 140 + 110 + (canEdit ? 72 : 0) }} data-testid="perm-table">
             <thead className="sticky top-0 z-20">
               <tr className="text-[11px]">
                 <th rowSpan={3} className={`${stickyL} z-30 bg-slate-50 text-left text-xs text-slate-500 px-3 md:px-4 py-2 ${th} w-[150px] min-w-[150px] md:w-[248px] md:min-w-[248px]`} style={{ boxShadow: "1px 0 0 #E2E8F0" }}>
@@ -2125,7 +2324,7 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
                 ))}
                 <th rowSpan={3} className={`bg-slate-50 text-left text-xs text-slate-500 px-3 py-2 ${th}`} style={{ minWidth: 140, borderLeft: "2px solid #CBD5E1" }}>회사/지점</th>
                 <th rowSpan={3} className={`bg-slate-50 text-left text-xs text-slate-500 px-3 py-2 ${th}`} style={{ minWidth: 110 }}>마지막 접속</th>
-                {canEdit && <th rowSpan={3} className={`bg-slate-50 text-center text-xs text-slate-500 px-2 py-2 ${th}`} style={{ minWidth: 52 }}>삭제</th>}
+                {canEdit && <th rowSpan={3} className={`bg-slate-50 text-center text-xs text-slate-500 px-2 py-2 ${th}`} style={{ minWidth: 72 }}>관리</th>}
               </tr>
               <tr>
                 {T365_PERM_GROUPS.map((g) => g.items.map((it, ii) => (
@@ -2155,16 +2354,21 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
                         <div className="min-w-0 flex-1 leading-tight" title={`${p.row.Title || ""} (${p.email})`}>
                           <div className="flex items-center gap-1 min-w-0">
                             <span className="font-medium text-[13px] text-slate-800 truncate">{p.row.Title || p.email}</span>
-                            {isExternalEmail(p.email) && <span className="shrink-0 text-[9.5px] px-1 rounded bg-blue-50 text-blue-700 font-medium leading-[15px]" title="회사 밖 메일 — Microsoft 365 게스트(B2B)">외부</span>}
+                            {(!dirOk || p.dirStatus === "in") && isExternalEmail(p.email) && <span className="shrink-0 text-[9.5px] px-1 rounded bg-blue-50 text-blue-700 font-medium leading-[15px]" title="회사 밖 메일 — Microsoft 365 게스트(B2B)">외부</span>}
+                            {p.dirStatus === "missing" && (p.extAgent
+                              ? <span className="shrink-0 text-[9.5px] px-1 rounded bg-blue-50 text-blue-700 font-medium leading-[15px]" title="외부 Agent(게스트) — 직원 명부에 없는 것이 정상입니다" data-dir={p.email}>외부(Agent)</span>
+                              : <span className="shrink-0 text-[9.5px] px-1 rounded bg-amber-50 text-amber-700 font-medium leading-[15px]" title="직원 명부에 없는 내부 메일 — 퇴사 · 이동 여부를 확인해 주세요" data-dir={p.email}>명부 없음</span>)}
+                            {p.dirStatus === "alt" && <span className="shrink-0 text-[9.5px] px-1 rounded bg-amber-50 text-amber-700 font-medium leading-[15px]" title={`직원 명부에는 ${p.altDir.email} 로 있습니다 — 같은 사람이면 그 메일로 다시 등록해 주세요`} data-dir={p.email}>메일 다름</span>}
+                            {p.dirOnly && <span className="shrink-0 text-[9.5px] px-1 rounded bg-slate-100 text-slate-500 font-medium leading-[15px]" title="직원 명부에만 있고 아직 등록되지 않은 직원 — 역할을 골라 「반영」 하거나 「추가」" data-dir={p.email}>명부에만</span>}
                           </div>
-                          <div className="text-[11px] text-slate-400 truncate">{p.email}</div>
+                          <div className="text-[11px] text-slate-400 truncate">{p.email}{p.dir && p.dir.dept ? <span className="text-slate-300"> · {p.dir.dept}</span> : null}</div>
                           <div className="md:hidden mt-1 flex items-center gap-1.5">
                             <select value={T365_ROLES.includes(role) ? role : ""} disabled={!canEdit || isCfg} onChange={(e) => setField(p, "Role", e.target.value)} data-role-select-m={p.email} aria-label="역할"
-                              className={`h-6 min-w-0 flex-1 border rounded text-[11px] px-1 font-medium disabled:opacity-90 ${ROLE_META[role] ? ROLE_META[role].cls : "bg-red-50 text-red-600 border-red-200"}`}>
-                              {!T365_ROLES.includes(role) && <option value="">미지정</option>}
+                              className={`h-6 min-w-0 flex-1 border rounded text-[11px] px-1 font-medium disabled:opacity-90 ${ROLE_META[role] ? ROLE_META[role].cls : p.dirOnly ? "bg-white text-slate-400 border-slate-200 border-dashed" : "bg-red-50 text-red-600 border-red-200"}`}>
+                              {!T365_ROLES.includes(role) && <option value="">{p.dirOnly ? "역할 선택" : "미지정"}</option>}
                               {T365_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                             </select>
-                            <input type="checkbox" checked={!!active} disabled={!canEdit || isCfg} onChange={() => setField(p, "Active", !active)} className="w-4 h-4 shrink-0" title="사용(해제하면 로그인 불가)" aria-label="사용" />
+                            {!p.dirOnly && <input type="checkbox" checked={!!active} disabled={!canEdit || isCfg} onChange={() => setField(p, "Active", !active)} className="w-4 h-4 shrink-0" title="사용(해제하면 로그인 불가)" aria-label="사용" />}
                           </div>
                           <div className="flex items-center gap-1 mt-0.5 flex-wrap">
                             {isCfg && <span className="text-[9.5px] px-1.5 rounded-full bg-slate-100 text-slate-500 leading-[16px] inline-flex items-center gap-0.5"><LockKeyhole size={8} />설정 관리자</span>}
@@ -2183,12 +2387,12 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
                     </td>
                     <td className="hidden md:table-cell px-2 py-1.5 border-b border-slate-100" style={{ background: rowBg }}>
                       <select value={T365_ROLES.includes(role) ? role : ""} disabled={!canEdit || isCfg} onChange={(e) => setField(p, "Role", e.target.value)} data-role-select={p.email}
-                        className={`h-8 w-full border rounded-md text-[12.5px] px-1.5 font-medium disabled:opacity-90 ${ROLE_META[role] ? ROLE_META[role].cls : "bg-red-50 text-red-600 border-red-200"}`}>
-                        {!T365_ROLES.includes(role) && <option value="">미지정({role || "빈 값"})</option>}
+                        className={`h-8 w-full border rounded-md text-[12.5px] px-1.5 font-medium disabled:opacity-90 ${ROLE_META[role] ? ROLE_META[role].cls : p.dirOnly ? "bg-white text-slate-400 border-slate-200 border-dashed" : "bg-red-50 text-red-600 border-red-200"}`}>
+                        {!T365_ROLES.includes(role) && <option value="">{p.dirOnly ? "— 역할 선택 —" : `미지정(${role || "빈 값"})`}</option>}
                         {T365_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                       </select>
                     </td>
-                    <td className="hidden md:table-cell px-2 py-1.5 text-center border-b border-slate-100" style={{ background: rowBg }}><input type="checkbox" checked={!!active} disabled={!canEdit || isCfg} onChange={() => setField(p, "Active", !active)} className="w-4 h-4" title="해제하면 로그인할 수 없습니다" /></td>
+                    <td className="hidden md:table-cell px-2 py-1.5 text-center border-b border-slate-100" style={{ background: rowBg }}>{p.dirOnly ? <span className="text-slate-300 text-xs">-</span> : <input type="checkbox" checked={!!active} disabled={!canEdit || isCfg} onChange={() => setField(p, "Active", !active)} className="w-4 h-4" title="해제하면 로그인할 수 없습니다" />}</td>
                     {cols.map((c) => {
                       const lv = cur[c.item.key] || "n"; const on = c.col === "v" ? lv !== "n" : lv === "e";
                       const preOn = c.col === "v" ? (pre[c.item.key] || "n") !== "n" : pre[c.item.key] === "e";
@@ -2209,7 +2413,8 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
                     })}
                     <td className="px-2 py-1.5 border-b border-slate-100" style={{ background: rowBg, borderLeft: "2px solid #CBD5E1" }}><input value={eff(p, "Company")} disabled={!canEdit} onChange={(e) => setField(p, "Company", e.target.value)} className="w-full h-8 px-2 border border-transparent hover:border-slate-200 focus:border-slate-300 rounded-md text-[12.5px] bg-transparent focus:bg-white focus:outline-none disabled:hover:border-transparent" placeholder="-" /></td>
                     <td className="px-3 py-1.5 text-[12px] text-slate-500 tabular-nums whitespace-nowrap border-b border-slate-100" style={{ background: rowBg }}>{lastLogin[p.email] ? fmtDate(lastLogin[p.email]).slice(2) : <span className="text-slate-300">-</span>}</td>
-                    {canEdit && <td className="px-2 py-1.5 text-center border-b border-slate-100" style={{ background: rowBg }}><button onClick={() => removeUsers([p])} disabled={!!saving} title="삭제 — 활동 이력에 남습니다" className="w-7 h-7 inline-flex items-center justify-center rounded-lg text-slate-300 hover:text-red-600 hover:bg-red-50"><Trash2 size={14} /></button></td>}
+                    {canEdit && p.dirOnly && <td className="px-2 py-1.5 text-center border-b border-slate-100" style={{ background: rowBg }}><button onClick={() => addFromDir(p)} disabled={!!saving} data-add-dir={p.email} title={`바로 등록 — 역할 ${T365_ROLES.includes(role) ? role : "본사"}${o && o.Perm ? " · 고른 권한" : ""}`} className="h-7 px-2.5 inline-flex items-center gap-1 rounded-lg text-[11.5px] font-medium border border-[#9CCBC8] text-[#2F7B7A] bg-white hover:bg-[#E4F1F0] whitespace-nowrap"><UserPlus size={12} />추가</button></td>}
+                    {canEdit && !p.dirOnly && <td className="px-2 py-1.5 text-center border-b border-slate-100" style={{ background: rowBg }}><button onClick={() => removeUsers([p])} disabled={!!saving} title="삭제 — 활동 이력에 남습니다" className="w-7 h-7 inline-flex items-center justify-center rounded-lg text-slate-300 hover:text-red-600 hover:bg-red-50"><Trash2 size={14} /></button></td>}
                   </tr>
                 );
               }) : <tr><td colSpan={6 + cols.length} className="text-center text-slate-400 py-10">{merged.length ? "조회 결과가 없습니다." : "등록된 사용자가 없습니다 — 위 「사용자 추가」 또는 「Excel 일괄 등록」으로 등록해 주세요."}</td></tr>}
@@ -2273,8 +2478,8 @@ function CategoriesTab({ ctx, catRows, listStatus, reload }) {
   const dirty = draft.filter((d) => { const b = base.find((x) => x.key === d.key); return b && (b.label !== d.label || b.desc !== d.desc || Number(b.order) !== Number(d.order) || b.active !== d.active); });
   const set = (key, k, v) => setDraft((prev) => prev.map((d) => (d.key === key ? { ...d, [k]: v } : d)));
   async function save() {
-    if (draft.some((d) => !String(d.label).trim())) { alert("카테고리 이름을 비울 수 없습니다."); return; }
-    if (!draft.some((d) => d.active)) { alert("사용하는 카테고리가 하나 이상 있어야 합니다."); return; }
+    if (draft.some((d) => !String(d.label).trim())) { uiAlert("카테고리 이름을 비울 수 없습니다."); return; }
+    if (!draft.some((d) => d.active)) { uiAlert("사용하는 카테고리가 하나 이상 있어야 합니다."); return; }
     setSaving(true);
     try {
       const fresh = await tListAll(T365_LISTS.categories);
@@ -2291,7 +2496,7 @@ function CategoriesTab({ ctx, catRows, listStatus, reload }) {
         t365Log("카테고리", "수정", `${f.Title} (${d.key})`, { changes });
       }
       await reload();
-    } catch (e) { alert(e.message); }
+    } catch (e) { uiAlert(e.message); }
     setSaving(false);
   }
   return (
@@ -2368,8 +2573,8 @@ function AccessLogTab({ ctx }) {
   const [loaded, setLoaded] = useState("");
   const PAGE_SIZE = 25;
   async function load(f = from, t = to) {
-    if (!f || !t || f > t) { alert("조회 기간을 확인해 주세요."); return; }
-    if (dayAdd(f, 92) < t) { alert("한 번에 93일까지 조회할 수 있습니다."); return; }
+    if (!f || !t || f > t) { uiAlert("조회 기간을 확인해 주세요."); return; }
+    if (dayAdd(f, 92) < t) { uiAlert("한 번에 93일까지 조회할 수 있습니다."); return; }
     setLoading(true); setError("");
     const fi = kstDayStartIso(f), ti = kstDayStartIso(dayAdd(t, 1));
     try {
@@ -2545,8 +2750,8 @@ function ActivityLogTab() {
   const [detail, setDetail] = useState(null);
   const PAGE_SIZE = 20;
   async function load(f = from, t = to) {
-    if (!f || !t || f > t) { alert("조회 기간을 확인해 주세요."); return; }
-    if (dayAdd(f, 30) < t) { alert("한 번에 31일까지 조회할 수 있습니다. 기간을 줄여 주세요."); return; }
+    if (!f || !t || f > t) { uiAlert("조회 기간을 확인해 주세요."); return; }
+    if (dayAdd(f, 30) < t) { uiAlert("한 번에 31일까지 조회할 수 있습니다. 기간을 줄여 주세요."); return; }
     setLoading(true); setError("");
     try { setRows(await loadActivityLogs(f, t)); setPage(1); } catch (e) { setError(e.message); setRows([]); }
     setLoading(false);
@@ -3014,6 +3219,9 @@ async function t365Boot(account) {
   T365Session.startTimers();
   root.render(<App boot={{ me: { ...ident, email, name: (myRow && myRow.Title) || ident.shortName, company }, role, isCfgAdmin, configAdmins, users, usersLoaded: !usersR.e, myRow }} />);
 }
+
+// 확인 · 알림 창(DialogHost)은 앱 · 권한 없음 화면과 따로 한 번만 붙인다 — 어느 화면에서든 uiConfirm/uiAlert 가 같은 모양으로 뜬다
+(function mountDialogs() { const el = document.createElement("div"); el.id = "t365-dialogs"; document.body.appendChild(el); createRoot(el).render(<DialogHost />); })();
 
 // 시험용 — 테스트 하네스가 window.T365_TEST_HOOKS 를 켰을 때만 쓰기 함수를 노출(편집 권한 없는 강제 쓰기가 막히는지 확인)
 if (window.T365_TEST_HOOKS) window.__t365 = { tCreate, tUpdate, tDelete, tUploadFile };

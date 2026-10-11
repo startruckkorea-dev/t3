@@ -156,6 +156,13 @@ STK-DB **문서(Documents)** 라이브러리 루트에 폴더 **`training365`** 
 - 첨부 · 동영상은 `training365/YYYY-MM/` 아래에 저장됩니다(월 폴더는 앱이 만듦). 첨부 1개 100MB · 동영상 300MB(mp4 · webm · mov · m4v) · 실행 파일/HTML/SVG 차단.
 - 관리 행위 이력은 MKQR 과 같은 방식으로 `Logging_data/Training365/YYYY-MM-DD/*.json` 에 남습니다(앱이 폴더를 만듦 · APS 「이력 조회」와 같은 형식).
 
+### 2-1. 직원 명부 대조 (새로 만들 것 없음)
+
+「사용자 · 권한 관리」 화면은 ICS · MKQR 「카테고리 접근 권한」과 같은 공용 직원 명부 **`employee_search.xlsx`**(문서 라이브러리 루트, 열 `Company · Department · Team · EngName · EMail …`)를 읽어 등록 사용자와 대조합니다. 읽기만 하고 고치지 않습니다.
+- 보기: **전체 · 권한 있음**(training365_Users 에 등록) **· 명부에만 있음**(명부에 있으나 미등록 — 역할 없는 행) **· 명부 없음**(등록됐으나 명부에 없음). Agent(게스트) · 외부 메일은 명부에 없는 것이 정상이라 「외부(Agent)」로, 내부 메일인데 명부에 없으면 「명부 없음」(퇴사 · 이동 의심), 메일 표기만 다르면 「메일 다름」으로 표시합니다.
+- 명부 직원은 체크해서 역할(또는 메뉴 권한 칸 — 칸부터 고르면 「본사」로 시작)을 정하고 **「반영」** 하거나, 한 사람은 오른쪽 **「추가」** 로 바로 등록합니다(이름 · 부서는 명부 값). 외부 Agent 는 지금처럼 「사용자 추가」 · Excel 일괄 등록.
+- 명부를 못 읽으면(권한 · 파일 없음) 등록된 사용자만 보이고 안내가 뜹니다 — 나머지 기능은 그대로입니다.
+
 ---
 
 ## 3. Agent 계정 · 권한 (가장 중요)
@@ -223,7 +230,7 @@ Worker(Cloudflare)는 필요 없습니다 — 모든 사용자가 Microsoft 로�
 
 관리자 판정 순서(하나라도 맞으면 관리자):
 1. 코드 고정 IT 계정: `jimmy.lee@hyosung.com`(MKQR · ICS 관리 IT 매니저) · `stk_it@hyosung.com` — 설정 파일을 못 읽어도 관리자
-2. system_config_final.xlsx(시트 SystemConfig, A열 KEY · B열 이름 · C열 메일)의 `TRAINING365_ADMIN_1`, `TRAINING365_ADMIN_2` …(번호가 비어도 뒤 번호까지 읽음) · `ADMIN_SP` · `ADMIN_SP_N` · `IT_MANAGER`
+2. system_config_final.xlsx(시트 SystemConfig, A열 KEY · B열 이름 · C열 메일)의 **`TRAINING365_ADMIN` 으로 시작하는 모든 키**(`TRAINING365_ADMIN_1` · `TRAINING365_ADMIN_IT` · `TRAINING365_ADMIN_System` 처럼 꼬리가 번호든 이름이든) · `ADMIN_SP` · `ADMIN_SP_N` · `IT_MANAGER`
 3. training365_Users 에서 역할이 `관리자` 이고 Active 인 사람(예: 박종헌 매니저 — 화면에서 등록)
 
 그 밖의 사람은 training365_Users 에 등록 · 사용 중 · 역할 4개 중 하나여야만 들어옵니다. 설정 파일이나 사용자 목록을 못 읽으면 관리자 화면을 열지 않고(고정 IT 계정 제외), 등록되지 않은 계정은 「권한 없음 — 관리자에게 요청」 화면과 함께 접속 기록에 `접근 차단` 으로 남습니다.
