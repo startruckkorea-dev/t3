@@ -2316,6 +2316,8 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
   const PAGE_SIZE = 50;
   const me = normEmail(ctx.me.email);
   const cfgSet = new Set(configAdmins);
+  // 목록에 직원 명부를 통째로 넣어 두고(역할 빈 값 = 로그인 불가) 역할을 주는 방식도 쓰므로, 「권한 있음」 = 설정 관리자 또는 역할 있음 · 사용 중
+  const hasAccess = (p) => cfgSet.has(p.email) || (!p.dirOnly && T365_ROLES.includes(p.row.Role) && p.row.Active !== false);
   const canEdit = ctx.canEditMenu("users");   // 보기만이면 표는 읽기 전용 — 추가 · 반영 · 삭제 · 일괄 등록 없음
   // Permissions 열 — 없으면 역할 기본값만(작성자의 게시판 편집은 WriterCategories 로 저장되므로 그 칸만 바꿀 수 있다)
   const usersSt = listStatus && listStatus.users;
@@ -2346,7 +2348,7 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
     .map((d) => ({ email: d.email, dirOnly: true, dir: d, dirStatus: "dirOnly", row: { Title: d.name, Email: d.email, Company: d.dept || d.company || "", Role: "", Active: true } })) : [];
   const everyone = merged.concat(dirRows);
   const missingRows = merged.filter((p) => p.dirStatus === "missing" || p.dirStatus === "alt");
-  const viewCounts = { all: everyone.length, registered: merged.length + dirRows.filter((p) => cfgSet.has(p.email)).length, dirOnly: dirRows.filter((p) => !cfgSet.has(p.email)).length, missing: missingRows.length };
+  const viewCounts = { all: everyone.length, registered: everyone.filter((p) => cfgSet.has(p.email) || (!p.dirOnly && T365_ROLES.includes(p.row.Role) && p.row.Active !== false)).length, dirOnly: dirRows.filter((p) => !cfgSet.has(p.email)).length, missing: missingRows.length };
   const lastLogin = {};
   (accessRows || []).forEach((r) => { const e = normEmail(r.UserEmail); if (r.EndType !== "접근 차단" && (!lastLogin[e] || r.LoginAt > lastLogin[e])) lastLogin[e] = r.LoginAt; });
   const eff = (p, k) => { const o = overrides[p.email]; return o && k in o ? o[k] : k === "Active" ? p.row.Active !== false : String(p.row[k] || ""); };
@@ -2362,12 +2364,12 @@ function UsersTab({ ctx, users, configAdmins, accessRows, listStatus, reload }) 
   const presetOf = (p) => rolePreset(eff(p, "Role"), catKeysOf(p.row.WriterCategories));
   const qq = q.trim().toLowerCase();
   const filtered = everyone
-    .filter((p) => view === "all" || (view === "registered" ? (!p.dirOnly || cfgSet.has(p.email)) : view === "dirOnly" ? (p.dirOnly && !cfgSet.has(p.email)) : (p.dirStatus === "missing" || p.dirStatus === "alt")))
+    .filter((p) => view === "all" || (view === "registered" ? hasAccess(p) : view === "dirOnly" ? (p.dirOnly && !cfgSet.has(p.email)) : (p.dirStatus === "missing" || p.dirStatus === "alt")))
     .filter((p) => !roleF || eff(p, "Role") === roleF)
     .filter((p) => !qq || [p.email, p.row.Title, eff(p, "Company"), eff(p, "Role"), p.dir && p.dir.dept, p.dir && p.dir.team, p.dir && p.dir.name].some((v) => String(v || "").toLowerCase().includes(qq)));
   const roleRank = { "관리자": 0, "작성자": 1, "본사": 2, "Agent": 3 };
   // 권한 있는 사람 먼저 — 설정 파일 관리자(명부에만 있어도) → 등록 사용자 → 명부 직원(이름순)
-  const permRank = (p) => (cfgSet.has(p.email) ? 0 : p.dirOnly ? 2 : 1);
+  const permRank = (p) => (cfgSet.has(p.email) ? 0 : hasAccess(p) ? 1 : !p.dirOnly ? 2 : 3);
   const ordered = [...filtered].sort((a, b) => (justAdded.has(b.email) ? 1 : 0) - (justAdded.has(a.email) ? 1 : 0) || permRank(a) - permRank(b) || (a.dirOnly && b.dirOnly ? String(a.row.Title || "").localeCompare(String(b.row.Title || "")) : 0) || (roleRank[a.row.Role] ?? 9) - (roleRank[b.row.Role] ?? 9) || String(a.row.Company || "").localeCompare(String(b.row.Company || "")) || String(a.row.Title || "").localeCompare(String(b.row.Title || "")));
   const totalPages = Math.max(1, Math.ceil(ordered.length / PAGE_SIZE));
   const pageSafe = Math.min(page, totalPages);
