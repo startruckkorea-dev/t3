@@ -93,6 +93,13 @@
   @keyframes t365-prog { to { width: 100%; } }
   @media (prefers-reduced-motion: reduce) { .t365-kenburns, .t365-rise, .t365-hero-truck, .t365-progress { animation: none !important; } .t365-progress { width: 100%; } }
   mark.t365-hl { background: #FEF08A; color: inherit; border-radius: 2px; padding: 0 1px; }
+  /* 새 글 표시 — 예전 「N」 네모 대신, 안 읽은 새 글(7일 안)에만 맥박처럼 번지는 점. 읽으면 사라진다 */
+  .t365-newdot { position: relative; display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: #F43F5E; box-shadow: 0 0 0 2px rgba(244,63,94,.16); flex-shrink: 0; }
+  .t365-newdot::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: #F43F5E; animation: t365-ping 1.9s cubic-bezier(0,0,.2,1) infinite; }
+  @keyframes t365-ping { 0% { transform: scale(1); opacity: .55; } 75%, 100% { transform: scale(2.7); opacity: 0; } }
+  /* 공지 · 필수 종류 — 글씨 없는 작은 아이콘 칩(공지 · 필수 상자 안에서는 글씨가 겹치므로) */
+  .t365-kind { width: 20px; height: 20px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  @media (prefers-reduced-motion: reduce) { .t365-newdot::after { animation: none; display: none; } }
 
 html, * { scrollbar-width: thin; scrollbar-color: #CBD5E1 transparent; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -132,7 +139,7 @@ import {
   ExternalLink, Mail, ShieldCheck, AlertTriangle, ArrowLeftToLine, ArrowRightFromLine, Menu, LockKeyhole, ChevronLeft, FileText,
   Bold, List, ListOrdered, Heading2, Link2, Clock, BarChart3, Tags, HelpCircle, ListChecks, UserPlus, FileSpreadsheet, PlayCircle,
   Circle, Quote, BookOpen, LogOut, SquarePen, Truck, Container, Bus, Car, Gauge, Fuel, Wrench, Cog, HardHat, ClipboardList, Newspaper, Bell, Calendar, Gift, Star, Trophy, Award, Lightbulb, Target, Rocket, Zap, CircleDollarSign, Handshake, Briefcase, Building2, Phone, MapPin, Globe, Leaf, Flag, Camera, Sparkles, ImagePlus, Palette, GalleryHorizontal, ArrowRight, Pause, Play, AlignLeft, Rows3, ChevronRight, ChevronDown, ChevronUp, ChevronsLeft, ChevronsRight, TrendingUp, FileArchive, FileImage, FileVideo, Info, Inbox,
-  BellRing, MessageCircleQuestion, MessageSquareReply,
+  BellRing, MessageCircleQuestion, MessageSquareReply, Copy,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -797,6 +804,8 @@ function dayAdd(s, n) { const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.get
 function kstDayStartIso(s) { return new Date(Date.parse(s + "T00:00:00Z") - 9 * 36e5).toISOString(); }
 function fmtDuration(ms) { if (!(ms >= 0)) return "-"; if (ms < 60e3) return "1분 미만"; const m = Math.round(ms / 60e3); return m < 60 ? `${m}분` : `${Math.floor(m / 60)}시간 ${m % 60}분`; }
 function isNewPost(p) { return Date.now() - (Date.parse(p.PublishedAt || p._created || 0) || 0) < 7 * 864e5; }
+// 내가 이미 본 글 — 열람 기록이 있거나 내가 쓴 글(내 글은 「새 글 · 안 읽은 글」 로 세지 않는다)
+const seenBy = (p, row, me) => !!row || (!!me && !!normEmail(p.AuthorEmail) && normEmail(p.AuthorEmail) === normEmail(me.email));
 
 /* ---- 링크 — https 만 허용 ---- */
 function safeHttpsUrl(u) {
@@ -1184,22 +1193,25 @@ function fileKind(name) {
   if (T365_VIDEO_EXT.includes(e)) return { Icon: FileVideo, c: "#0E7490", bg: "#ECFEFF" };
   return { Icon: FileText, c: "#64748B", bg: "#F1F5F9" };
 }
-// 제목 옆 작은 표시 — 새 글 N · 첨부 · 동영상 · 필수
-// Q&A 상태 — 답변이 있으면 「답변 완료」, 없으면 「답변 대기」
+// Q&A 상태 — 답변이 있으면 「답변 완료」, 없으면 「답변 대기」. age = 답변 담당자에게 기다린 날수(하루 넘으면 「대기 n일」, 3일 넘으면 주황)
 const qnaAnswered = (p) => !!String((p && p.Answer) || "").trim();
-const QnaPill = ({ p }) => qnaAnswered(p)
-  ? <span className="t365-pill whitespace-nowrap" style={{ background: "#E1EAFD", color: "#1D4ED8" }} data-qna="done"><MessageSquareReply size={10} />답변 완료</span>
-  : <span className="t365-pill whitespace-nowrap bg-slate-100 text-slate-500" data-qna="wait">답변 대기</span>;
-function PostMarks({ p, compact }) {
+const QnaPill = ({ p, age }) => {
+  if (qnaAnswered(p)) return <span className="t365-pill whitespace-nowrap" style={{ background: "#E1EAFD", color: "#1D4ED8" }} data-qna="done"><MessageSquareReply size={10} />답변 완료</span>;
+  const d = age ? Math.floor((Date.now() - postTs(p)) / 864e5) : 0;
+  const late = d >= 3;
+  return <span className={`t365-pill whitespace-nowrap ${late ? "" : "bg-slate-100 text-slate-500"}`} style={late ? { background: "#FDEEE6", color: "#C2410C" } : undefined} data-qna="wait" data-wait-days={age ? d : undefined}
+    title={d >= 1 ? `질문한 지 ${d}일째 답변을 기다리고 있습니다` : undefined}>{late && <Clock size={10} />}{d >= 1 ? `대기 ${d}일` : "답변 대기"}</span>;
+};
+// 제목 옆 작은 표시 — Q&A 상태 · 필수 · 첨부 · 동영상
+function PostMarks({ p, compact, noQna }) {
   const att = parseFiles(p.AttachmentsJson).length > 0;
   const vid = !!(safeHttpsUrl(p.VideoUrl) || parseFiles(p.VideoFileJson).length);
   return (
     <span className="inline-flex items-center gap-1 shrink-0 align-middle">
-      {p.Category === "qna" && <QnaPill p={p} />}
+      {p.Category === "qna" && !noQna && <QnaPill p={p} />}
       {p.RequireConfirm && !compact && <span className="text-[10px] font-bold px-1 rounded leading-[16px]" style={{ background: "#FDEEE6", color: "#C2410C" }}>필수</span>}
       {att && <Paperclip size={12} className="text-slate-400" aria-label="첨부" />}
       {vid && <PlayCircle size={12.5} className="text-slate-400" aria-label="동영상" />}
-      {isNewPost(p) && <span className="text-[9px] font-extrabold text-white rounded-[4px] w-[15px] h-[15px] inline-flex items-center justify-center" style={{ background: "#E11D48" }} aria-label="새 글">N</span>}
     </span>
   );
 }
@@ -1222,8 +1234,8 @@ function WidgetCard({ icon: Icon, title, tint, right, children, testid, tone }) 
     <section className="bg-white rounded-xl border border-slate-200 overflow-hidden t365-portlet" data-testid={testid} data-tone={tone || undefined}>
       <div className="t365-portlet-head">
         <span className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: (tint || BRAND.accent) + "1A" }}><Icon size={13} style={{ color: tint || BRAND.accent }} /></span>
-        <h3 className="text-[15px] font-bold text-slate-900 tracking-[-0.01em] truncate">{title}</h3>
-        <div className="ml-auto shrink-0">{right}</div>
+        <h3 className="text-[15px] font-bold text-slate-900 tracking-[-0.01em] whitespace-nowrap shrink-0">{title}</h3>
+        <div className="ml-auto min-w-0 flex justify-end">{right}</div>
       </div>
       {children}
     </section>
@@ -1280,9 +1292,31 @@ function BoardCell({ cat, bare }) {
   );
 }
 const HomeColHead = ({ children }) => <div className="t365-cols px-4 h-9 flex items-stretch gap-3 bg-[#F1F4F8] border-b border-slate-200 text-[12px] font-semibold text-slate-600 select-none">{children}</div>;
+// 새 글 점 — 7일 안에 올라왔고 내가 아직 열지 않은 글. 읽으면 사라진다(예전 「N」 대신)
+const NewDot = () => <span className="t365-newdot" role="img" aria-label="새 글 — 아직 읽지 않음" title="새 글 — 아직 읽지 않았습니다" data-new="1"></span>;
+// 공지 · 필수 종류 — 글씨 없는 아이콘 칩(공지 · 필수 상자 안에서)
+const KindIcons = ({ p }) => (<>
+  {p.IsPinned && <span className="t365-kind" style={{ background: "#FEF3C7", color: "#B45309" }} title="공지 — 목록 맨 위에 고정된 글" aria-label="공지" data-kind="pin"><Pin size={11} /></span>}
+  {p.RequireConfirm && <span className="t365-kind" style={{ background: "#FDEEE6", color: "#C2410C" }} title="필수 — Agent 조회확인 대상" aria-label="필수" data-kind="req"><BellRing size={11} /></span>}
+</>);
+// 게시물 주소(게시판 기준 — 홈 팝업으로 열었어도 공유 링크는 그 게시판으로)
+const postLink = (p) => `${window.location.origin}${window.location.pathname}#/cat/${p.Category}/${p.id}`;
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
+  try { const ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select(); const ok = document.execCommand("copy"); ta.remove(); return !!ok; } catch (e) { return false; }
+}
+// 메일 쓰기 주소(mailto) — 메일 앱 한계(약 2,000자)를 넘으면 본문을 링크만으로 · 제목을 줄여 다시 만들고,
+// 그래도 길면(받는 사람이 많을 때) null → 부르는 쪽에서 주소 복사로 대신
+function mailtoHref({ to = [], bcc = [], subject = "", body = "", link = "" }) {
+  const build = (sub, bod) => `mailto:${to.map((x) => encodeURIComponent(x)).join(",")}?${[bcc.length ? `bcc=${encodeURIComponent(bcc.join(","))}` : "", `subject=${encodeURIComponent(sub)}`, `body=${encodeURIComponent(bod)}`].filter(Boolean).join("&")}`;
+  let href = build(subject, body);
+  if (href.length > 1900 && link) href = build(subject.length > 48 ? subject.slice(0, 47) + "…" : subject, link);
+  return href.length <= 1900 ? href : null;
+}
 // Agent 조회확인 상태 — 버튼이 아니라 표시(글을 열면 자동으로 확인 완료)
-const UnconfirmedPill = () => <span className="t365-pill whitespace-nowrap" style={{ background: "#FDEEE6", color: "#C2410C" }} data-confirm-state="pending"><BellRing size={10} />미확인</span>;
-const ConfirmedPill = () => <span className="t365-pill whitespace-nowrap bg-emerald-50 text-emerald-700" data-confirm-state="done"><CheckCircle2 size={10} />확인 완료</span>;
+// tight = 휴대폰에서는 아이콘만(좁은 칸)
+const UnconfirmedPill = ({ tight }) => <span className="t365-pill whitespace-nowrap" style={{ background: "#FDEEE6", color: "#C2410C" }} data-confirm-state="pending" title={tight ? "미확인" : undefined}><BellRing size={10} />{tight ? <span className="hidden sm:inline">미확인</span> : "미확인"}</span>;
+const ConfirmedPill = ({ tight }) => <span className="t365-pill whitespace-nowrap bg-emerald-50 text-emerald-700" data-confirm-state="done" title={tight ? "확인 완료" : undefined}><CheckCircle2 size={10} />{tight ? <span className="hidden sm:inline">확인 완료</span> : "확인 완료"}</span>;
 // 게시물 앞의 작은 표시 — 공지 · 필수(제목 왼쪽)
 const NoticePill = () => <span className="t365-pill bg-amber-100 text-amber-800" data-pill="pin"><Pin size={10} />공지</span>;
 const ReqPill = () => <span className="t365-pill" style={{ background: "#FDEEE6", color: "#C2410C" }} data-pill="req"><BellRing size={10} />필수</span>;
@@ -1301,12 +1335,34 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
   const vis = posts.filter((p) => catMap[p.Category]).sort(byNewest);
   const isTodo = (p) => ctx.isAgent && p.RequireConfirm && !(myRow(p) && myRow(p).ConfirmedAt);
   const todo = vis.filter(isTodo);
-  // 공지 · 필수 — Agent 는 아직 확인 안 한 필수 자료가 먼저
+  const seen = (p) => seenBy(p, myRow(p), me);
+  const fresh = (p) => isNewPost(p) && !seen(p);   // 새 글 점 — 7일 안 · 아직 안 읽음(내 글 제외)
+  // Agent 의 필수 자료 진행 — 확인한 수 / 전체 필수
+  const reqAll = ctx.isAgent ? vis.filter((p) => p.RequireConfirm) : [];
+  const reqDone = reqAll.length - todo.length;
+  // 공지 · 필수 — Agent 는 아직 확인 안 한 필수 자료가 먼저, 그다음 공지, 그다음 최신순
   const notice = vis.filter((p) => p.IsPinned || p.RequireConfirm).sort((a, b) => (isTodo(b) ? 1 : 0) - (isTodo(a) ? 1 : 0) || (b.IsPinned ? 1 : 0) - (a.IsPinned ? 1 : 0) || byNewest(a, b));
   const NOTICE_MAX = 6;
-  // Q&A — 답변 대기 먼저, 그다음 최신순
-  const qna = vis.filter((p) => p.Category === "qna").sort((a, b) => (qnaAnswered(a) ? 1 : 0) - (qnaAnswered(b) ? 1 : 0) || byNewest(a, b));
-  const popular = vis.map((p) => ({ p, v: viewStats(readIdx, p.id).views })).filter((x) => x.v > 0).sort((a, b) => b.v - a.v || byNewest(a.p, b.p)).slice(0, 5);
+  // 최근 게시물 — 공식 자료 중심(Q&A 는 오른쪽 Q&A 상자에서)
+  const recent = vis.filter((p) => p.Category !== "qna");
+  // 많이 본 글 — 오래된 인기 글이 계속 자리를 차지하지 않게 최근 90일 글 중에서(3건이 안 되면 전체에서)
+  const ranked = (list) => list.map((p) => ({ p, v: viewStats(readIdx, p.id).views })).filter((x) => x.v > 0).sort((a, b) => b.v - a.v || byNewest(a.p, b.p));
+  const since90 = Date.now() - 90 * 864e5;
+  const pop90 = ranked(vis.filter((p) => postTs(p) >= since90));
+  const popularRecent = pop90.length >= 3;
+  const popular = (popularRecent ? pop90 : ranked(vis)).slice(0, 5);
+  // Q&A — 보는 사람에 따라: Agent 는 「새 답변이 달린 내 질문 → 내 질문 → 최신」, 답변 담당자는 「답변 대기(오래된 것부터) → 답변 완료」
+  const duty = ctx.qnaDuty;   // 답변 담당(Q&A 문의 담당자 — 정하지 않았으면 답변할 수 있는 직원 모두)
+  const mineQ = (p) => normEmail(p.AuthorEmail) === normEmail(me.email);
+  const newAnswer = (p) => qnaAnswered(p) && (!myRow(p) || String(myRow(p).LastViewedAt || "") < String(p.AnsweredAt || ""));
+  const qnaAll = vis.filter((p) => p.Category === "qna");
+  const qWait = qnaAll.filter((p) => !qnaAnswered(p));
+  const myNew = ctx.isAgent ? qnaAll.filter((p) => mineQ(p) && newAnswer(p)) : [];
+  const qna = ctx.isAgent
+    ? [...qnaAll].sort((a, b) => (mineQ(b) && newAnswer(b) ? 1 : 0) - (mineQ(a) && newAnswer(a) ? 1 : 0) || (mineQ(b) ? 1 : 0) - (mineQ(a) ? 1 : 0) || byNewest(a, b))
+    : duty ? [...qnaAll].sort((a, b) => (qnaAnswered(a) ? 1 : 0) - (qnaAnswered(b) ? 1 : 0) || (qnaAnswered(a) ? byNewest(a, b) : postTs(a) - postTs(b)))
+    : [...qnaAll].sort(byNewest);
+  const qnaUrgent = ctx.isAgent ? myNew.length > 0 : duty && qWait.length > 0;   // 할 일이 있으면 많이 본 글보다 위로
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState(null);
   const open = openId ? vis.find((p) => String(p.id) === String(openId)) : null;
@@ -1325,7 +1381,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
           <form onSubmit={(e) => { e.preventDefault(); onSearch(q.trim()); }} className="flex items-center gap-1.5 w-full lg:max-w-[520px] min-[1400px]:w-[340px] shrink-0 min-[1400px]:mb-2" role="search" data-testid="home-search">
             <div className="relative flex-1">
               <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/60" />
-              <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="게시물 검색" title="모든 게시판의 제목 · 내용 · 첨부 이름에서 찾습니다" aria-label="게시물 검색" className="h-10 w-full rounded-lg text-[13px] pl-9 pr-9 text-white placeholder:text-white/55 bg-white/10 border border-white/25 backdrop-blur focus:bg-white focus:text-slate-900 focus:placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7FD1CB]/60 transition-colors" data-testid="home-search-input" />
+              <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="게시물 검색" title="모든 게시판의 제목 · 내용 · 첨부 이름 · Q&A 답변에서 찾습니다" aria-label="게시물 검색" className="h-10 w-full rounded-lg text-[13px] pl-9 pr-9 text-white placeholder:text-white/55 bg-white/10 border border-white/25 backdrop-blur focus:bg-white focus:text-slate-900 focus:placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7FD1CB]/60 transition-colors" data-testid="home-search-input" />
               <kbd className="hidden md:inline absolute right-2.5 top-1/2 -translate-y-1/2 text-[10.5px] text-white/60 border border-white/25 rounded px-1.5 leading-[18px]">/</kbd>
             </div>
             <button type="submit" className="h-10 px-4 rounded-lg text-[13px] font-semibold bg-white text-slate-900 hover:bg-[#E4F1F0] shrink-0">검색</button>
@@ -1348,24 +1404,25 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
               {notice.length > NOTICE_MAX && <button onClick={() => onSearch("", "notice")} className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 whitespace-nowrap shrink-0" data-testid="notice-more">더보기 <ChevronRight size={12} className="inline -mt-0.5" /></button>}
             </div>
             {notice.length > 0 && <HomeColHead>
-              <span className="w-[92px] shrink-0 flex items-center">구분</span><span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
+              <span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
               <span className={`w-[100px] shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center`}>작성자</span>
-              <span className="w-[96px] shrink-0 hidden md:flex items-center">작성일</span>{ctx.isAgent && <span className="w-[96px] shrink-0 flex items-center">조회확인</span>}
+              <span className="w-[96px] shrink-0 hidden md:flex items-center">작성일</span>{ctx.isAgent && <span className="w-[26px] sm:w-[92px] shrink-0 flex items-center"><span className="hidden sm:inline">조회확인</span></span>}
             </HomeColHead>}
             {notice.length ? notice.slice(0, NOTICE_MAX).map((p) => {
               const c = catMap[p.Category]; const r = myRow(p);
               return (
                 <button key={p.id} onClick={() => openPost(p)} data-notice={p.id} title={p.Title} className="t365-cols w-full text-left px-4 h-11 flex items-stretch gap-3 border-t border-[#E9EEF3] first:border-t-0 even:bg-slate-50/70 hover:!bg-[#EEF6F5] min-w-0">
-                  <span className="w-[92px] shrink-0 flex items-center gap-1">{p.IsPinned && <NoticePill />}{p.RequireConfirm && <ReqPill />}</span>
                   <BoardCell cat={c} />
                   <span className="min-w-0 flex-1 flex items-center gap-1.5">
-                    <span className={`min-w-0 truncate text-[13.5px] ${r ? "text-slate-600" : "font-semibold text-slate-900"}`}>{p.Title}</span>
+                    {fresh(p) && <NewDot />}
+                    <KindIcons p={p} />
+                    <span className={`min-w-0 truncate text-[13.5px] ${seen(p) ? "text-slate-600" : "font-semibold text-slate-900"}`}>{p.Title}</span>
                     <PostMarks p={p} compact />
                   </span>
                   <span className={`w-[100px] text-[12px] text-slate-500 shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center min-w-0`}><span className="truncate">{p.AuthorName || ""}</span></span>
                   <span className="text-[11.5px] text-slate-400 tabular-nums shrink-0 hidden md:flex items-center w-[96px]" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
-                  {ctx.isAgent && <span className="shrink-0 w-[96px] flex items-center">
-                    {ctx.isAgent ? (p.RequireConfirm ? (r && r.ConfirmedAt ? <ConfirmedPill /> : <UnconfirmedPill />) : <span className="text-[11.5px] text-slate-300">-</span>) : null}
+                  {ctx.isAgent && <span className="shrink-0 w-[26px] sm:w-[92px] flex items-center">
+                    {p.RequireConfirm ? (r && r.ConfirmedAt ? <ConfirmedPill tight /> : <UnconfirmedPill tight />) : <span className="text-[11.5px] text-slate-300">-</span>}
                   </span>}
                 </button>
               );
@@ -1377,19 +1434,20 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
             <div className="t365-portlet-head">
               <span className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: BRAND.accentSoft }}><LayoutList size={13} style={{ color: BRAND.accent }} /></span>
               <h2 className="text-[15px] font-bold text-slate-900 tracking-[-0.01em]">최근 게시물</h2>
-              <span className="text-[11.5px] text-slate-400 hidden sm:inline">모든 게시판 · 굵은 제목 = 안 읽은 글</span>
+              <span className="text-[11.5px] text-slate-400 hidden sm:inline-flex items-center gap-1.5">모든 게시판 · <NewDot /> 안 읽은 새 글</span>
               <button onClick={() => setTab("all")} className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 inline-flex items-center shrink-0" data-testid="recent-more">전체 게시물<ChevronRight size={13} /></button>
             </div>
-            {vis.length > 0 && <HomeColHead>
+            {recent.length > 0 && <HomeColHead>
               <span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
               <span className="w-[108px] shrink-0 hidden md:flex items-center">작성자</span><span className="w-[104px] shrink-0 flex items-center">작성일</span>
             </HomeColHead>}
-            {vis.length ? vis.slice(0, 12).map((p) => {
-              const c = catMap[p.Category]; const rd = !!myRow(p);
+            {recent.length ? recent.slice(0, 12).map((p, i) => {
+              const c = catMap[p.Category]; const rd = seen(p);
               return (
-                <button key={p.id} onClick={() => openPost(p)} data-wpost={p.id} title={p.Title} className="t365-cols w-full text-left px-4 h-11 flex items-stretch gap-3 border-t border-[#E9EEF3] first:border-t-0 even:bg-slate-50/70 hover:!bg-[#EEF6F5] min-w-0">
+                <button key={p.id} onClick={() => openPost(p)} data-wpost={p.id} title={p.Title} className={`t365-cols w-full text-left px-4 h-11 ${i >= 6 ? "hidden sm:flex" : "flex"} items-stretch gap-3 border-t border-[#E9EEF3] first:border-t-0 even:bg-slate-50/70 hover:!bg-[#EEF6F5] min-w-0`}>
                   <BoardCell cat={c} />
                   <span className="min-w-0 flex-1 flex items-center gap-1.5">
+                    {fresh(p) && <NewDot />}
                     {p.IsPinned && <NoticePill />}{p.RequireConfirm && <ReqPill />}
                     <span className={`min-w-0 truncate text-[13.5px] ${rd ? "text-slate-600" : "font-semibold text-slate-900"}`}>{p.Title}</span>
                     <PostMarks p={p} compact />
@@ -1402,58 +1460,81 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
           </section>
         </div>
 
-        {/* 오른쪽 작은 상자 */}
-        <aside className="xl:col-span-4 space-y-3 min-w-0">
+        {/* 오른쪽 작은 상자 — Agent: 내 확인 대기 · Q&A · 많이 본 글 / 그 밖: Q&A · 많이 본 글. 할 일이 있는 Q&A 는 많이 본 글보다 위 */}
+        <aside className="xl:col-span-4 min-w-0 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-1 gap-3 items-start content-start">
           {ctx.isAgent && (
             <WidgetCard icon={BookOpenCheck} tint="#C2410C" title="내 확인 대기" testid="w-todo" right={todo.length ? <span className="text-[11px] font-bold px-1.5 rounded-full leading-[18px] text-white" style={{ background: "#C2410C" }}>{todo.length}</span> : null}>
-              {todo.length ? todo.slice(0, 5).map((p) => (
-                <button key={p.id} onClick={() => openPost(p)} title={p.Title} className="w-full text-left px-4 h-10 flex items-center gap-2 border-t border-slate-100 first:border-t-0 hover:bg-orange-50/40">
-                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "#C2410C" }}></span>
-                  <span className="truncate text-[13px] text-slate-800 flex-1">{p.Title}</span>
-                  <UnconfirmedPill />
-                </button>
-              )) : <SmallEmpty icon={CheckCircle2}>필수 자료를 모두 확인했습니다.</SmallEmpty>}
-            </WidgetCard>
-          )}
-          <WidgetCard icon={TrendingUp} title="많이 본 글" tint="#2563EB" testid="w-popular" tone="soft">
-            {popular.length ? (<>
-              <HomeColHead>
-                <span className="w-6 shrink-0 flex items-center">#</span><span className="w-[112px] shrink-0 flex items-center">게시판</span>
-                <span className="flex-1 flex items-center">제목</span><span className="w-12 shrink-0 flex items-center">조회</span>
-              </HomeColHead>
-              <ol>
-                {popular.map(({ p, v }, i) => { const c = catMap[p.Category]; const I = (c && c.icon) || FileText; return (
-                  <li key={p.id}>
-                    <button onClick={() => openPost(p)} title={p.Title} data-popular={p.id} className="t365-cols w-full text-left px-4 h-11 flex items-stretch gap-3 hover:bg-[#EEF6F5] border-t border-[#E9EEF3] first:border-t-0">
-                      <span className="w-6 shrink-0 flex items-center"><span className={`w-5 h-5 rounded-md flex items-center justify-center text-[11.5px] font-bold tabular-nums ${i < 3 ? "text-white" : "text-slate-500 bg-white border border-slate-200"}`} style={i < 3 ? { background: BRAND.accent } : undefined}>{i + 1}</span></span>
-                      <span className="w-[112px] shrink-0 flex items-center gap-1.5 min-w-0" style={{ color: c && c.color }}>
-                        <span className="w-5 h-5 rounded-md flex items-center justify-center shrink-0" style={{ background: c && c.soft }}><I size={11} style={{ color: c && c.color }} /></span>
-                        <span className="text-[12px] font-medium truncate">{c ? c.label : "-"}</span>
-                      </span>
-                      <span className="flex-1 min-w-0 flex items-center"><span className="truncate text-[13px] text-slate-700">{p.Title}</span></span>
-                      <span className="w-12 shrink-0 text-[11.5px] text-slate-400 tabular-nums flex items-center gap-0.5"><Eye size={11} />{v}</span>
-                    </button>
-                  </li>
-                ); })}
-              </ol>
-            </>
-            ) : <SmallEmpty icon={Eye}>아직 조회 기록이 없습니다.</SmallEmpty>}
-          </WidgetCard>
-          {catMap.qna && (
-            <WidgetCard icon={MessageCircleQuestion} title="Q&A" tint="#1D4ED8" testid="w-qna"
-              right={<span className="flex items-center gap-1.5">
-                {ctx.canWrite("qna") && <button onClick={() => setEditing({ cat: "qna" })} className="h-7 px-2.5 rounded-md text-[12px] font-semibold text-white inline-flex items-center gap-1" style={{ background: "#1D4ED8" }} data-testid="qna-ask"><MessageCircleQuestion size={13} />질문하기</button>}
-                <button onClick={() => setTab("cat:qna")} className="h-7 px-1.5 text-[12px] text-slate-400 hover:text-slate-700 inline-flex items-center">전체<ChevronRight size={13} /></button>
-              </span>}>
-              {qna.length ? qna.slice(0, 5).map((p) => (
-                <button key={p.id} onClick={() => openPost(p)} title={p.Title} data-qna-row={p.id} className="w-full text-left px-4 h-11 flex items-center gap-2.5 hover:bg-[#EEF3FD] border-t border-[#E9EEF3] first:border-t-0 min-w-0">
-                  <span className="w-[72px] shrink-0 flex"><QnaPill p={p} /></span>
-                  <span className={`min-w-0 flex-1 truncate text-[13px] ${myRow(p) ? "text-slate-600" : "font-semibold text-slate-900"}`}>{p.Title}</span>
+              {reqAll.length > 0 && (
+                <div className="px-4 pt-3 pb-3 border-b border-slate-100" data-testid="todo-progress">
+                  <div className="flex items-center justify-between text-[12px]">
+                    <span className="text-slate-500">필수 자료 확인</span>
+                    <span className="tabular-nums font-semibold" style={{ color: todo.length ? "#C2410C" : "#047857" }}>{reqDone} / {reqAll.length}</span>
+                  </div>
+                  <div className="mt-1.5 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full transition-[width] duration-700" style={{ width: `${Math.round((reqDone / reqAll.length) * 100)}%`, background: todo.length ? "linear-gradient(90deg,#F97316,#EA580C)" : "#10B981" }}></div></div>
+                </div>
+              )}
+              {todo.length ? todo.slice(0, 5).map((p) => { const c = catMap[p.Category]; const I = (c && c.icon) || FileText; return (
+                <button key={p.id} onClick={() => openPost(p)} title={p.Title} data-todo={p.id} className="w-full text-left px-4 h-11 flex items-center gap-2.5 border-t border-slate-100 first:border-t-0 hover:bg-orange-50/50 min-w-0">
+                  <span className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: c && c.soft }} title={c && c.label}><I size={12} style={{ color: c && c.color }} /></span>
+                  <span className="min-w-0 flex-1 flex items-center gap-1.5">{fresh(p) && <NewDot />}<span className="truncate text-[13px] text-slate-800 font-medium">{p.Title}</span></span>
                   <span className="text-[11px] text-slate-400 tabular-nums shrink-0" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
                 </button>
-              )) : <SmallEmpty icon={MessageCircleQuestion}>아직 질문이 없습니다 — 궁금한 점을 편하게 물어보세요.</SmallEmpty>}
+              ); }) : <SmallEmpty icon={CheckCircle2}>필수 자료를 모두 확인했습니다.</SmallEmpty>}
+              {todo.length > 5 && <button onClick={() => onSearch("", "todo")} className="w-full h-9 border-t border-slate-100 text-[12px] font-medium text-orange-700 hover:bg-orange-50/50" data-testid="todo-more">확인할 자료 {todo.length - 5}건 더 보기</button>}
             </WidgetCard>
           )}
+          {catMap.qna && (
+            <div style={{ order: qnaUrgent ? 0 : 2 }}>
+              <WidgetCard icon={MessageCircleQuestion} title="Q&A" tint="#1D4ED8" testid="w-qna"
+                right={<span className="flex items-center gap-1.5">
+                  {ctx.isAgent && myNew.length > 0 && <span className="text-[11px] font-bold px-2 rounded-full leading-5 text-white whitespace-nowrap" style={{ background: "#1D4ED8" }} data-testid="qna-new-count">새 답변 {myNew.length}</span>}
+                  {duty && qWait.length > 0 && <span className="text-[11px] font-bold px-2 rounded-full leading-5 text-white whitespace-nowrap" style={{ background: "#C2410C" }} data-testid="qna-wait-count">답변 대기 {qWait.length}</span>}
+                  <button onClick={() => setTab("cat:qna")} className="h-7 px-1 text-[12px] text-slate-400 hover:text-slate-700 inline-flex items-center whitespace-nowrap" aria-label="Q&A 전체">전체<ChevronRight size={13} /></button>
+                </span>}>
+                {/* 두 줄 — 위: 제목(안 잘리게 한 줄 전체), 아래: 답변 상태 · 내 질문(또는 질문한 사람) · 시각 */}
+                {qna.length ? qna.slice(0, 5).map((p) => { const isNew = ctx.isAgent && mineQ(p) && newAnswer(p); return (
+                  <button key={p.id} onClick={() => openPost(p)} title={p.Title} data-qna-row={p.id} className={`w-full text-left px-4 py-2.5 block border-t border-[#E9EEF3] first:border-t-0 min-w-0 ${isNew ? "bg-[#F3F7FE] hover:bg-[#EAF1FD]" : "hover:bg-[#F3F7FE]"}`}>
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      {fresh(p) && <NewDot />}
+                      <span className={`truncate text-[13px] ${seen(p) && !isNew ? "text-slate-700" : "font-semibold text-slate-900"}`}>{p.Title}</span>
+                    </span>
+                    <span className="mt-1 flex items-center gap-1.5 text-[11.5px] text-slate-400 min-w-0">
+                      {isNew ? <span className="t365-pill text-white" style={{ background: "#1D4ED8" }} data-qna="new"><Sparkles size={10} />새 답변</span> : <QnaPill p={p} age={duty} />}
+                      {mineQ(p) ? <span className="t365-pill bg-slate-100 text-slate-500" data-mine="1">내 질문</span> : <span className="truncate max-w-[120px]">{p.AuthorName || ""}</span>}
+                      <span className="text-slate-300">·</span>
+                      <span className="tabular-nums shrink-0" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
+                    </span>
+                  </button>
+                ); }) : <SmallEmpty icon={MessageCircleQuestion}>{ctx.isAgent ? "아직 질문이 없습니다 — 궁금한 점을 편하게 물어보세요." : "아직 올라온 질문이 없습니다."}</SmallEmpty>}
+                {/* Agent — 질문하기는 상자 아래 띠(머리는 상태 숫자만) */}
+                {ctx.isAgent && ctx.canWrite("qna") && (
+                  <button onClick={() => setEditing({ cat: "qna" })} className="w-full h-10 border-t border-[#E1EAFD] bg-[#F7F9FE] hover:bg-[#EEF3FD] text-[12.5px] font-semibold text-[#1D4ED8] inline-flex items-center justify-center gap-1.5" data-testid="qna-ask"><MessageCircleQuestion size={14} />질문하기<span className="font-normal text-[#1D4ED8]/70 hidden sm:inline">— 궁금한 점을 편하게 물어보세요</span></button>
+                )}
+              </WidgetCard>
+            </div>
+          )}
+          <div style={{ order: 1 }}>
+            <WidgetCard icon={TrendingUp} title="많이 본 글" tint="#2563EB" testid="w-popular" right={popularRecent ? <span className="text-[11px] text-slate-400" title="최근 90일 안에 올라온 글 중 조회가 많은 순">최근 90일</span> : null}>
+              {popular.length ? (
+                <ol>
+                  {popular.map(({ p, v }, i) => { const c = catMap[p.Category]; const I = (c && c.icon) || FileText; return (
+                    <li key={p.id}>
+                      <button onClick={() => openPost(p)} title={p.Title} data-popular={p.id} className="w-full text-left px-4 py-2.5 flex items-start gap-3 hover:bg-[#EEF6F5] border-t border-[#E9EEF3] min-w-0">
+                        <span className={`mt-0.5 w-5 h-5 rounded-md flex items-center justify-center text-[11.5px] font-bold tabular-nums shrink-0 ${i < 3 ? "text-white" : "text-slate-500 bg-white border border-slate-200"}`} style={i < 3 ? { background: BRAND.accent } : undefined}>{i + 1}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-1.5 min-w-0">{fresh(p) && <NewDot />}<span className={`truncate text-[13px] ${seen(p) ? "text-slate-700" : "font-semibold text-slate-900"}`}>{p.Title}</span></span>
+                          <span className="mt-1 flex items-center gap-1.5 text-[11.5px] text-slate-400 min-w-0">
+                            <span className="inline-flex items-center gap-1 min-w-0 font-medium" style={{ color: c && c.color }}><span className="w-4 h-4 rounded flex items-center justify-center shrink-0" style={{ background: c && c.soft }}><I size={10} style={{ color: c && c.color }} /></span><span className="truncate">{c ? c.label : "-"}</span></span>
+                            <span className="text-slate-300">·</span><span className="inline-flex items-center gap-0.5 tabular-nums shrink-0"><Eye size={11} />조회 {v}</span>
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  ); })}
+                </ol>
+              ) : <SmallEmpty icon={Eye}>아직 조회 기록이 없습니다.</SmallEmpty>}
+            </WidgetCard>
+          </div>
         </aside>
       </div>
       {/* 홈에서 누른 글은 홈 위 팝업으로(게시판으로 옮겨 가지 않음) — 위 · 아래 단추는 홈 목록(최신순) 기준 */}
@@ -1499,6 +1580,8 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
   useEffect(() => { setPage(1); }, [q, field, filter, catFilter, catKey, sort, size]);
   useEffect(() => { if (firstRun.current) { firstRun.current = false; return; } setQ(""); setFilter("all"); setCatFilter(""); setSort("new"); }, [catKey]);
   useEffect(() => { if (seed && onSeedUsed) onSeedUsed(); }, []);   // 게시판 홈에서 넘긴 검색어 · 보기 탭은 처음 한 번만(다른 게시판을 다녀와도 다시 걸리지 않게)
+  // 「질문하기」 바로 열기(도움말 단추에서) — 이미 이 게시판에 있어도 열리게 seed 번호로
+  useEffect(() => { if (seed && seed.compose) { if (canWriteHere) setEditing({}); if (onSeedUsed) onSeedUsed(); } }, [seed && seed.n]);
   useEffect(() => {
     if (openId) return;
     const k = (e) => { if (e.key === "/" && !isTyping(e) && !e.ctrlKey && !e.metaKey && searchRef.current) { e.preventDefault(); searchRef.current.focus(); } };
@@ -1511,12 +1594,19 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
   const qq = q.trim().toLowerCase();
   const hit = (p) => {
     if (!qq) return true;
-    const t = String(p.Title || "").toLowerCase(), b = (plainPreview(p.Body, 4000) + " " + parseFiles(p.AttachmentsJson).map((f) => f.name).join(" ")).toLowerCase(), a = String(p.AuthorName || "").toLowerCase();
+    // 내용 = 본문 + 첨부 이름 + Q&A 답변(답변까지 찾아져야 Q&A 가 「먼저 찾아보는」 자료가 된다)
+    const t = String(p.Title || "").toLowerCase(), b = (plainPreview(p.Body, 4000) + " " + parseFiles(p.AttachmentsJson).map((f) => f.name).join(" ") + (p.Answer ? " " + plainPreview(p.Answer, 4000) : "")).toLowerCase(), a = String(p.AuthorName || "").toLowerCase();
     return field === "t" ? t.includes(qq) : field === "b" ? b.includes(qq) : field === "a" ? a.includes(qq) : t.includes(qq) || b.includes(qq);
   };
   const rateOf = (p) => (p.RequireConfirm ? confirmStats(p, readIdx, ctx.agents) : null);
   const isTodo = (p) => p.RequireConfirm && !(myRow(p) && myRow(p).ConfirmedAt);
-  const passFilter = (p, f) => f === "all" ? true : f === "unread" ? !myRow(p) : f === "notice" ? (p.IsPinned || p.RequireConfirm) : f === "pinned" ? p.IsPinned : f === "todo" ? isTodo(p) : f === "required" ? p.RequireConfirm : true;
+  const isMine = (p) => normEmail(p.AuthorEmail) === normEmail(me.email);
+  // 게시판 종류 — Q&A(답변 상태) · 필수 교육자료(조회확인) · 그 밖(공지 · 필수). 종류마다 보기 탭 · 상태 칸이 다르다
+  const kind = catKey === "qna" ? "qna" : catKey && catMap[catKey] && catMap[catKey].required ? "required" : "normal";
+  const passFilter = (p, f) => f === "all" ? true : f === "unread" ? !seenBy(p, myRow(p), me) : f === "notice" ? (p.IsPinned || p.RequireConfirm) : f === "pinned" ? p.IsPinned
+    : f === "todo" ? isTodo(p) : f === "done" ? (p.RequireConfirm && !isTodo(p)) : f === "required" ? p.RequireConfirm
+    : f === "incomplete" ? (() => { const r = rateOf(p); return !!r && r.total > 0 && r.done < r.total; })()
+    : f === "qwait" ? !qnaAnswered(p) : f === "qdone" ? qnaAnswered(p) : f === "mine" ? isMine(p) : true;
   const base = scope.filter((p) => !catFilter || p.Category === catFilter).filter(hit);
   const view0 = base.filter((p) => passFilter(p, filter));
   const sorter = sort === "old" ? (a, b) => -byNewest(a, b) : sort === "views" ? (a, b) => viewStats(readIdx, b.id).views - viewStats(readIdx, a.id).views || byNewest(a, b)
@@ -1538,9 +1628,13 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
   const closeModal = () => setOpenId(null);
 
   const cnt = (f) => base.filter((p) => passFilter(p, f)).length;
-  const tabs = [["all", "전체"], ["unread", "안 읽은 글"], ["notice", "공지 · 필수"], ctx.isAgent ? ["todo", "확인 필요"] : null].filter(Boolean);
+  // 보기 탭 — Q&A: 답변 상태(내 질문은 질문한 적이 있을 때만 — 직원은 대개 답변하는 쪽), 필수: Agent 는 내 확인, 직원은 아직 다 확인되지 않은 글(독려할 글)
+  const tabs = (kind === "qna" ? [["all", "전체"], ["qwait", "답변 대기"], ["qdone", "답변 완료"], ctx.isAgent || cnt("mine") > 0 || filter === "mine" ? ["mine", "내 질문"] : null]
+    : kind === "required" ? (ctx.isAgent ? [["all", "전체"], ["todo", "확인 필요"], ["done", "확인 완료"]] : [["all", "전체"], showRate ? ["incomplete", "확인 미완료"] : null, ["unread", "안 읽은 글"]])
+    : [["all", "전체"], ["unread", "안 읽은 글"], ["notice", "공지 · 필수"], ctx.isAgent && (cnt("todo") > 0 || filter === "todo") ? ["todo", "확인 필요"] : null]).filter(Boolean);
   const ctrl = "h-9 border border-slate-300 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/40";
   const StatusCell = ({ p }) => {
+    if (kind === "qna") return <QnaPill p={p} age={ctx.qnaDuty} />;
     if (ctx.isAgent) {
       const r = myRow(p);
       return r && r.ConfirmedAt ? <ConfirmedPill />
@@ -1550,21 +1644,25 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
     const s = rateOf(p);
     return s ? <MiniRate s={s} w={40} /> : <span className="text-[11.5px] text-slate-300">-</span>;
   };
-  const showStatusCol = ctx.isAgent || showRate;
+  // 상태 칸 — Q&A 는 답변, 그 밖은 조회확인(Agent) · 확인율(직원). 필수 글이 하나도 없는 게시판에서는 빈 칸만 이어져 빼 둔다
+  const showStatusCol = kind === "qna" || ((ctx.isAgent || showRate) && scope.some((p) => p.RequireConfirm));
+  const statusHead = kind === "qna" ? "답변" : ctx.isAgent ? "조회확인" : "확인율";
   const colCount = 5 + (catKey ? 0 : 1) + (showStatusCol ? 1 : 0);   // 빈 줄 colSpan 이 실제 열 수와 다르면 고정 표가 왼쪽으로 쏠린다(10-12 화면)
   const block = Math.floor((pageSafe - 1) / 10);
   const pages = Array.from({ length: Math.min(10, totalPages - block * 10) }, (_, i) => block * 10 + i + 1);
   const pgBtn = "min-w-[32px] h-8 px-2 rounded-md text-[13px] tabular-nums inline-flex items-center justify-center disabled:opacity-30";
-  const emptyMsg = scope.length ? (qq ? <>「{q.trim()}」 검색 결과가 없습니다. <button onClick={() => setQ("")} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>검색어 지우기</button></> : filter === "unread" ? "안 읽은 글이 없습니다 — 모두 읽었습니다." : filter === "todo" ? "확인할 필수 자료가 없습니다." : "조건에 맞는 글이 없습니다.")
+  const emptyMsg = scope.length ? (qq ? <>「{q.trim()}」 검색 결과가 없습니다. <button onClick={() => setQ("")} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>검색어 지우기</button></> : filter === "unread" ? "안 읽은 글이 없습니다 — 모두 읽었습니다." : filter === "todo" ? "확인할 필수 자료가 없습니다 — 모두 확인했습니다." : filter === "done" ? "아직 확인한 필수 자료가 없습니다." : filter === "qwait" ? "답변을 기다리는 질문이 없습니다." : filter === "incomplete" ? "모든 Agent 가 확인을 마쳤습니다." : filter === "qdone" ? "아직 답변이 달린 질문이 없습니다." : filter === "mine" ? "내가 올린 질문이 없습니다." : "조건에 맞는 글이 없습니다.")
     : <>등록된 게시물이 없습니다.{canWriteHere && <> <button onClick={() => setEditing({})} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>첫 글 쓰기</button></>}</>;
   const TitleLine = ({ p, pin, big, inTable }) => {
-    const unread = !myRow(p);
+    const unread = !seenBy(p, myRow(p), me);
     return (
       <div className="flex items-center gap-1.5 min-w-0">
+        {unread && isNewPost(p) && <NewDot />}
         {(pin || p.IsPinned) && <NoticePill />}
-        {p.RequireConfirm && <ReqPill />}
+        {p.RequireConfirm && kind !== "required" && <ReqPill />}
         <span className={`truncate ${big ? "text-[15px]" : "text-[14px]"} ${pin || unread ? "font-semibold text-slate-900" : "text-slate-600"}`} data-unread-title={unread ? "1" : undefined}><Hl text={p.Title} q={field === "t" || field === "tb" ? q : ""} /></span>
-        <PostMarks p={p} compact />
+        {kind === "qna" && isMine(p) && <span className="t365-pill bg-slate-100 text-slate-500 font-semibold" data-mine="1">내 질문</span>}
+        <PostMarks p={p} compact noQna={inTable && kind === "qna"} />
       </div>
     );
   };
@@ -1580,14 +1678,15 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
               {tabs.map(([k, label]) => {
                 const on = filter === k || (k === "notice" && filter === "pinned") || (k === "notice" && filter === "required" && !ctx.isAgent);
                 const n = cnt(k);
-                const TI = { all: LayoutList, unread: Eye, notice: Megaphone, todo: BellRing }[k] || LayoutList;
-                const tint = k === "todo" || k === "notice" ? "#C2410C" : BRAND.accent;
+                const TI = { all: LayoutList, unread: Eye, notice: Megaphone, todo: BellRing, done: CheckCircle2, incomplete: BarChart3, qwait: Clock, qdone: MessageSquareReply, mine: SquarePen }[k] || LayoutList;
+                const tint = k === "todo" || k === "notice" || k === "incomplete" ? "#C2410C" : k === "done" ? "#047857" : kind === "qna" ? "#1D4ED8" : BRAND.accent;
+                const urgent = (k === "todo" || (k === "qwait" && ctx.qnaDuty)) && n > 0;   // 할 일이 있는 탭 — 고르지 않아도 개수를 주황으로
                 return (
                   <button key={k} role="tab" aria-selected={on} onClick={() => setFilter(k)} data-filter={k}
                     className={`h-8 px-3 rounded-lg text-[13px] whitespace-nowrap inline-flex items-center gap-1.5 transition-all ${on ? "bg-white text-slate-900 font-semibold shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-800 hover:bg-white/60"}`}>
                     <TI size={14} style={{ color: on ? tint : "#94A3B8" }} />
                     {label}
-                    <span className={`min-w-[20px] text-center text-[11px] font-semibold tabular-nums rounded-full px-1.5 leading-[18px] ${on || (k === "todo" && n) ? "text-white" : "bg-slate-200/80 text-slate-500"}`} style={on ? { background: tint } : k === "todo" && n ? { background: "#C2410C" } : undefined}>{n}</span>
+                    <span className={`min-w-[20px] text-center text-[11px] font-semibold tabular-nums rounded-full px-1.5 leading-[18px] ${on || urgent ? "text-white" : "bg-slate-200/80 text-slate-500"}`} style={on ? { background: tint } : urgent ? { background: "#C2410C" } : undefined}>{n}</span>
                   </button>
                 );
               })}
@@ -1603,7 +1702,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
               {q ? <button onClick={() => setQ("")} aria-label="검색어 지우기" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"><X size={14} /></button>
                 : <kbd className="hidden md:inline absolute right-2 top-1/2 -translate-y-1/2 text-[10.5px] text-slate-400 border border-slate-200 rounded px-1.5 leading-[18px]">/</kbd>}
             </div>
-            {canWriteHere && <button onClick={() => setEditing({})} className={`${btnPrimaryCls} shrink-0`} style={{ background: BRAND.accent }} data-testid="btn-write">{catKey === "qna" || (!catKey && ctx.isAgent) ? <MessageCircleQuestion size={14} /> : <SquarePen size={14} />}<span className="hidden sm:inline">{catKey === "qna" || (!catKey && ctx.isAgent) ? "질문하기" : "글쓰기"}</span></button>}
+            {canWriteHere && <button onClick={() => setEditing({})} className={`${btnPrimaryCls} shrink-0`} style={{ background: catKey === "qna" ? "#1D4ED8" : BRAND.accent }} data-testid="btn-write">{catKey === "qna" || (!catKey && ctx.isAgent) ? <MessageCircleQuestion size={14} /> : <SquarePen size={14} />}<span className="hidden sm:inline">{catKey === "qna" || (!catKey && ctx.isAgent) ? "질문하기" : "글쓰기"}</span></button>}
           </div>
         </div>
         {/* 건수 · 분류 · 정렬 · 보기 방식 · 쪽당 글 수 */}
@@ -1616,7 +1715,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
               </select>
             )}
             <select value={sort} onChange={(e) => setSort(e.target.value)} className="h-8 border border-slate-300 rounded-md text-[12.5px] bg-white px-2" aria-label="정렬" data-testid="board-sort">
-              <option value="new">최신순</option><option value="old">오래된순</option><option value="views">조회순</option>{showRate && <option value="rate">확인율 낮은순</option>}
+              <option value="new">최신순</option><option value="old">오래된순</option><option value="views">조회순</option>{showRate && kind !== "qna" && <option value="rate">확인율 낮은순</option>}
             </select>
             <div className="hidden sm:flex items-center rounded-md border border-slate-300 overflow-hidden h-8 bg-white" role="group" aria-label="보기 방식">
               {[["list", Rows3, "목록형"], ["summary", AlignLeft, "요약형"]].map(([k, I, l], i) => (
@@ -1635,7 +1734,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
             <table className="w-full table-fixed" data-testid="board-table">
               <colgroup><col style={{ width: 64 }} />{!catKey && <col style={{ width: 140 }} />}<col /><col style={{ width: 120 }} /><col style={{ width: 120 }} /><col style={{ width: 70 }} />{showStatusCol && <col style={{ width: 110 }} />}</colgroup>
               <thead className="text-slate-600 text-[12.5px] bg-[#F1F4F8]">
-                <tr>{["번호", ...(catKey ? [] : ["게시판"]), "제목", "작성자", "작성일", "조회", ...(showStatusCol ? [ctx.isAgent ? "조회확인" : "확인율"] : [])].map((h) => <th key={h} className="px-3 h-10 font-semibold whitespace-nowrap border-y border-slate-300/70 text-left">{h}</th>)}</tr>
+                <tr>{["번호", ...(catKey ? [] : ["게시판"]), "제목", "작성자", "작성일", "조회", ...(showStatusCol ? [statusHead] : [])].map((h) => <th key={h} className="px-3 h-10 font-semibold whitespace-nowrap border-y border-slate-300/70 text-left">{h}</th>)}</tr>
               </thead>
               <tbody>
                 {rows.length ? rows.map(({ p, pin }) => {
@@ -1772,7 +1871,8 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
     let alive = true;
     const autoConfirm = ctx.isAgent && !!post.RequireConfirm;
     setAutoState(autoConfirm && !(mine && mine.ConfirmedAt) ? "saving" : "");
-    t365RecordView(post, me, { confirm: autoConfirm }).then((row) => { if (alive && row) { ctx.upsertRead(row); setAutoState(""); } })
+    // 열람 기록은 창을 금방 닫아도 목록에 반영(서버에는 이미 저장됨 — 안 하면 다시 불러오기 전까지 「안 읽음 · 미확인」 으로 남는다). 창 상태만 alive 확인
+    t365RecordView(post, me, { confirm: autoConfirm }).then((row) => { if (row) ctx.upsertRead(row); if (alive && row) setAutoState(""); })
       .catch((e) => { console.warn("[Training365] 열람 기록 실패:", e.message); if (alive) setAutoState(autoConfirm ? "error" : ""); });
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
     return () => { alive = false; };
@@ -1790,6 +1890,10 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
     if (!(await uiConfirm(`「${post.Title}」 게시물을 삭제할까요?\n삭제하면 되돌릴 수 없고, 이 게시물의 조회확인 기록은 확인 현황에서 빠집니다.`, { title: "게시물 삭제", okText: "삭제", danger: true }))) return;
     setDeleting(true);
     try {
+      if (post.Category === "qna" && !ctx.isAdmin) {   // 이 창을 연 뒤 답변이 달렸으면 지우지 않는다(다른 Agent 가 볼 답이 사라지지 않게)
+        const cur = await tGetItem(T365_LISTS.posts, post.id).catch(() => undefined);
+        if (cur && qnaAnswered(cur)) { setDeleting(false); uiAlert("이 질문에 그 사이 답변이 달려 지울 수 없습니다."); await ctx.reload(); return; }
+      }
       await tDelete(T365_LISTS.posts, post.id, { cat: post.Category });
       t365Log("게시물", "삭제", post.Title, { info: { 카테고리: cat ? cat.label : post.Category, 게시물ID: post.id, 작성자: post.AuthorName || post.AuthorEmail || "" } });
       onBack();
@@ -1801,6 +1905,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
   const totalSize = files.reduce((a, f) => a + (Number(f.size) || 0), 0);
   const Dot = () => <span className="text-slate-300">·</span>;
   const edit = ctx.canEditPost(post);
+  const lockedQ = !edit && post.Category === "qna" && qnaAnswered(post) && normEmail(post.AuthorEmail) === normEmail(me.email);   // 답변이 달린 내 질문
   const confirmed = !!(mine && mine.ConfirmedAt);
 
   return (
@@ -1811,11 +1916,14 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
         {cat && <span className="inline-flex items-center gap-2 text-[13px] font-semibold shrink-0"><CatIconBox cat={{ ...cat, soft: "#FFFFFF" }} size={24} icon={13} />{cat.label}</span>}
         {idx >= 0 && siblings.length > 1 && <span className="text-[11.5px] text-white/55 tabular-nums hidden sm:inline">{listLabel !== (cat && cat.label) ? `${listLabel} · ` : ""}{idx + 1} / {siblings.length}</span>}
         <span className="ml-auto inline-flex items-center gap-0.5 shrink-0">
+          <button onClick={async () => { const ok = await copyText(postLink(post)); toast(ok ? "게시물 링크를 복사했습니다 — 메신저 · 메일에 붙여 넣으세요" : "링크를 복사하지 못했습니다"); }} title="이 글의 링크 복사 — 받은 사람이 로그인하면 바로 이 글이 열립니다" aria-label="링크 복사" className="h-8 px-2.5 rounded-lg text-[12.5px] text-white/80 hover:bg-white/10 hover:text-white inline-flex items-center gap-1" data-testid="btn-link"><Link2 size={13} /><span className="hidden sm:inline">링크</span></button>
+          <span className="w-px h-5 bg-white/15 mx-1"></span>
           <button onClick={() => newer && onOpen(newer.id)} disabled={!newer} title={newer ? `다음글 · ${newer.Title}` : "다음 글이 없습니다"} aria-label="다음글" className="w-8 h-8 rounded-lg flex items-center justify-center text-white/75 hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent" data-testid="hd-newer"><ChevronUp size={17} /></button>
           <button onClick={() => older && onOpen(older.id)} disabled={!older} title={older ? `이전글 · ${older.Title}` : "이전 글이 없습니다"} aria-label="이전글" className="w-8 h-8 rounded-lg flex items-center justify-center text-white/75 hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent" data-testid="hd-older"><ChevronDown size={17} /></button>
           {edit && <span className="w-px h-5 bg-white/15 mx-1"></span>}
           {edit && <button onClick={onEdit} className="h-8 px-2.5 rounded-lg text-[12.5px] text-white/80 hover:bg-white/10 hover:text-white inline-flex items-center gap-1" data-testid="btn-edit"><Pencil size={13} />수정</button>}
           {edit && <button onClick={remove} className="h-8 px-2.5 rounded-lg text-[12.5px] text-white/80 hover:bg-red-500/80 hover:text-white inline-flex items-center gap-1" data-testid="btn-delete"><Trash2 size={13} />삭제</button>}
+          {lockedQ && <><span className="w-px h-5 bg-white/15 mx-1"></span><span className="h-8 px-2 inline-flex items-center gap-1 text-[12px] text-white/55 cursor-help" title="답변이 달린 질문은 고치거나 지울 수 없습니다 — 바꿀 내용이 있으면 새 질문으로 올려 주세요" data-testid="q-locked"><LockKeyhole size={12} /><span className="hidden sm:inline">수정 잠김</span></span></>}
           <span className="w-px h-5 bg-white/15 mx-1"></span>
           <button onClick={onBack} aria-label="닫기" title="닫기 (Esc)" className="w-9 h-9 rounded-lg flex items-center justify-center text-white/75 hover:text-white hover:bg-white/10" data-testid="btn-back"><X size={19} /></button>
         </span>
@@ -1825,8 +1933,10 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
         <article className="min-h-full flex flex-col" data-testid="article">
           {/* 제목 · 정보 */}
           <header className="px-5 md:px-10 pt-6 pb-5 border-b border-slate-200 bg-white">
-            {(post.IsPinned || post.RequireConfirm) && (
+            {(post.IsPinned || post.RequireConfirm || post.Category === "qna") && (
               <div className="flex items-center gap-1 mb-2">
+                {post.Category === "qna" && <QnaPill p={post} />}
+                {post.Category === "qna" && normEmail(post.AuthorEmail) === normEmail(me.email) && <span className="t365-pill bg-slate-100 text-slate-500" data-mine="1">내 질문</span>}
                 {post.IsPinned && <NoticePill />}
                 {post.RequireConfirm && <span className="t365-pill" style={{ background: "#FDEEE6", color: "#C2410C" }}><BellRing size={10} />조회확인 필수</span>}
               </div>
@@ -1909,7 +2019,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
             {[["다음글", newer, ChevronUp], ["이전글", older, ChevronDown]].filter((x) => x[1]).map(([label, p, I]) => (
               <button key={label} disabled={!p} onClick={() => p && onOpen(p.id)} data-nav-post={label} title={p ? p.Title : undefined} className="w-full flex items-center gap-3 px-5 md:px-10 h-10 border-t border-slate-100 first:border-t-0 text-left hover:bg-slate-50 disabled:hover:bg-white disabled:cursor-default min-w-0">
                 <span className="inline-flex items-center gap-1 text-slate-400 w-14 shrink-0 text-[12px]"><I size={13} />{label}</span>
-                {p ? <><span className="truncate flex-1 text-slate-700">{p.Title}</span><PostMarks p={p} compact /><span className="text-[11.5px] text-slate-400 tabular-nums shrink-0 hidden sm:inline">{fmtDay(p.PublishedAt || p._created).slice(2).replace(/-/g, ".")}</span></>
+                {p ? <>{isNewPost(p) && !seenBy(p, (readIdx.get(String(p.id)) || new Map()).get(normEmail(me.email)), me) && <NewDot />}<span className="truncate flex-1 text-slate-700">{p.Title}</span><PostMarks p={p} compact /><span className="text-[11.5px] text-slate-400 tabular-nums shrink-0 hidden sm:inline">{shortDate(p.PublishedAt || p._created)}</span></>
                   : <span className="text-slate-300 flex-1 text-[12.5px]">{label === "다음글" ? "다음 글이 없습니다" : "이전 글이 없습니다"}</span>}
               </button>
             ))}
@@ -1958,6 +2068,14 @@ function QnaAnswer({ ctx, post }) {
   const canAnswer = !ctx.isAgent && ctx.canWrite("qna");
   const has = qnaAnswered(post);
   const [editing, setEditing] = useState(false);
+  // 질문자에게 알리기 — 답변을 단 담당자가 메일 앱으로(자동 메일은 Power Automate 로 — 리뷰 안내)
+  const asker = normEmail(post.AuthorEmail);
+  const notifyHref = has && asker && asker !== normEmail(ctx.me.email) ? mailtoHref({ to: [asker], link: postLink(post), subject: `[Training365] 질문에 답변이 등록되었습니다 — ${post.Title}`,
+    body: `${post.AuthorName || ""}님, 안녕하세요.\n\nTraining365 Q&A 에 올리신 질문에 답변이 등록되었습니다.\n아래 링크에서 확인해 주세요.\n\n■ ${post.Title}\n${postLink(post)}\n\n${ctx.me.name || ""}` }) : null;
+  // 질문자가 답변을 봤는지(답변 뒤에 그 글을 열었는지) — 담당자가 알림 메일이 필요한지 판단
+  const askerRow = asker ? (ctx.readIdx.get(String(post.id)) || new Map()).get(asker) : null;
+  const askerSeen = has && !!askerRow && String(askerRow.LastViewedAt || "") >= String(post.AnsweredAt || "");
+  const showSeen = canAnswer && has && !!asker && asker !== normEmail(ctx.me.email);
   const [text, setText] = useState(post.Answer || "");
   const [busy, setBusy] = useState(false);
   useEffect(() => { setText(post.Answer || ""); setEditing(false); }, [post.id, post.Answer]);
@@ -1972,7 +2090,7 @@ function QnaAnswer({ ctx, post }) {
       await tUpdate(T365_LISTS.posts, post.id, { Answer: v, AnsweredBy: ctx.me.name, AnsweredAt: new Date().toISOString() }, { prevCat: post.Category });   // 쓰기 확인은 그 글의 게시판(Q&A) 편집 권한
       t365Log("게시물", has ? "답변 수정" : "답변", post.Title, { info: { 게시물ID: post.id } });
       await ctx.reload();
-      setEditing(false); toast(has ? "답변을 수정했습니다" : "답변을 등록했습니다");
+      setEditing(false); toast(has ? "답변을 수정했습니다" : asker && asker !== normEmail(ctx.me.email) ? "답변을 등록했습니다 — 「질문자에게 알리기」 로 메일을 보낼 수 있습니다" : "답변을 등록했습니다");
     } catch (e) { uiAlert(e.message); }
     setBusy(false);
   }
@@ -1983,8 +2101,14 @@ function QnaAnswer({ ctx, post }) {
           <span className="w-6 h-6 rounded-md flex items-center justify-center text-[12px] font-extrabold text-white shrink-0" style={{ background: has ? "#1D4ED8" : "#94A3B8" }}>A</span>
           <span className="text-[13px] font-semibold text-slate-800">답변</span>
           {has && <span className="text-[11.5px] text-slate-500 truncate">{post.AnsweredBy || "담당자"}{post.AnsweredAt ? ` · ${fmtDate(post.AnsweredAt)}` : ""}</span>}
+          {showSeen && (askerSeen
+            ? <span className="t365-pill bg-emerald-50 text-emerald-700 shrink-0" title={`질문자가 ${fmtDate(askerRow.LastViewedAt)} 에 답변을 봤습니다`} data-testid="qna-seen" data-seen="1"><CheckCircle2 size={10} />질문자 확인</span>
+            : <span className="t365-pill bg-slate-100 text-slate-500 shrink-0" title={notifyHref ? "질문자가 아직 답변을 보지 않았습니다 — 「질문자에게 알리기」 로 메일을 보낼 수 있습니다" : "질문자가 아직 답변을 보지 않았습니다"} data-testid="qna-seen" data-seen="0">질문자 아직 안 봄</span>)}
           {!has && <span className="text-[11.5px] text-slate-400">답변 대기</span>}
-          {canAnswer && !editing && <button onClick={() => setEditing(true)} className="ml-auto h-7 px-2.5 rounded-md text-[12px] font-medium inline-flex items-center gap-1 text-white" style={{ background: "#1D4ED8" }} data-testid="qna-answer-btn"><MessageSquareReply size={13} />{has ? "답변 수정" : "답변 쓰기"}</button>}
+          {canAnswer && !editing && <span className="ml-auto flex items-center gap-1.5">
+            {notifyHref && <a href={notifyHref} onClick={() => t365Log("게시물", "답변 알림 메일", post.Title, { info: { 질문자: asker } })} className="h-7 px-2.5 rounded-md text-[12px] font-medium inline-flex items-center gap-1 border border-[#BFD3F6] text-[#1D4ED8] bg-white hover:bg-[#EEF3FD]" data-testid="qna-notify" title={`${asker} 에게 답변 알림 메일 쓰기`}><Mail size={12} />질문자에게 알리기</a>}
+            <button onClick={() => setEditing(true)} className="h-7 px-2.5 rounded-md text-[12px] font-medium inline-flex items-center gap-1 text-white" style={{ background: "#1D4ED8" }} data-testid="qna-answer-btn"><MessageSquareReply size={13} />{has ? "답변 수정" : "답변 쓰기"}</button>
+          </span>}
         </div>
         {editing ? (
           <div className="p-3">
@@ -2005,30 +2129,101 @@ function QnaAnswer({ ctx, post }) {
 }
 // 게시물 하나의 조회확인 현황(접기) — 대상은 Agent 역할 사용자만(회의록: 본사 제외). 열람한 사람은 역할과 관계없이 따로
 function ConfirmPanel({ ctx, post }) {
+  const req = !!post.RequireConfirm;   // 조회확인 대상(필수) 글만 확인율 — 그 밖의 글(Q&A 포함)은 열람 현황만
   const s = confirmStats(post, ctx.readIdx, ctx.agents);
   const [openP, setOpenP] = useState(false);
-  const [view, setView] = useState(post.RequireConfirm ? "pending" : "all");
+  const [view, setView] = useState("pending");
   const [q, setQ] = useState("");
   const [showViewers, setShowViewers] = useState(false);
   const qq = q.trim().toLowerCase();
   const uMap = new Map(ctx.users.map((u) => [normEmail(u.Email), u]));
   const viewers = [...((ctx.readIdx.get(String(post.id)) || new Map()).values())].map((r) => { const u = uMap.get(normEmail(r.UserEmail)) || {}; return { ...r, name: r.UserName || u.Title || r.UserEmail, role: u.Role || r.Role || "", company: r.Company || u.Company || "" }; })
     .sort((a, b) => String(b.LastViewedAt || "").localeCompare(String(a.LastViewedAt || "")));
+  const views = viewers.reduce((a, v) => a + (Number(v.ViewCount) || 1), 0);
+  const agentSeen = s.rows.filter((x) => x.viewedAt).length;   // 이 글을 한 번이라도 연 Agent 수(도달) — Q&A 질문에는 의미가 없어 빼고 보임
+  const isQ = post.Category === "qna";
   const rows = s.rows
     .filter((x) => view === "all" ? true : view === "done" ? !!x.confirmedAt : !x.confirmedAt)
     .filter((x) => !qq || [x.user.Title, x.user.Email, x.user.Company].some((v) => String(v || "").toLowerCase().includes(qq)))
     .sort((a, b) => (a.confirmedAt ? 0 : 1) - (b.confirmedAt ? 0 : 1) || String(a.confirmedAt).localeCompare(String(b.confirmedAt)) || String(a.user.Company || "").localeCompare(String(b.user.Company || "")) || String(a.user.Title || "").localeCompare(String(b.user.Title || "")));
-  function exportExcel() {
-    const data = s.rows.map((x, i) => ({ 번호: i + 1, 이름: x.user.Title || "", 메일: x.user.Email || "", "회사/지점": x.user.Company || "", 조회확인: x.confirmedAt ? "확인" : "미확인", "확인 시각(KST)": x.confirmedAt ? fmtDate(x.confirmedAt) : "", "첫 열람(KST)": x.viewedAt ? fmtDate(x.viewedAt) : "" }));
-    const vw = viewers.map((v, i) => ({ 번호: i + 1, 이름: v.name, 메일: v.UserEmail, 역할: v.role, "회사/지점": v.company, "첫 열람(KST)": fmtDate(v.FirstViewedAt), "마지막 열람(KST)": fmtDate(v.LastViewedAt), "열람 횟수": Number(v.ViewCount) || 1, 조회확인: v.ConfirmedAt ? fmtDate(v.ConfirmedAt) : "" }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.length ? data : [{ 안내: "확인 대상 Agent 가 없습니다" }]), "조회확인");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(vw.length ? vw : [{ 안내: "열람 기록이 없습니다" }]), "열람한 사람");
-    XLSX.writeFile(wb, `Training365_조회확인_${post.id}_${kstToday()}.xlsx`);
-    t365Log("조회확인", "Excel 내보내기", post.Title, { info: { 확인: `${s.done}/${s.total}`, 열람: viewers.length } });
+  // 미확인 Agent 에게 확인 요청 — 메일 앱(숨은 참조)으로, 인원이 많아 주소가 너무 길면 주소 복사로
+  const pendingEmails = req ? s.rows.filter((x) => !x.confirmedAt).map((x) => normEmail(x.user.Email)).filter(Boolean) : [];
+  const remindHref = pendingEmails.length ? mailtoHref({ bcc: pendingEmails, link: postLink(post), subject: `[Training365] 필수 자료 확인 요청 — ${post.Title}`,
+    body: `안녕하세요.\n\nTraining365 에 올라온 필수 자료를 아직 확인하지 않으셨습니다.\n아래 링크로 들어가 내용을 확인해 주세요 — 글을 열면 조회확인이 자동으로 기록됩니다.\n\n■ ${post.Title}\n${postLink(post)}\n\n감사합니다.\n${ctx.me.name || ""}` }) : null;
+  async function copyPending() {
+    const ok = await copyText(pendingEmails.join("; "));
+    toast(ok ? `미확인 ${pendingEmails.length}명의 메일 주소를 복사했습니다 — 메일의 숨은 참조(BCC)에 붙여 넣으세요` : "주소를 복사하지 못했습니다");
+    if (ok) t365Log("조회확인", "미확인 주소 복사", post.Title, { info: { 인원: pendingEmails.length } });
   }
+  // 필수가 아닌 글(공지 등) — 아직 안 본 Agent 에게 알림 메일(숨은 참조). Q&A 질문은 대상 아님
+  const unseenAgents = !req && post.Category !== "qna" ? s.rows.filter((x) => !x.viewedAt).map((x) => normEmail(x.user.Email)).filter(Boolean) : [];
+  const nudgeHref = unseenAgents.length ? mailtoHref({ bcc: unseenAgents, link: postLink(post), subject: `[Training365] ${post.Title}`,
+    body: `안녕하세요.\n\nTraining365 에 확인하실 글이 있습니다. 아래 링크에서 확인해 주세요.\n\n■ ${post.Title}\n${postLink(post)}\n\n감사합니다.\n${ctx.me.name || ""}` }) : null;
+  async function copyUnseen() {
+    const ok = await copyText(unseenAgents.join("; "));
+    toast(ok ? `아직 안 본 Agent ${unseenAgents.length}명의 메일 주소를 복사했습니다 — 메일의 숨은 참조(BCC)에 붙여 넣으세요` : "주소를 복사하지 못했습니다");
+    if (ok) t365Log("게시물", "안 본 Agent 주소 복사", post.Title, { info: { 인원: unseenAgents.length } });
+  }
+  function exportExcel() {
+    const vw = viewers.map((v, i) => ({ 번호: i + 1, 이름: v.name, 메일: v.UserEmail, 역할: v.role, "회사/지점": v.company, "첫 열람(KST)": fmtDate(v.FirstViewedAt), "마지막 열람(KST)": fmtDate(v.LastViewedAt), "열람 횟수": Number(v.ViewCount) || 1, ...(req ? { 조회확인: v.ConfirmedAt ? fmtDate(v.ConfirmedAt) : "" } : {}) }));
+    const wb = XLSX.utils.book_new();
+    if (req) {
+      const data = s.rows.map((x, i) => ({ 번호: i + 1, 이름: x.user.Title || "", 메일: x.user.Email || "", "회사/지점": x.user.Company || "", 조회확인: x.confirmedAt ? "확인" : "미확인", "확인 시각(KST)": x.confirmedAt ? fmtDate(x.confirmedAt) : "", "첫 열람(KST)": x.viewedAt ? fmtDate(x.viewedAt) : "" }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.length ? data : [{ 안내: "확인 대상 Agent 가 없습니다" }]), "조회확인");
+    }
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(vw.length ? vw : [{ 안내: "열람 기록이 없습니다" }]), "열람한 사람");
+    XLSX.writeFile(wb, `Training365_${req ? "조회확인" : "열람"}_${post.id}_${kstToday()}.xlsx`);
+    t365Log("조회확인", "Excel 내보내기", post.Title, { info: { ...(req ? { 확인: `${s.done}/${s.total}` } : {}), 열람: viewers.length } });
+  }
+  const viewersTable = (
+    <div className="overflow-x-auto max-h-[320px] overflow-y-auto border-t border-slate-100" data-testid="viewers">
+      <table className="w-full text-[12.5px]" style={{ minWidth: 560 }}>
+        <thead className="bg-slate-50 text-slate-500 text-[11.5px] sticky top-0"><tr>{["이름", "역할", "첫 열람", "마지막 열람", "횟수", ...(req ? ["조회확인"] : [])].map((h) => <th key={h} className="px-4 h-9 font-medium text-left whitespace-nowrap border-b border-slate-200">{h}</th>)}</tr></thead>
+        <tbody>
+          {viewers.length ? viewers.map((v) => (
+            <tr key={v.UserEmail} className="border-t border-slate-100 first:border-t-0" data-viewer={v.UserEmail}>
+              <td className="px-4 h-9 text-slate-800 font-medium whitespace-nowrap" title={`${v.UserEmail}${v.company ? ` · ${v.company}` : ""}`}>{v.name}</td>
+              <td className="px-4 h-9"><RoleBadge role={v.role} small /></td>
+              <td className="px-4 h-9 text-slate-500 tabular-nums whitespace-nowrap">{fmtDate(v.FirstViewedAt)}</td>
+              <td className="px-4 h-9 text-slate-500 tabular-nums whitespace-nowrap">{fmtDate(v.LastViewedAt)}</td>
+              <td className="px-4 h-9 text-slate-500 tabular-nums">{Number(v.ViewCount) || 1}</td>
+              {req && <td className="px-4 h-9">{v.ConfirmedAt ? <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 size={12} />{fmtDate(v.ConfirmedAt).slice(5)}</span> : <span className="text-slate-300">{v.role === "Agent" ? "미확인" : "대상 아님"}</span>}</td>}
+            </tr>
+          )) : <tr><td colSpan={req ? 6 : 5} className="text-center text-slate-400 py-6">아직 열람한 사람이 없습니다.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  );
+  const chip = <span className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-full border border-slate-200 bg-white text-[11.5px] text-slate-500">{openP ? "접기" : "명단"}<ChevronDown size={13} className={`transition-transform ${openP ? "rotate-180" : ""}`} /></span>;
+
+  // 필수가 아닌 글 — 열람 현황만(확인율 없음)
+  if (!req) return (
+    <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" data-testid="confirm-panel" data-mode="views">
+      <button onClick={() => setOpenP((v) => !v)} aria-expanded={openP} className="w-full px-4 py-3 flex items-center gap-4 text-left hover:bg-slate-50/70 transition-colors" data-testid="confirm-toggle">
+        <span className="w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center shrink-0" aria-hidden="true"><Eye size={18} className="text-slate-400" /></span>
+        <span className="min-w-0 flex-1" data-testid="confirm-rate">
+          <span className="block text-[13.5px] font-semibold text-slate-800">열람 현황</span>
+          <span className="block text-[12px] text-slate-500 mt-0.5">열어 본 사람 <b className="tabular-nums text-slate-700">{viewers.length}</b>명{s.total > 0 && !isQ && <> · Agent <b className="tabular-nums text-slate-700" data-testid="reach">{agentSeen}</b><span className="tabular-nums"> / {s.total}명</span></>} · 조회 <span className="tabular-nums">{views}</span>회{!isQ && <span className="text-slate-400 hidden sm:inline"> · 조회확인 대상이 아닌 글</span>}</span>
+        </span>
+        {chip}
+      </button>
+      {openP && (<>
+        <div className="px-4 py-2 flex items-center gap-2 flex-wrap border-t border-slate-100">
+          <span className="text-[12px] text-slate-500">역할과 관계없이 열어 본 모든 사람 · 최근 열람 순</span>
+          <span className="ml-auto flex items-center gap-1.5">
+            {unseenAgents.length > 0 && (nudgeHref
+              ? <a href={nudgeHref} onClick={() => t365Log("게시물", "안 본 Agent 메일", post.Title, { info: { 인원: unseenAgents.length } })} className={`${btnCls} h-8`} data-testid="nudge-mail" title="메일 앱이 열리고 아직 이 글을 열지 않은 Agent 가 숨은 참조(BCC)로 들어갑니다"><Mail size={13} />안 본 Agent {unseenAgents.length}명에게 메일</a>
+              : <button onClick={copyUnseen} className={`${btnCls} h-8`} data-testid="nudge-mail" title="인원이 많아 메일 앱으로 바로 넘길 수 없습니다 — 주소를 복사합니다"><Copy size={13} />안 본 Agent {unseenAgents.length}명 주소 복사</button>)}
+            <button onClick={exportExcel} className={`${btnCls} h-8`}><Download size={13} /> Excel</button>
+          </span>
+        </div>
+        {viewersTable}
+      </>)}
+    </section>
+  );
+
   return (
-    <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" data-testid="confirm-panel">
+    <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" data-testid="confirm-panel" data-mode="confirm">
       <button onClick={() => setOpenP((v) => !v)} aria-expanded={openP} className="w-full px-4 py-3 flex items-center gap-4 text-left hover:bg-slate-50/70 transition-colors" data-testid="confirm-toggle" title="조회확인은 Agent 역할만 대상입니다 — 본사 · 관리자는 열람한 사람에만 보입니다">
         {/* 왼쪽 — 확인율 고리 */}
         <span className="relative w-11 h-11 shrink-0" aria-hidden="true">
@@ -2045,15 +2240,15 @@ function ConfirmPanel({ ctx, post }) {
         {/* 오른쪽 — 열람 */}
         <span className="shrink-0 hidden sm:flex flex-col items-end leading-tight pl-4 border-l border-slate-200">
           <span className="text-[15px] font-bold text-slate-800 tabular-nums inline-flex items-center gap-1"><Eye size={13} className="text-slate-400" />{viewers.length}<span className="text-[11px] font-normal text-slate-400">명</span></span>
-          <span className="text-[10.5px] text-slate-400">열람 · 조회 {viewers.reduce((a, v) => a + (Number(v.ViewCount) || 1), 0)}회</span>
+          <span className="text-[10.5px] text-slate-400">열람 · 조회 {views}회</span>
         </span>
-        <span className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-full border border-slate-200 bg-white text-[11.5px] text-slate-500">{openP ? "접기" : "명단"}<ChevronDown size={13} className={`transition-transform ${openP ? "rotate-180" : ""}`} /></span>
+        {chip}
       </button>
       {openP && (
         <div className="border-t border-slate-100">
           {s.total > 0 ? (
             <>
-              <div className="px-4 py-0 h-9.5 flex items-center gap-2 flex-wrap">
+              <div className="px-4 py-2.5 flex items-center gap-2 flex-wrap">
                 <div className="flex items-center rounded-lg border border-slate-300 overflow-hidden h-8">
                   {[["pending", `미확인 ${s.total - s.done}`], ["done", `확인 ${s.done}`], ["all", `전체 ${s.total}`]].map(([k, label], i) => (
                     <button key={k} onClick={() => setView(k)} data-view={k} className={`px-3 h-full text-[12.5px] whitespace-nowrap ${i ? "border-l border-slate-300" : ""} ${view === k ? "text-white" : "text-slate-600 bg-white hover:bg-slate-50"}`} style={view === k ? { background: BRAND.accent } : undefined}>{label}</button>
@@ -2063,21 +2258,27 @@ function ConfirmPanel({ ctx, post }) {
                   <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름 · 메일 · 회사 검색" className="h-8 w-full border border-slate-300 rounded-lg text-[12.5px] bg-white pl-8 pr-3 focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/40" />
                 </div>
-                <button onClick={exportExcel} className={`${btnCls} h-8 ml-auto`}><Download size={13} /> Excel</button>
+                <div className="ml-auto flex items-center gap-1.5">
+                  {pendingEmails.length > 0 && (remindHref
+                    ? <a href={remindHref} onClick={() => t365Log("조회확인", "미확인 메일", post.Title, { info: { 인원: pendingEmails.length } })} className="h-8 px-3 rounded-lg text-[12.5px] font-semibold text-white inline-flex items-center gap-1.5 hover:brightness-110" style={{ background: "#C2410C" }} data-testid="remind-mail" title="메일 앱이 열리고 미확인 Agent 가 숨은 참조(BCC)로 들어갑니다"><Mail size={13} />미확인 {pendingEmails.length}명에게 메일</a>
+                    : <button onClick={copyPending} className="h-8 px-3 rounded-lg text-[12.5px] font-semibold text-white inline-flex items-center gap-1.5" style={{ background: "#C2410C" }} data-testid="remind-mail" title="인원이 많아 메일 앱으로 바로 넘길 수 없습니다 — 주소를 복사합니다"><Copy size={13} />미확인 {pendingEmails.length}명 주소 복사</button>)}
+                  {pendingEmails.length > 0 && remindHref && <button onClick={copyPending} className={`${btnCls} h-8 px-2.5`} title="미확인 Agent 메일 주소만 복사" aria-label="미확인 주소 복사" data-testid="remind-copy"><Copy size={13} /></button>}
+                  <button onClick={exportExcel} className={`${btnCls} h-8`}><Download size={13} /> Excel</button>
+                </div>
               </div>
               <div className="overflow-x-auto max-h-[360px] overflow-y-auto border-t border-slate-100">
                 <table className="w-full text-[12.5px]" style={{ minWidth: 560 }}>
                   <thead className="bg-slate-50 text-slate-500 text-[11.5px] sticky top-0">
-                    <tr>{["이름", "회사/지점", "조회확인", "확인 시각", "첫 열람"].map((h) => <th key={h} className="px-4 py-0 h-9 font-medium text-left whitespace-nowrap border-b border-slate-200">{h}</th>)}</tr>
+                    <tr>{["이름", "회사/지점", "조회확인", "확인 시각", "첫 열람"].map((h) => <th key={h} className="px-4 h-9 font-medium text-left whitespace-nowrap border-b border-slate-200">{h}</th>)}</tr>
                   </thead>
                   <tbody>
                     {rows.length ? rows.map((x) => (
                       <tr key={x.user.id || x.user.Email} className="border-t border-slate-100 first:border-t-0">
                         <td className="px-4 h-9 text-slate-800 font-medium whitespace-nowrap" title={x.user.Email}>{x.user.Title || x.user.Email || "-"}</td>
-                        <td className="px-4 py-0 h-9 text-slate-600">{x.user.Company || "-"}</td>
-                        <td className="px-4 py-0 h-9">{x.confirmedAt ? <ConfirmedPill /> : <UnconfirmedPill />}</td>
-                        <td className="px-4 py-0 h-9 text-slate-600 tabular-nums whitespace-nowrap">{x.confirmedAt ? fmtDate(x.confirmedAt) : "-"}</td>
-                        <td className="px-4 py-0 h-9 text-slate-400 tabular-nums whitespace-nowrap">{x.viewedAt ? fmtDate(x.viewedAt) : "열람 안 함"}</td>
+                        <td className="px-4 h-9 text-slate-600">{x.user.Company || "-"}</td>
+                        <td className="px-4 h-9">{x.confirmedAt ? <ConfirmedPill /> : <UnconfirmedPill />}</td>
+                        <td className="px-4 h-9 text-slate-600 tabular-nums whitespace-nowrap">{x.confirmedAt ? fmtDate(x.confirmedAt) : "-"}</td>
+                        <td className="px-4 h-9 text-slate-400 tabular-nums whitespace-nowrap">{x.viewedAt ? fmtDate(x.viewedAt) : "열람 안 함"}</td>
                       </tr>
                     )) : <tr><td colSpan={5} className="text-center text-slate-400 py-8">조회 결과가 없습니다.</td></tr>}
                   </tbody>
@@ -2092,28 +2293,10 @@ function ConfirmPanel({ ctx, post }) {
           )}
           <div className="border-t border-slate-100">
             <button onClick={() => setShowViewers((v) => !v)} aria-expanded={showViewers} className="w-full px-4 md:px-5 h-10 flex items-center gap-2 text-[12.5px] text-slate-600 hover:bg-slate-50 text-left" data-testid="viewers-toggle">
-              <Eye size={14} className="text-slate-400" /><span>열람한 사람 <b className="tabular-nums">{viewers.length}</b>명</span><span className="text-slate-400">· 역할과 관계없이 모두 · 조회 {viewers.reduce((a, v) => a + (Number(v.ViewCount) || 1), 0)}회</span>
+              <Eye size={14} className="text-slate-400" /><span>열람한 사람 <b className="tabular-nums">{viewers.length}</b>명</span><span className="text-slate-400">· 역할과 관계없이 모두 · 조회 {views}회</span>
               <ChevronDown size={14} className={`ml-auto text-slate-400 transition-transform ${showViewers ? "rotate-180" : ""}`} />
             </button>
-            {showViewers && (
-              <div className="overflow-x-auto max-h-[320px] overflow-y-auto border-t border-slate-100" data-testid="viewers">
-                <table className="w-full text-[12.5px]" style={{ minWidth: 640 }}>
-                  <thead className="bg-slate-50 text-slate-500 text-[11.5px] sticky top-0"><tr>{["이름", "역할", "첫 열람", "마지막 열람", "횟수", "조회확인"].map((h) => <th key={h} className="px-4 py-0 h-9 font-medium text-left whitespace-nowrap border-b border-slate-200">{h}</th>)}</tr></thead>
-                  <tbody>
-                    {viewers.length ? viewers.map((v) => (
-                      <tr key={v.UserEmail} className="border-t border-slate-100 first:border-t-0" data-viewer={v.UserEmail}>
-                        <td className="px-4 h-9 text-slate-800 font-medium whitespace-nowrap" title={`${v.UserEmail}${v.company ? ` · ${v.company}` : ""}`}>{v.name}</td>
-                        <td className="px-4 py-0 h-9"><RoleBadge role={v.role} small /></td>
-                        <td className="px-4 py-0 h-9 text-slate-500 tabular-nums whitespace-nowrap">{fmtDate(v.FirstViewedAt)}</td>
-                        <td className="px-4 py-0 h-9 text-slate-500 tabular-nums whitespace-nowrap">{fmtDate(v.LastViewedAt)}</td>
-                        <td className="px-4 py-0 h-9 text-slate-500 tabular-nums">{Number(v.ViewCount) || 1}</td>
-                        <td className="px-4 py-0 h-9">{v.ConfirmedAt ? <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 size={12} />{fmtDate(v.ConfirmedAt).slice(5)}</span> : <span className="text-slate-300">{v.role === "Agent" ? "미확인" : "대상 아님"}</span>}</td>
-                      </tr>
-                    )) : <tr><td colSpan={6} className="text-center text-slate-400 py-6">아직 열람한 사람이 없습니다.</td></tr>}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            {showViewers && viewersTable}
           </div>
         </div>
       )}
@@ -2146,6 +2329,29 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
   const hasOldVideo = isEdit && !!(safeHttpsUrl(post.VideoUrl) || parseFiles(post.VideoFileJson).length);
   useEffect(() => { if (!touchedReq.current) setReqConfirm(!!(ctx.catMap[cat] && ctx.catMap[cat].required)); }, [cat]);
   useEffect(() => { const t = setTimeout(() => { const el = document.querySelector("[data-testid=ed-title]"); if (el && !isEdit) el.focus(); }, 60); return () => clearTimeout(t); }, []);
+  // 임시 저장(새 글만) — 이 기기 브라우저에 제목 · 본문 · 게시판 · 옵션을 자동 저장. 창이 닫히거나 새로고침돼도 다음 「글쓰기」 에서 불러온다(첨부파일 제외)
+  const draftKey = `t365.draft.${normEmail(ctx.me.email)}`;
+  const [draft, setDraft] = useState(() => {
+    if (isEdit) return null;
+    try { const d = JSON.parse(localStorage.getItem(draftKey) || "null"); return d && (String(d.title || "").trim() || String(d.body || "").trim()) ? d : null; } catch (e) { return null; }
+  });
+  useEffect(() => {
+    if (isEdit) return;
+    if (draft) { if (title.trim() || body.trim()) setDraft(null); return; }   // 묻는 동안은 덮어쓰지 않는다 — 불러오지 않고 새로 쓰기 시작하면 새 글이 임시 글이 된다
+    const t = setTimeout(() => {
+      try { if (title.trim() || body.trim()) localStorage.setItem(draftKey, JSON.stringify({ cat, title, body, pinned, reqConfirm, at: new Date().toISOString() })); else localStorage.removeItem(draftKey); } catch (e) {}   // 다 지우면 임시 글도 지운다
+    }, 600);
+    return () => clearTimeout(t);
+  }, [title, body, cat, pinned, reqConfirm, draft]);
+  const clearDraft = () => { try { localStorage.removeItem(draftKey); } catch (e) {} };
+  function restoreDraft() {
+    if (draft.cat && ctx.canWrite(draft.cat)) setCat(draft.cat);
+    setTitle(draft.title || ""); setBody(draft.body || "");
+    if (!ctx.isAgent) { setPinned(!!draft.pinned); touchedReq.current = true; setReqConfirm(!!draft.reqConfirm); }
+    setDraft(null);
+  }
+  function discardDraft() { clearDraft(); setDraft(null); }
+  const isQna = cat === "qna";
 
   function wrap(before, after, placeholder) {
     const el = ta.current; if (!el) return;
@@ -2207,6 +2413,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
         setSaving("최신 내용을 확인하고 있습니다...");
         const cur = await tGetItem(T365_LISTS.posts, id).catch(() => undefined);
         if (cur === null) { setSaving(""); savingRef.current = false; uiAlert("이 게시물은 그 사이에 삭제되었습니다 — 저장할 수 없습니다."); return; }
+        if (cur && !ctx.isAdmin && cur.Category === "qna" && qnaAnswered(cur)) { setSaving(""); savingRef.current = false; uiAlert("이 질문에 그 사이 답변이 달렸습니다 — 답변이 달린 질문은 고칠 수 없습니다.\n바꿀 내용이 있으면 새 질문으로 올려 주세요."); return; }
         if (cur && post._modified && cur._modified && cur._modified !== post._modified) {
           setSaving("");
           const who = cur.UpdatedBy ? `${cur.UpdatedBy} 님이 ` : "다른 사람이 ";
@@ -2233,6 +2440,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
         t365Log("게시물", "등록", t, { info: { 카테고리: (ctx.catMap[cat] || {}).label || cat, 게시물ID: id, 첨부: `${uploaded.length}개`, ...(uploaded.length ? { "첨부 위치": `${T365_ATTACH_LIB}/${T365_ATTACH_ROOT}/${id}` } : {}), 중요: !!pinned, "조회확인 필수": !!reqConfirm } });
       }
       setSaving(""); savingRef.current = false;
+      if (!isEdit) clearDraft();
       if (failed.length) uiAlert(`게시물은 저장됐지만 첨부 ${failed.length}개를 올리지 못했습니다 — 「수정」에서 다시 첨부해 주세요.\n\n${failed.join("\n")}`);
       onSaved(id, cat);   // 고른 게시판(cat)을 함께 — 다른 게시판에 올렸으면 그 게시판으로 가서 연다
     } catch (e) { setSaving(""); savingRef.current = false; uiAlert(e.message); }
@@ -2243,7 +2451,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
     const touched = isEdit ? (title !== (post.Title || "") || body !== (post.Body || "") || newFiles.length || files.length !== parseFiles(post.AttachmentsJson).length) : (title.trim() || body.trim() || newFiles.length);
     if (!touched) { onClose(); return; }
     closingRef.current = true;
-    const ok = await uiConfirm("작성 중인 내용을 닫을까요? 저장하지 않은 내용은 사라집니다.", { title: "작성 중인 글 닫기", okText: "닫기", cancelText: "계속 쓰기", danger: true });
+    const ok = await uiConfirm(isEdit ? "수정한 내용을 저장하지 않고 닫을까요? 바꾼 내용은 사라집니다." : "작성 중인 글을 닫을까요?\n제목 · 본문은 이 기기에 임시 저장되어 다음에 「글쓰기」를 열면 불러올 수 있습니다(첨부파일은 다시 올려야 합니다).", { title: isEdit ? "수정 취소" : "작성 중인 글 닫기", okText: "닫기", cancelText: "계속 쓰기", danger: !!isEdit });
     closingRef.current = false;
     if (ok) onClose();
   }
@@ -2285,14 +2493,14 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
   );
 
   return (
-    <PostModalShell onClose={requestClose} label={isEdit ? "게시물 수정" : "글쓰기"} zClass="z-[60]" panelClass="md:max-w-[1180px] md:h-[min(92vh,900px)]" testid="editor" suspended={!!saving}>
+    <PostModalShell onClose={requestClose} label={isEdit ? (isQna ? "질문 수정" : "게시물 수정") : (isQna ? "질문하기" : "글쓰기")} zClass="z-[60]" panelClass="md:max-w-[1180px] md:h-[min(92vh,900px)]" testid="editor" suspended={!!saving}>
       {/* 머리 */}
       <div className="shrink-0 h-1 transition-colors duration-300" style={{ background: curCat ? `linear-gradient(90deg, ${curCat.color}, ${curCat.color}55)` : BRAND.accent }} aria-hidden="true"></div>
       <div className="shrink-0 h-14 px-4 md:px-6 flex items-center gap-3 border-b border-slate-100">
         <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors duration-300" style={{ background: curCat ? curCat.soft : BRAND.accentSoft }} data-testid="ed-head-icon"><CatIcon size={17} style={{ color: curCat ? curCat.color : BRAND.accent }} /></span>
         <div className="min-w-0 flex-1 leading-tight">
-          <div className="text-[15px] font-semibold text-slate-800">{isEdit ? "게시물 수정" : "글쓰기"}</div>
-          <div className="text-[11.5px] text-slate-400 truncate hidden sm:block">{isEdit ? `${post.AuthorName || ""} · ${fmtDate(post.PublishedAt || post._created)} 게시` : (curCat ? `${curCat.label} 게시판에 올립니다 — 제목 · 본문을 쓰고 「게시」를 누르세요` : "게시판 · 제목 · 본문을 쓰고 「게시」를 누르세요")}</div>
+          <div className="text-[15px] font-semibold text-slate-800" data-testid="ed-heading">{isEdit ? (isQna ? "질문 수정" : "게시물 수정") : (isQna ? "질문하기" : "글쓰기")}</div>
+          <div className="text-[11.5px] text-slate-400 truncate hidden sm:block">{isEdit ? `${post.AuthorName || ""} · ${fmtDate(post.PublishedAt || post._created)} 게시` : isQna ? "궁금한 점을 올리면 담당자가 답변합니다 — 다른 Agent 도 볼 수 있으니 고객 개인정보는 쓰지 마세요" : (curCat ? `${curCat.label} 게시판에 올립니다 — 제목 · 본문을 쓰고 「게시」를 누르세요` : "게시판 · 제목 · 본문을 쓰고 「게시」를 누르세요")}</div>
         </div>
         <button onClick={requestClose} aria-label="닫기" title="닫기 (Esc)" className="w-9 h-9 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-800 hover:bg-slate-100"><X size={19} /></button>
       </div>
@@ -2300,6 +2508,14 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
       <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden">
         {/* 왼쪽 — 본문 */}
         <div className="flex-1 min-w-0 flex flex-col p-4 md:p-6 gap-4 md:overflow-y-auto">
+          {draft && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 flex items-center gap-2 text-[12.5px] text-amber-900" data-testid="ed-draft">
+              <History size={14} className="text-amber-600 shrink-0" />
+              <span className="min-w-0 flex-1 truncate" title="이 기기에 임시 저장된 제목 · 본문입니다(첨부파일 제외)">작성 중이던 글이 있습니다 — 「{String(draft.title || "").trim() || "제목 없음"}」 · {shortDate(draft.at)}</span>
+              <button onClick={restoreDraft} className="h-7 px-2.5 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-[12px] font-semibold shrink-0" data-testid="ed-draft-restore">불러오기</button>
+              <button onClick={discardDraft} className="h-7 px-2 rounded-md text-[12px] text-amber-800 hover:bg-amber-100 shrink-0" data-testid="ed-draft-discard">버리기</button>
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="sm:col-span-2">
               <label className="block text-[12px] font-medium text-slate-500 mb-1.5">게시판 <span className="text-red-500">*</span></label>
@@ -2315,7 +2531,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
             </div>
             <div className="sm:col-span-2">
               <label className="flex items-center text-[12px] font-medium text-slate-500 mb-1">제목 <span className="text-red-500 ml-0.5">*</span><span className={`ml-auto tabular-nums text-[11px] ${title.length > T365_TITLE_MAX * 0.9 ? "text-amber-600" : "text-slate-400"}`} data-testid="ed-title-count">{title.length} / {T365_TITLE_MAX}</span></label>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={T365_TITLE_MAX} className={`${inputCls} h-10 text-[15px] font-medium`} placeholder="예: 기프트 세트 링크 접속 방법" data-testid="ed-title" />
+              <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={T365_TITLE_MAX} className={`${inputCls} h-10 text-[15px] font-medium`} placeholder={isQna ? "예: 견적서 할인율은 어디서 확인하나요?" : "예: 기프트 세트 링크 접속 방법"} data-testid="ed-title" />
             </div>
           </div>
           <div className="flex-1 min-h-[340px] flex flex-col border border-slate-300 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-[#2F7B7A]/30 focus-within:border-[#2F7B7A]/50">
@@ -2333,7 +2549,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
             <div className={`flex-1 min-h-0 flex ${mode === "split" ? "divide-x divide-slate-200" : ""}`}>
               {mode !== "preview" && (
                 <textarea ref={ta} value={body} onChange={(e) => setBody(e.target.value)} className="flex-1 min-w-0 w-full px-4 py-3 text-[14.5px] leading-[1.8] focus:outline-none resize-none block min-h-[300px]" data-testid="ed-body"
-                  placeholder={"내용을 입력하세요.\n\n예)\n## 접속 방법\n1. CRM 에 로그인합니다\n2. 메뉴에서 **기프트 세트** 를 누릅니다\n> 권한이 없으면 담당자에게 요청해 주세요"}></textarea>
+                  placeholder={isQna ? "궁금한 점을 자세히 적어 주세요 — 자세할수록 답변이 빠릅니다.\n\n예)\n- 어떤 화면에서: CRM 견적 화면\n- 하려던 일: 할인율 적용\n- 막힌 점: 할인율 칸이 보이지 않습니다\n\n화면 캡처는 오른쪽 「첨부파일」 로 올려 주세요." : "내용을 입력하세요.\n\n예)\n## 접속 방법\n1. CRM 에 로그인합니다\n2. 메뉴에서 **기프트 세트** 를 누릅니다\n> 권한이 없으면 담당자에게 요청해 주세요"}></textarea>
               )}
               {mode !== "write" && <div className="flex-1 min-w-0 overflow-y-auto px-5 py-4 bg-white min-h-[300px]" data-testid="ed-preview">{body.trim() ? preview : <p className="text-[13px] text-slate-300">미리 볼 내용이 없습니다.</p>}</div>}
             </div>
@@ -2373,19 +2589,29 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
                 <span className={`truncate text-[13.5px] font-semibold ${title.trim() ? "text-slate-900" : "text-slate-300"}`}>{title.trim() || "제목을 입력하세요"}</span>
                 {reqConfirm && <span className="text-[9.5px] font-bold px-1 rounded leading-[15px] shrink-0" style={{ background: "#FDEEE6", color: "#C2410C" }}>필수</span>}
                 {allCount > 0 && <Paperclip size={11.5} className="text-slate-400 shrink-0" />}
-                <span className="text-[8.5px] font-extrabold text-white rounded-[3px] w-[13px] h-[13px] inline-flex items-center justify-center shrink-0" style={{ background: "#E11D48" }}>N</span>
+                <NewDot />
               </div>
-              <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5 min-w-0"><CatTag cat={curCat} /><span>·</span><span className="truncate">{isEdit ? post.AuthorName : ctx.me.name}</span><span>·</span><span className="tabular-nums">{fmtDay(isEdit ? post.PublishedAt || post._created : new Date().toISOString()).slice(2).replace(/-/g, ".")}</span></div>
+              <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5 min-w-0"><CatTag cat={curCat} /><span>·</span><span className="truncate">{isEdit ? post.AuthorName : ctx.me.name}</span><span>·</span><span className="tabular-nums">{shortDate(isEdit ? post.PublishedAt || post._created : new Date().toISOString())}</span></div>
               {body.trim() && <p className="text-[11.5px] text-slate-500 mt-1.5 t365-clamp2">{plainPreview(body, 160)}</p>}
             </div>
           </Card>
-          <Card title="작성 안내" icon={Info}>
+          <Card title={isQna ? "질문 안내" : "작성 안내"} icon={Info}>
+            {isQna ? (
+            <ul className="text-[11.5px] text-slate-500 space-y-1.5 leading-snug" data-testid="ed-tips-qna">
+              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>질문은 <b className="text-slate-700">다른 Agent 도 볼 수 있습니다</b> — 고객 이름 · 연락처 · 계약 정보는 쓰지 마세요.</span></li>
+              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>답변이 달리면 Overview 의 Q&A 상자에 <b className="text-slate-700">「새 답변」</b> 으로 표시됩니다.</span></li>
+              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>화면 캡처를 첨부하면 더 빨리 답변할 수 있습니다.</span></li>
+              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>올린 질문은 <b>답변이 달리기 전까지</b> 본인만 고치거나 지울 수 있습니다.</span></li>
+            </ul>
+            ) : (
             <ul className="text-[11.5px] text-slate-500 space-y-1.5 leading-snug" data-testid="ed-tips">
               <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>첫 줄에 핵심을 쓰고, 단계는 <b className="text-slate-700">1. 번호 목록</b>으로 정리하면 읽기 쉽습니다.</span></li>
               <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>링크는 <b className="text-slate-700">https://</b> 주소만 연결됩니다. 영상은 공유 링크를 본문에 붙여 주세요.</span></li>
               <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>개인정보 · 고객 연락처는 올리지 마세요.</span></li>
               <li className="flex gap-1.5"><span className="text-slate-300">•</span><span><kbd className="px-1 rounded border border-slate-200 bg-white text-[10.5px]">Ctrl</kbd> + <kbd className="px-1 rounded border border-slate-200 bg-white text-[10.5px]">Enter</kbd> 로 바로 게시합니다.</span></li>
+              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>쓰는 동안 이 기기에 <b className="text-slate-700">임시 저장</b>되어, 창이 닫혀도 다음 글쓰기에서 불러올 수 있습니다.</span></li>
             </ul>
+            )}
             {hasOldVideo && <p className="mt-2 text-[11px] text-slate-500 bg-slate-50 rounded-md px-2 py-1.5" data-testid="ed-old-video"><PlayCircle size={11} className="inline -mt-0.5 mr-1" />이 글에 연결된 동영상은 보기 화면에서 그대로 재생됩니다.</p>}
           </Card>
         </aside>
@@ -2396,7 +2622,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
         <span className="text-[11.5px] text-slate-400 hidden md:inline"><span className="text-red-500">*</span> 필수 — 게시판 · 제목 · 본문 또는 첨부</span>
         <span className="ml-auto text-[11px] text-slate-400 hidden lg:inline mr-1">Ctrl + Enter</span>
         <button onClick={requestClose} disabled={!!saving} className="h-10 px-4 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 ml-auto lg:ml-0">취소</button>
-        <button onClick={save} disabled={!!saving} className="h-10 px-6 text-sm rounded-lg text-white font-semibold disabled:opacity-50 inline-flex items-center gap-1.5 shadow-sm transition-colors duration-300 hover:brightness-110" style={{ background: curCat ? curCat.color : BRAND.accent }} data-testid="ed-save"><CheckCircle2 size={15} />{isEdit ? "수정 저장" : "게시"}</button>
+        <button onClick={save} disabled={!!saving} className="h-10 px-6 text-sm rounded-lg text-white font-semibold disabled:opacity-50 inline-flex items-center gap-1.5 shadow-sm transition-colors duration-300 hover:brightness-110" style={{ background: curCat ? curCat.color : BRAND.accent }} data-testid="ed-save"><CheckCircle2 size={15} />{isEdit ? "수정 저장" : isQna ? "질문 올리기" : "게시"}</button>
       </div>
       {saving && <BlockingOverlay message={saving} />}
     </PostModalShell>
@@ -3171,7 +3397,7 @@ const T365_FRESH_MS = 864e5;
 function BoardIconStrip({ ctx, onGo }) {
   const { posts, cats, readIdx, me } = ctx;
   const since = Date.now() - T365_FRESH_MS;
-  const read = (p) => !!(readIdx.get(String(p.id)) || new Map()).get(normEmail(me.email));
+  const read = (p) => seenBy(p, (readIdx.get(String(p.id)) || new Map()).get(normEmail(me.email)), me);
   return (
     <div className="flex items-end gap-1 md:gap-1.5 overflow-x-auto pb-0.5 -mx-1 px-1" data-testid="board-icons">
       {cats.map((c) => {
@@ -3328,7 +3554,7 @@ function CatStyleModal({ ctx, d, onApply, onClose }) {
   }
   const sec = "text-[12px] font-semibold text-slate-500 mb-2 flex items-center gap-1.5";
   return (
-    <Modal title={`${d.label} — 아이콘 · 색 · 문의 담당자`} onClose={onClose} wide>
+    <Modal title={`${d.label} — 아이콘 · 색 · ${d.key === "qna" ? "답변 담당자" : "문의 담당자"}`} onClose={onClose} wide>
       <div className="flex items-center gap-3 mb-4 p-3 rounded-xl bg-slate-50 border border-slate-200" data-testid="cs-preview">
         <CatIconBox cat={preview} size={40} icon={20} />
         <div className="min-w-0"><div className="text-[14px] font-semibold text-slate-800">{d.label}</div><div className="text-[11.5px] text-slate-400">사이드바 · 게시판 홈 · 글쓰기에서 이렇게 보입니다</div></div>
@@ -3360,7 +3586,7 @@ function CatStyleModal({ ctx, d, onApply, onClose }) {
         })}
       </div>
 
-      <div className={sec}><HelpCircle size={13} />문의 담당자 <span className="font-normal text-slate-400">— 「문의하기」 와 이 게시판 머리에 보입니다 · {T365_CONTACT_MAX}명까지</span></div>
+      <div className="text-[12px] text-slate-500 mb-2 leading-relaxed"><span className="inline-flex items-center gap-1.5 font-semibold whitespace-nowrap align-middle"><HelpCircle size={13} />{d.key === "qna" ? "답변 담당자" : "문의 담당자"}</span> <span className="text-slate-400">— {d.key === "qna" ? "「답변 대기」 질문 숫자(주황)가 이 사람들에게 갑니다. 비워 두면 답변할 수 있는 직원 모두에게 갑니다 · 「문의하기」 에도 보입니다" : "「문의하기」 와 이 게시판 머리에 보입니다"} · {T365_CONTACT_MAX}명까지</span></div>
       <div className="space-y-1.5 mb-2" data-testid="cs-contacts">
         {contacts.length ? contacts.map((c, k) => (
           <div key={c.email} className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-slate-200 bg-white" data-contact={c.email}>
@@ -3510,7 +3736,7 @@ function CategoriesTab({ ctx, catRows, bannerRows, listStatus, reload }) {
                         {d.contacts.length ? <>
                           <span className="flex -space-x-1 shrink-0">{d.contacts.slice(0, 3).map((c) => <span key={c.email} className="w-5 h-5 rounded-full ring-2 ring-white flex items-center justify-center text-[9.5px] font-bold text-white" style={{ background: vc.color }}>{String(c.name || c.email).trim().slice(0, 1).toUpperCase()}</span>)}</span>
                           <span className="text-[12px] text-slate-600 truncate">{d.contacts.map((c) => c.name || c.email).join(", ")}</span>
-                        </> : <span className="inline-flex items-center gap-1 text-[11.5px] text-slate-400 hover:text-slate-700">{locked ? "담당자 없음" : <><UserPlus size={12} />담당자 지정</>}</span>}
+                        </> : <span className="inline-flex items-center gap-1 text-[11.5px] text-slate-400 hover:text-slate-700">{locked ? "담당자 없음" : <><UserPlus size={12} />{d.key === "qna" ? "답변 담당자 지정" : "담당자 지정"}</>}</span>}
                       </button>
                       <span className="shrink-0 text-[11.5px] text-slate-400 inline-flex items-center gap-1"><FileText size={12} />게시물 <b className="text-slate-700 tabular-nums">{counts[d.key] || 0}</b></span>
                     </div>
@@ -3968,15 +4194,22 @@ function HelpFab({ ctx }) {
   }, [open]);
   const withC = ctx.cats.filter((c) => (c.contacts || []).length).length;
   return (
-    <div ref={ref} className="fixed right-4 bottom-4 md:right-6 md:bottom-6 z-[60] flex flex-col items-end gap-3" data-testid="help-fab-wrap">
+    <div ref={ref} className="fixed right-4 bottom-4 md:right-6 md:bottom-6 z-40 flex flex-col items-end gap-3" data-testid="help-fab-wrap">
       {open && (
         <div className="w-[300px] max-w-[calc(100vw-32px)] rounded-2xl overflow-hidden shadow-2xl border border-slate-200 bg-white t365-dlg-in" role="dialog" aria-label="도움말" data-testid="help-pop">
           <div className="relative px-4 pt-4 pb-3.5 text-white" style={{ background: "linear-gradient(135deg,#16294A 0%,#1A3B55 60%,#22525A 100%)" }}>
             <HelpCircle size={70} strokeWidth={1.2} className="absolute -right-2 -bottom-3 text-white/[0.07]" aria-hidden="true" />
             <div className="text-[14px] font-semibold">도움이 필요하세요?</div>
-            <p className="text-[12px] text-white/70 leading-relaxed mt-1 break-keep">궁금한 것은 먼저 게시판에서 찾아보고, 해결되지 않으면 아래로 문의해 주세요.</p>
+            <p className="text-[12px] text-white/70 leading-relaxed mt-1 break-keep">궁금한 것은 먼저 게시판에서 찾아보고, 해결되지 않으면 Q&A 에 질문하거나 아래로 문의해 주세요.</p>
           </div>
           <div className="p-2">
+            {ctx.catMap.qna && ctx.canWrite("qna") && (
+              <button onClick={() => { setOpen(false); ctx.askQuestion(); }} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 text-left" data-testid="help-ask">
+                <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: "#E1EAFD", color: "#1D4ED8" }}><MessageCircleQuestion size={15} /></span>
+                <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-slate-800">Q&A 에 질문하기</span><span className="block text-[11.5px] text-slate-400">담당자가 게시판에서 답변합니다</span></span>
+                <ChevronRight size={15} className="text-slate-300" />
+              </button>
+            )}
             <button onClick={() => { setOpen(false); ctx.openContact(); }} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 text-left" data-testid="link-contact">
               <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: BRAND.accentSoft, color: BRAND.accent }}><Mail size={15} /></span>
               <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-slate-800">자료 · 권한 · 사용법</span><span className="block text-[11.5px] text-slate-400">게시판별 담당자{withC ? ` · ${withC}개 게시판` : ""}</span></span>
@@ -4085,7 +4318,12 @@ function App({ boot }) {
     .filter((u, i, a) => a.findIndex((x) => normEmail(x.Email) === normEmail(u.Email)) === i);
   const readIdx = useMemo(() => indexReads(reads), [reads]);
   const canWrite = (k) => !!catMap[k] && P["cat:" + k] === "e";
-  const canEditPost = (p) => canWrite(p.Category) && (isAdmin || normEmail(p.AuthorEmail) === normEmail(me.email));   // 그 게시판 편집 권한 + (관리자 역할이거나 본인 글)
+  // 그 게시판 편집 권한 + (관리자 역할이거나 본인 글). 답변이 달린 Q&A 질문은 질문자도 고치거나 지울 수 없다(답변과 어긋나거나 다른 Agent 가 볼 답이 사라지지 않게) — 관리자만
+  const canEditPost = (p) => canWrite(p.Category) && (isAdmin || (normEmail(p.AuthorEmail) === normEmail(me.email) && !(p.Category === "qna" && qnaAnswered(p))));
+  // Q&A 답변 담당 — 답변은 Agent 가 아닌 Q&A 편집 권한자 누구나 쓸 수 있지만, 「답변 대기」 할 일(주황 숫자 · 홈 Q&A 상자 위로)은
+  // Q&A 게시판의 문의 담당자(카테고리 관리에서 지정)에게만. 담당자를 정하지 않았으면 답변할 수 있는 직원 모두에게
+  const qnaContacts = ((catMap.qna && catMap.qna.contacts) || []).map((c) => normEmail(c.email));
+  const qnaDuty = !isAgent && canWrite("qna") && (!qnaContacts.length || qnaContacts.includes(normEmail(me.email)));
 
   const reloadSeq = useRef(0);
   async function reload() {
@@ -4127,11 +4365,13 @@ function App({ boot }) {
   }
   const setOpenId = (id) => setTab(tab, id ? String(id) : null);
   const openPost = (p) => setTab(catMap[p.Category] ? "cat:" + p.Category : "all", String(p.id));
-  const openSearch = (q, filter) => { setBoardSeed({ q: q || "", filter: filter || "all", n: Date.now() }); setTab("all"); };
+  const openSearch = (q, filter) => { setBoardSeed({ tab: "all", q: q || "", filter: filter || "all", n: Date.now() }); setTab("all"); };
   useEffect(() => { const on = () => { const x = parseHash(); setTabRaw(x.tab); setOpenPostRaw(x.post); }; window.addEventListener("popstate", on); return () => window.removeEventListener("popstate", on); }, []);
   const upsertRead = (row) => setReads((prev) => { const i = prev.findIndex((x) => x.Title === row.Title); if (i < 0) return [...prev, row]; const n = prev.slice(); n[i] = { ...n[i], ...row }; return n; });
 
-  const ctx = { goPost: (cat, id) => setTab(catMap[cat] ? "cat:" + cat : "all", String(id)), openContact: () => setContactOpen(true), me, role, isAdmin, isAgent, canWrite, canEditPost, canView, canEditMenu, perms: P, cats, catMap, users, agents, posts, readIdx, upsertRead, reload };
+  const ctx = { goPost: (cat, id) => setTab(catMap[cat] ? "cat:" + cat : "all", String(id)), openContact: () => setContactOpen(true),
+    askQuestion: () => { if (!catMap.qna || !canWrite("qna")) return; setBoardSeed({ tab: "cat:qna", compose: true, n: Date.now() }); setTab("cat:qna"); },   // Q&A 게시판으로 가서 질문 쓰기 창을 바로
+    me, role, isAdmin, isAgent, canWrite, canEditPost, qnaDuty, canView, canEditMenu, perms: P, cats, catMap, users, agents, posts, readIdx, upsertRead, reload };
 
   // 화면 접근 — 관리 화면은 관리자만, 확인 현황은 Agent 제외, 카테고리는 사용 중인 것만
   const tabAllowed = (t) => !!role && (t === "overview" || (t === "all" && canView("all")) || (t.startsWith("cat:") && !!catMap[t.slice(4)]) || ((t === "status" || T365_ADMIN_TABS.includes(t)) && canView(t)));
@@ -4161,10 +4401,16 @@ function App({ boot }) {
   if (denied) return <AccessDenied ident={boot.me} reason={denied} contacts={[]} />;
 
   const myRead = (p) => (readIdx.get(String(p.id)) || new Map()).get(normEmail(me.email));
+  // 사이드바 숫자 — 역할마다 「할 일」 이 먼저(진한 색): Agent 는 확인할 필수(주황) · 내 질문의 새 답변(파랑), 답변 담당자는 Q&A 답변 대기(주황).
+  // 그 밖에는 안 읽은 글 수(옅은 회색 — 할 일과 섞여 보이지 않게. 내 글은 세지 않음)
   const badgeFor = (key) => {
     const list = posts.filter((p) => p.Category === key);
-    if (isAgent) { const todo = list.filter((p) => p.RequireConfirm && !(myRead(p) && myRead(p).ConfirmedAt)).length; if (todo) return { n: todo, color: "#C2410C" }; }
-    const n = list.filter((p) => !myRead(p)).length; return n ? { n, color: "#DC2626" } : null;
+    if (isAgent) { const todo = list.filter((p) => p.RequireConfirm && !(myRead(p) && myRead(p).ConfirmedAt)).length; if (todo) return { n: todo, color: "#EA580C", title: "확인할 필수 자료" }; }
+    if (key === "qna") {
+      if (isAgent) { const na = list.filter((p) => normEmail(p.AuthorEmail) === normEmail(me.email) && qnaAnswered(p) && (!myRead(p) || String(myRead(p).LastViewedAt || "") < String(p.AnsweredAt || ""))).length; if (na) return { n: na, color: "#2563EB", title: "내 질문의 새 답변" }; }
+      else if (qnaDuty) { const w = list.filter((p) => !qnaAnswered(p)).length; if (w) return { n: w, color: "#EA580C", title: "답변 대기 질문" }; }
+    }
+    const n = list.filter((p) => !seenBy(p, myRead(p), me)).length; return n ? { n, tone: "quiet", title: "안 읽은 글" } : null;
   };
   const homeNav = [{ id: "overview", label: "Overview", icon: LayoutDashboard }, { id: "all", label: "전체 게시물", icon: LayoutList }].filter((n) => n.id === "overview" || canView(n.id));
   const boardNav = cats.map((c) => ({ id: "cat:" + c.key, label: c.label, icon: c.icon || FileText, badge: badgeFor(c.key) }));
@@ -4217,7 +4463,7 @@ function App({ boot }) {
               {items.map((n) => {
                 const active = tab === n.id;
                 return (
-                  <button key={n.id} data-nav={n.id} aria-label={n.label} onClick={() => { setSideTip(null); setTab(n.id); if (isMobile) setDrawerOpen(false); }}
+                  <button key={n.id} data-nav={n.id} aria-label={n.badge ? `${n.label} — ${n.badge.title} ${n.badge.n}건` : n.label} onClick={() => { setSideTip(null); setTab(n.id); if (isMobile) setDrawerOpen(false); }}
                     className="relative w-full flex items-center text-left gap-2.5 px-3 py-2.5 rounded-lg text-sm mb-0.5 transition-colors whitespace-nowrap min-h-[40px]"
                     style={{ backgroundColor: active ? BRAND.navySoft : "transparent", color: active ? "#fff" : "#B7C0D1", borderLeft: active ? `3px solid ${BRAND.accent}` : "3px solid transparent" }}
                     onMouseEnter={(e) => { if (!active) e.currentTarget.style.backgroundColor = BRAND.navyHover; showSideTip(e, n.label); }}
@@ -4225,9 +4471,9 @@ function App({ boot }) {
                     <n.icon size={17} className="shrink-0" />
                     {!railCollapsed && <span className="leading-snug flex-1 truncate">{n.label}</span>}
                     {n.badge && (railCollapsed ? (
-                      <span className="absolute top-1 left-[26px] text-[9px] leading-none font-bold rounded-full px-1 min-w-[16px] h-[16px] flex items-center justify-center" style={{ backgroundColor: n.badge.color, color: "#fff", boxShadow: `0 0 0 2px ${BRAND.navy}` }}>{n.badge.n > 99 ? "99+" : n.badge.n}</span>
+                      <span className="absolute top-1 left-[26px] text-[9px] leading-none font-bold rounded-full px-1 min-w-[16px] h-[16px] flex items-center justify-center" style={{ backgroundColor: n.badge.tone === "quiet" ? "#475569" : n.badge.color, color: n.badge.tone === "quiet" ? "#E2E8F0" : "#fff", boxShadow: `0 0 0 2px ${BRAND.navy}` }} title={`${n.badge.title} ${n.badge.n}건`} aria-hidden="true">{n.badge.n > 99 ? "99+" : n.badge.n}</span>
                     ) : (
-                      <span className="shrink-0 text-[11px] font-semibold rounded-full px-1.5 min-w-[18px] text-center" style={{ backgroundColor: n.badge.color, color: "#fff" }} data-badge={n.id}>{n.badge.n > 99 ? "99+" : n.badge.n}</span>
+                      <span className="shrink-0 text-[11px] font-semibold rounded-full px-1.5 min-w-[18px] text-center tabular-nums" style={n.badge.tone === "quiet" ? { backgroundColor: "rgba(255,255,255,.1)", color: "#AEB8C9" } : { backgroundColor: n.badge.color, color: "#fff" }} data-badge={n.id} data-badge-kind={n.badge.title} data-badge-tone={n.badge.tone || "todo"} title={`${n.badge.title} ${n.badge.n}건`} aria-hidden="true">{n.badge.n > 99 ? "99+" : n.badge.n}</span>
                     ))}
                   </button>
                 );
@@ -4284,7 +4530,7 @@ function App({ boot }) {
             <button onClick={t365Logout} data-testid="btn-logout" className={`${isMobile && showAps ? "hidden" : "block"} text-xs font-medium text-slate-500 border border-slate-200 rounded-lg px-3 py-1.5 hover:border-red-300 hover:text-red-500 transition-colors whitespace-nowrap`}>로그아웃</button>
           </div>
         </div>
-        <main className="t365-main-scroll flex-1 p-4 md:p-6 overflow-y-auto">
+        <main className="t365-main-scroll flex-1 p-4 pb-24 md:p-6 md:pb-24 overflow-y-auto">
           <div className="max-w-[1600px] mx-auto">
             {tab !== "overview" && !(openPostId && (tab.startsWith("cat:") || tab === "all")) && (
               <PageHeader icon={meta[0]} title={cur.label} subtitle={meta[1]} tint={meta[2]} right={curCat && curCat.contacts && curCat.contacts.length ? (
@@ -4305,7 +4551,7 @@ function App({ boot }) {
             ) : (
               <>
                 {tab === "overview" && <OverviewTab ctx={ctx} openPost={(p) => setTab("overview", String(p.id))} openId={openPostId} setOpenId={setOpenId} setTab={(t) => { if (tabAllowed(t)) setTab(t); }} onSearch={openSearch} banners={parseBanners(bannerRows)} onManageBanners={canEditMenu("categories") ? () => setTab("categories") : null} />}
-                {(tab === "all" || tab.startsWith("cat:")) && <BoardTab ctx={ctx} catKey={tab === "all" ? null : tab.slice(4)} openId={openPostId} setOpenId={setOpenId} seed={tab === "all" ? boardSeed : null} onSeedUsed={() => setBoardSeed(null)} />}
+                {(tab === "all" || tab.startsWith("cat:")) && <BoardTab ctx={ctx} catKey={tab === "all" ? null : tab.slice(4)} openId={openPostId} setOpenId={setOpenId} seed={boardSeed && boardSeed.tab === tab ? boardSeed : null} onSeedUsed={() => setBoardSeed(null)} />}
                 {tab === "status" && <ConfirmStatusTab ctx={ctx} openPost={openPost} />}
                 {tab === "users" && <UsersTab ctx={ctx} users={users} bootstrap={boot.isBootAdmin} accessRows={accessRows} listStatus={listStatus} reload={reload} />}
                 {tab === "categories" && <CategoriesTab ctx={ctx} catRows={catRows} bannerRows={bannerRows} listStatus={listStatus} reload={reload} />}
