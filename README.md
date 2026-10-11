@@ -12,7 +12,7 @@ Star Truck Korea 본사와 Sales Agent(판매대리인)를 잇는 소통 채널 
 ## 구성
 
 - `index.html` 한 파일(React 18 · 브라우저 Babel · Tailwind CDN) — MKQR · ICS 와 같은 틀(남색 사이드바 · ←| 접기 · 휴대폰 서랍)
-- 데이터: STK-DB SharePoint 목록 `training365_Posts` · `training365_Reads` · `training365_Users` · `training365_AccessLog` (+ 선택 `training365_Categories`), 첨부는 문서 라이브러리 `training365/` 폴더, 관리 이력은 `Logging_data/Training365/`
+- 데이터: STK-DB SharePoint 목록 `training365_Posts` · `training365_Reads` · `training365_Users` · `training365_AccessLog` (+ 선택 `training365_Categories`), 첨부는 AttachedFiles 라이브러리 `Training365_Media-Files/{게시물 번호}/`, 관리 이력은 `Logging_data/Training365/`
 - Worker 없음 · 빌드 없음 — main 에 push 하면 GitHub Pages 로 배포
 
 ## 처음 설정

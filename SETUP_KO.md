@@ -13,7 +13,7 @@ Star Truck Korea 본사와 Sales Agent(판매대리인) 사이의 소통 채널�
 | # | 할 일 | 누가 | 소요 |
 |---|---|---|---|
 | 1 | SharePoint(STK-DB) 목록 4개(+선택 1개) 만들기 · 열 추가 · 인덱스 | IT | 30분 |
-| 2 | 문서 라이브러리에 `training365` 폴더 만들기 | IT | 1분 |
+| 2 | AttachedFiles 라이브러리의 `Training365_Media-Files` 폴더 확인(10-12 생성 완료) · 권한 | IT | 5분 |
 | 3 | Agent 게스트 초대 · 보안 그룹 · 목록/폴더 권한 | IT | 20분 + Agent 수 |
 | 4 | Azure(Entra ID) 앱 등록에 리디렉션 URI 추가 | IT | 2분 |
 | 5 | DNS CNAME `training365` → `startruckkorea-dev.github.io` | IT(도메인 관리) | 5분 + 전파 |
@@ -150,11 +150,17 @@ Star Truck Korea 본사와 Sales Agent(판매대리인) 사이의 소통 채널�
 
 ---
 
-## 2. 문서 라이브러리 폴더
+## 2. 첨부 저장 위치 — AttachedFiles › Training365_Media-Files (APS 공통 방식)
 
-STK-DB **문서(Documents)** 라이브러리 루트에 폴더 **`training365`** 를 만듭니다(system_config_final.xlsx 와 같은 위치).
-- 첨부 · 동영상은 `training365/YYYY-MM/` 아래에 저장됩니다(월 폴더는 앱이 만듦). 첨부 1개 100MB · 동영상 300MB(mp4 · webm · mov · m4v) · 실행 파일/HTML/SVG 차단.
-- 관리 행위 이력은 MKQR 과 같은 방식으로 `Logging_data/Training365/YYYY-MM-DD/*.json` 에 남습니다(앱이 폴더를 만듦 · APS 「이력 조회」와 같은 형식).
+새 첨부는 STK-DB 의 **AttachedFiles** 문서 라이브러리(다른 APS 시스템과 같은 공용 첨부 라이브러리) 안 **`Training365_Media-Files/{게시물 번호}/파일명`** 에 쌓입니다.
+GA(`AttachedFiles/BC_Requests_AttachedFiles/{번호}/…`) · MKQR(`AttachedFiles/MKQR_Media_AttachedFiles/…`) 와 같은 규칙입니다.
+
+- 폴더 `Training365_Media-Files` 는 10-12 에 만들어 두었습니다. 게시물 번호 폴더는 앱이 첫 첨부 때 만듭니다.
+- 저장 순서: 글을 먼저 저장해 번호를 받고 → 그 번호 폴더에 첨부를 올리고 → 게시물의 `AttachmentsJson` 에 파일 정보(driveId · itemId)를 붙입니다. 같은 이름이 있으면 덮어쓰지 않고 이름을 바꿔 둡니다. 4MB 넘는 파일은 나눠서 올립니다.
+- 첨부 1개 100MB · 한 게시물 10개 · 실행 파일/HTML/SVG 등은 차단. 첨부를 올리지 못하면 글은 저장되고 「수정」에서 다시 첨부하라고 안내합니다.
+- **10-12 이전 첨부**는 문서(Documents) 라이브러리 `training365/YYYY-MM/` 에 있습니다. 게시물에 파일 위치 대신 파일 번호(itemId)를 저장하므로 그대로 열립니다 — 옮길 필요 없습니다.
+- 글쓰기 창의 동영상 입력은 없앴습니다(10-12). 영상은 공유 링크를 본문에 넣습니다. 예전 글에 연결된 동영상은 보기에서 그대로 재생됩니다.
+- 관리 행위 이력은 MKQR 과 같은 방식으로 문서 라이브러리 `Logging_data/Training365/YYYY-MM-DD/*.json` 에 남습니다(앱이 폴더를 만듦 · APS 「이력 조회」와 같은 형식).
 
 ### 2-1. 직원 명부 대조 (새로 만들 것 없음)
 
@@ -180,10 +186,11 @@ Agent 는 STK 테넌트의 **B2B 게스트**로 로그인합니다(SSC 의 PKF �
 | training365_Users | 읽기 | — (역할 판정 · 문의 담당자 표시에 필요) |
 | training365_Reads | 기여(참여) | 읽기: **모든 항목** / 만들기·편집: **사용자가 만든 항목만** |
 | training365_AccessLog | 기여(참여) | 읽기: **사용자가 만든 항목만** / 만들기·편집: **사용자가 만든 항목만** |
-| 문서 › `training365` 폴더 | 읽기 | — |
+| AttachedFiles › `Training365_Media-Files` 폴더 | **읽기** (권한 상속 중지 후 그룹 추가 — 라이브러리 전체가 아니라 이 폴더만) | — |
+| (10-12 이전 첨부가 있으면) 문서 › `training365` 폴더 | 읽기 | — |
 
 - 내부 직원(본사 · 작성자 · 관리자)은 지금처럼 사이트 구성원 권한(편집)을 그대로 둡니다. 「편집」에는 목록 관리 권한이 있어 항목 수준 제한과 관계없이 모든 행을 봅니다 — **관리자(박종헌 매니저 등)는 AccessLog 에 편집 이상 권한이 있어야 전체 접속 기록이 보입니다.**
-- 작성자는 `training365` 폴더에 파일을 올리므로 편집 권한이 필요합니다(사이트 구성원이면 그대로).
+- 작성자는 `Training365_Media-Files` 폴더에 파일을 올리므로 편집 권한이 필요합니다(사이트 구성원이면 그대로). AttachedFiles 의 다른 APS 폴더(GW · ACC 등)는 Agent 에게 열지 마세요.
 - STK-DB 사이트의 외부 공유가 「기존 게스트만」 이상인지 확인합니다(SharePoint 관리 센터 → 사이트 → STK-DB → 공유). SSC PKF 게스트가 이미 쓰고 있다면 그대로입니다.
 - Agent(게스트)는 system_config_final.xlsx 를 읽지 못해도 정상입니다(앱이 무시하고 사용자 목록으로 판정).
 - **오픈 전 테스트 게스트 계정 하나로 반드시 확인:** 로그인 → 게시물 열람 → 첨부 내려받기 → 조회확인 → 로그아웃. 막히면 위 표의 권한을 다시 봅니다.
