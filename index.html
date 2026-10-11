@@ -305,11 +305,33 @@ function showLoginErr(msg) {
 }
 async function getGraphToken() {
   const account = msalApp.getActiveAccount();
-  const tokenRes = await msalApp.acquireTokenSilent({ scopes: MSAL_SCOPES, account });
-  return tokenRes.accessToken;
+  try {
+    const tokenRes = await msalApp.acquireTokenSilent({ scopes: MSAL_SCOPES, account });
+    return tokenRes.accessToken;
+  } catch (e) {
+    // 세션 만료 · 비밀번호 변경 · 동의 필요 — 조용히 받을 수 없으면 로그인 화면으로 다시 보낸다(무한 실패 방지)
+    const code = String((e && (e.errorCode || e.name)) || "");
+    if (/interaction_required|login_required|consent_required|InteractionRequired/i.test(code)) {
+      try { await msalApp.acquireTokenRedirect({ scopes: MSAL_SCOPES, account }); } catch (e2) {}
+    }
+    throw e;
+  }
+}
+// Graph 호출 — 요청 제한(429) · 일시 오류(503 · 504)는 Retry-After(없으면 1 · 2 · 4초) 만큼 쉬고 최대 3번 다시.
+// POST(새로 만들기)는 처리되지 않은 것이 확실한 429 · 503 만 다시 보낸다(504 는 이미 만들어졌을 수 있어 중복 방지)
+const _sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+async function gfetch(url, init) {
+  const method = String((init && init.method) || "GET").toUpperCase();
+  for (let n = 0; ; n++) {
+    const res = await fetch(url, init);
+    const retryable = res.status === 429 || res.status === 503 || (res.status === 504 && method !== "POST");
+    if (!retryable || n >= 3) return res;
+    const ra = Number(res.headers && res.headers.get && res.headers.get("Retry-After"));
+    await _sleep(Math.min(30, ra > 0 ? ra : 2 ** n) * 1000);
+  }
 }
 async function apiGet(path, token) {
-  const res = await fetch(GRAPH + path, { headers: { Authorization: "Bearer " + (token || await getGraphToken()) } });
+  const res = await gfetch(GRAPH + path, { headers: { Authorization: "Bearer " + (token || await getGraphToken()) } });
   if (!res.ok) { const e = new Error(path.split("?")[0] + " → " + res.status); e.status = res.status; throw e; }
   return res.json();
 }
@@ -320,8 +342,13 @@ const odq = (v) => String(v == null ? "" : v).replace(/'/g, "''");
 const _tListIds = {};
 const _tMissing = {};
 function isMissingListError(e) { return !!(e && e.code === "LIST_MISSING"); }
-async function tListId(listName) {
-  if (_tListIds[listName]) return _tListIds[listName];
+const _tListIdP = {};   // 같은 목록을 동시에 찾을 때 한 번만 묻는다
+function tListId(listName) {
+  if (_tListIds[listName]) return Promise.resolve(_tListIds[listName]);
+  if (!_tListIdP[listName]) _tListIdP[listName] = tListIdFetch(listName).finally(() => { delete _tListIdP[listName]; });
+  return _tListIdP[listName];
+}
+async function tListIdFetch(listName) {
   const res = await apiGet(`/sites/${_siteId}/lists?$filter=displayName eq '${odq(listName)}'&$select=id,displayName`);
   if (!res.value || !res.value.length) {
     _tMissing[listName] = true;
@@ -352,20 +379,20 @@ async function tListAll(listName, extraQuery = "") {
   let items = [];
   let url = `${GRAPH}/sites/${_siteId}/lists/${listId}/items?expand=fields&$top=500${extraQuery}`;
   while (url) {
-    const res = await fetch(url, { headers: { Authorization: "Bearer " + token, Prefer: "HonorNonIndexedQueriesWarningMayFailRandomly" } });
+    const res = await gfetch(url, { headers: { Authorization: "Bearer " + token, Prefer: "HonorNonIndexedQueriesWarningMayFailRandomly" } });
     if (!res.ok) { const e = new Error(`${listName} 조회 실패 (${res.status})`); e.status = res.status; throw e; }
     const data = await res.json();
     items = items.concat(data.value || []);
     url = data["@odata.nextLink"] || null;
   }
-  return items.map((x) => ({ id: String(x.id), ...x.fields, _created: x.createdDateTime }));
+  return items.map((x) => ({ id: String(x.id), ...x.fields, _created: x.createdDateTime, _modified: x.lastModifiedDateTime || "" }));
 }
 async function tCreate(listName, fields) {
   t365AssertWrite(listName, [fields && fields.Category].filter(Boolean));
   const token = await getGraphToken();
   const listId = await tListId(listName);
   const body = await tSafeFields(listName, fields);
-  const res = await fetch(`${GRAPH}/sites/${_siteId}/lists/${listId}/items`, {
+  const res = await gfetch(`${GRAPH}/sites/${_siteId}/lists/${listId}/items`, {
     method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify({ fields: body }),
   });
   if (!res.ok) { const d = await res.text().catch(() => ""); const e = new Error(`${listName} 저장 실패 (${res.status}): ${d.slice(0, 200)}`); e.status = res.status; throw e; }
@@ -377,17 +404,27 @@ async function tUpdate(listName, itemId, fields, opts) {
   const token = await getGraphToken();
   const listId = await tListId(listName);
   const body = await tSafeFields(listName, fields);
-  const res = await fetch(`${GRAPH}/sites/${_siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}/fields`, {
+  const res = await gfetch(`${GRAPH}/sites/${_siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}/fields`, {
     method: "PATCH", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body), keepalive: !!(opts && opts.keepalive),
   });
   if (!res.ok) { const d = await res.text().catch(() => ""); const e = new Error(`${listName} 수정 실패 (${res.status}): ${d.slice(0, 200)}`); e.status = res.status; throw e; }
   return res.json();
 }
+// 한 행 — 수정 직전 충돌 확인용(lastModifiedDateTime)
+async function tGetItem(listName, itemId) {
+  const token = await getGraphToken();
+  const listId = await tListId(listName);
+  const res = await gfetch(`${GRAPH}/sites/${_siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}?expand=fields`, { headers: { Authorization: "Bearer " + token } });
+  if (res.status === 404) return null;
+  if (!res.ok) { const e = new Error(`${listName} 조회 실패 (${res.status})`); e.status = res.status; throw e; }
+  const x = await res.json();
+  return { id: String(x.id), ...x.fields, _created: x.createdDateTime, _modified: x.lastModifiedDateTime || "" };
+}
 async function tDelete(listName, itemId, opts) {
   t365AssertWrite(listName, [opts && opts.cat].filter(Boolean));
   const token = await getGraphToken();
   const listId = await tListId(listName);
-  const res = await fetch(`${GRAPH}/sites/${_siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}`, { method: "DELETE", headers: { Authorization: "Bearer " + token } });
+  const res = await gfetch(`${GRAPH}/sites/${_siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}`, { method: "DELETE", headers: { Authorization: "Bearer " + token } });
   if (!res.ok && res.status !== 404) { const e = new Error(`${listName} 삭제 실패 (${res.status})`); e.status = res.status; throw e; }
 }
 // 목록 준비 상태 — 관리자 안내용 { list: { missing, missingCols:[] } }
@@ -1123,10 +1160,11 @@ function viewStats(readIdx, id) {
   let views = 0; m.forEach((r) => { views += Number(r.ViewCount) || 1; });
   return { views, viewers: m.size, map: m };
 }
+// 목록용 시각(KST) — 오늘은 「14:32」, 올해는 「10.11 22:54」, 그 전은 「25.10.11 22:54」(말풍선에는 fmtDate 전체)
 function shortDate(iso) {
   const t = Date.parse(iso || 0); if (!t) return "-";
   const today = kstToday(); const d = fmtDate(iso);
-  return d.slice(0, 10) === today ? d.slice(11) : d.slice(0, 4) === today.slice(0, 4) ? d.slice(5, 10).replace("-", ".") : d.slice(2, 10).replace(/-/g, ".");
+  return d.slice(0, 10) === today ? d.slice(11) : d.slice(0, 4) === today.slice(0, 4) ? `${d.slice(5, 10).replace("-", ".")} ${d.slice(11)}` : `${d.slice(2, 10).replace(/-/g, ".")} ${d.slice(11)}`;
 }
 function fileKind(name) {
   const e = fileExt(name);
@@ -1235,7 +1273,7 @@ const ConfirmedPill = () => <span className="t365-pill whitespace-nowrap bg-emer
 // 게시물 앞의 작은 표시 — 공지 · 필수(제목 왼쪽)
 const NoticePill = () => <span className="t365-pill bg-amber-100 text-amber-800" data-pill="pin"><Pin size={10} />공지</span>;
 const ReqPill = () => <span className="t365-pill" style={{ background: "#FDEEE6", color: "#C2410C" }} data-pill="req"><BellRing size={10} />필수</span>;
-const dateCell = (p) => fmtDay(p.PublishedAt || p._created).slice(2).replace(/-/g, ".");
+const dateCell = (p) => shortDate(p.PublishedAt || p._created);   // 게시판 목록 작성일 — 시각까지(KST)
 // 입력 칸에서 치는 글자(검색어 등)와 겹치지 않을 때만 「/」 로 검색 칸 열기
 const isTyping = (e) => { const t = e.target; return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable); };
 
@@ -1297,7 +1335,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
             {notice.length > 0 && <HomeColHead>
               <span className="w-[104px] shrink-0 flex items-center">구분</span><span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
               <span className="w-[108px] shrink-0 hidden md:flex items-center">작성자</span>
-              <span className="w-[68px] shrink-0 hidden md:flex items-center justify-end">작성일</span>{ctx.isAgent && <span className="w-[96px] shrink-0 flex items-center justify-end">조회확인</span>}
+              <span className="w-[104px] shrink-0 hidden md:flex items-center">작성일</span>{ctx.isAgent && <span className="w-[96px] shrink-0 flex items-center">조회확인</span>}
             </HomeColHead>}
             {notice.length ? notice.slice(0, NOTICE_MAX).map((p) => {
               const c = catMap[p.Category]; const r = myRow(p);
@@ -1310,8 +1348,8 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                     <PostMarks p={p} compact />
                   </span>
                   <span className="w-[108px] text-[12px] text-slate-500 shrink-0 hidden md:flex items-center min-w-0"><span className="truncate">{p.AuthorName || ""}</span></span>
-                  <span className="text-[11.5px] text-slate-400 tabular-nums shrink-0 hidden md:flex items-center justify-end w-[68px]">{shortDate(p.PublishedAt || p._created)}</span>
-                  {ctx.isAgent && <span className="shrink-0 w-[96px] flex items-center justify-end">
+                  <span className="text-[11.5px] text-slate-400 tabular-nums shrink-0 hidden md:flex items-center w-[104px]" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
+                  {ctx.isAgent && <span className="shrink-0 w-[96px] flex items-center">
                     {ctx.isAgent ? (p.RequireConfirm ? (r && r.ConfirmedAt ? <ConfirmedPill /> : <UnconfirmedPill />) : <span className="text-[11.5px] text-slate-300">-</span>) : null}
                   </span>}
                 </button>
@@ -1329,7 +1367,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
             </div>
             {vis.length > 0 && <HomeColHead>
               <span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
-              <span className="w-[108px] shrink-0 hidden md:flex items-center">작성자</span><span className="w-[68px] shrink-0 flex items-center justify-end">작성일</span>
+              <span className="w-[108px] shrink-0 hidden md:flex items-center">작성자</span><span className="w-[104px] shrink-0 flex items-center">작성일</span>
             </HomeColHead>}
             {vis.length ? vis.slice(0, 12).map((p) => {
               const c = catMap[p.Category]; const rd = !!myRow(p);
@@ -1342,7 +1380,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                     <PostMarks p={p} compact />
                   </span>
                   <span className="w-[108px] text-[12px] text-slate-500 shrink-0 hidden md:flex items-center min-w-0"><span className="truncate">{p.AuthorName || ""}</span></span>
-                  <span className="w-[68px] text-[11.5px] text-slate-400 tabular-nums shrink-0 flex items-center justify-end">{shortDate(p.PublishedAt || p._created)}</span>
+                  <span className="w-[104px] text-[11.5px] text-slate-400 tabular-nums shrink-0 flex items-center" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
                 </button>
               );
             }) : <SmallEmpty>아직 올라온 글이 없습니다.</SmallEmpty>}
@@ -1365,20 +1403,20 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
           <WidgetCard icon={TrendingUp} title="많이 본 글" tint="#2563EB" testid="w-popular" tone="soft">
             {popular.length ? (<>
               <HomeColHead>
-                <span className="w-6 shrink-0 flex items-center justify-center">#</span><span className="w-[112px] shrink-0 flex items-center">게시판</span>
-                <span className="flex-1 flex items-center">제목</span><span className="w-12 shrink-0 flex items-center justify-end">조회</span>
+                <span className="w-6 shrink-0 flex items-center">#</span><span className="w-[112px] shrink-0 flex items-center">게시판</span>
+                <span className="flex-1 flex items-center">제목</span><span className="w-12 shrink-0 flex items-center">조회</span>
               </HomeColHead>
               <ol>
                 {popular.map(({ p, v }, i) => { const c = catMap[p.Category]; const I = (c && c.icon) || FileText; return (
                   <li key={p.id}>
                     <button onClick={() => openPost(p)} title={p.Title} data-popular={p.id} className="t365-cols w-full text-left px-4 h-11 flex items-stretch gap-3 hover:bg-[#EEF6F5] border-t border-[#E9EEF3] first:border-t-0">
-                      <span className="w-6 shrink-0 flex items-center justify-center"><span className={`w-5 h-5 rounded-md flex items-center justify-center text-[11.5px] font-bold tabular-nums ${i < 3 ? "text-white" : "text-slate-500 bg-white border border-slate-200"}`} style={i < 3 ? { background: BRAND.accent } : undefined}>{i + 1}</span></span>
+                      <span className="w-6 shrink-0 flex items-center"><span className={`w-5 h-5 rounded-md flex items-center justify-center text-[11.5px] font-bold tabular-nums ${i < 3 ? "text-white" : "text-slate-500 bg-white border border-slate-200"}`} style={i < 3 ? { background: BRAND.accent } : undefined}>{i + 1}</span></span>
                       <span className="w-[112px] shrink-0 flex items-center gap-1.5 min-w-0" style={{ color: c && c.color }}>
                         <span className="w-5 h-5 rounded-md flex items-center justify-center shrink-0" style={{ background: c && c.soft }}><I size={11} style={{ color: c && c.color }} /></span>
                         <span className="text-[12px] font-medium truncate">{c ? c.label : "-"}</span>
                       </span>
                       <span className="flex-1 min-w-0 flex items-center"><span className="truncate text-[13px] text-slate-700">{p.Title}</span></span>
-                      <span className="w-12 shrink-0 text-[11.5px] text-slate-400 tabular-nums flex items-center justify-end gap-0.5"><Eye size={11} />{v}</span>
+                      <span className="w-12 shrink-0 text-[11.5px] text-slate-400 tabular-nums flex items-center gap-0.5"><Eye size={11} />{v}</span>
                     </button>
                   </li>
                 ); })}
@@ -1560,22 +1598,22 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
         {view === "list" && (
           <div className="hidden md:block">
             <table className="w-full table-fixed" data-testid="board-table">
-              <colgroup><col style={{ width: 60 }} />{!catKey && <col style={{ width: 120 }} />}<col /><col style={{ width: 120 }} /><col style={{ width: 100 }} /><col style={{ width: 70 }} />{showStatusCol && <col style={{ width: 110 }} />}</colgroup>
+              <colgroup><col style={{ width: 64 }} />{!catKey && <col style={{ width: 140 }} />}<col /><col style={{ width: 120 }} /><col style={{ width: 120 }} /><col style={{ width: 70 }} />{showStatusCol && <col style={{ width: 110 }} />}</colgroup>
               <thead className="text-slate-600 text-[12.5px] bg-[#F1F4F8]">
-                <tr>{["번호", ...(catKey ? [] : ["게시판"]), "제목", "작성자", "작성일", "조회", ...(showStatusCol ? [ctx.isAgent ? "조회확인" : "확인율"] : [])].map((h) => <th key={h} className={`px-3 h-10 font-semibold whitespace-nowrap border-y border-slate-300/70 ${h === "제목" ? "text-left" : "text-center"}`}>{h}</th>)}</tr>
+                <tr>{["번호", ...(catKey ? [] : ["게시판"]), "제목", "작성자", "작성일", "조회", ...(showStatusCol ? [ctx.isAgent ? "조회확인" : "확인율"] : [])].map((h) => <th key={h} className="px-3 h-10 font-semibold whitespace-nowrap border-y border-slate-300/70 text-left">{h}</th>)}</tr>
               </thead>
               <tbody>
                 {rows.length ? rows.map(({ p, pin }) => {
                   const vs = viewStats(readIdx, p.id);
                   return (
                     <tr key={(pin ? "pin" : "") + p.id} onClick={() => setOpenId(p.id)} data-post={p.id} data-pin={pin ? "1" : undefined} title={p.Title} className={`border-t border-slate-200/80 first:border-t-0 cursor-pointer ${pin ? "bg-[#FFFBEB] hover:bg-amber-50" : "hover:bg-[#F3F8F8]"}`}>
-                      <td className="px-2 h-12 text-center text-[12.5px] text-slate-400 tabular-nums">{numOf.get(p.id)}</td>
-                      {!catKey && <td className="px-3 h-12 truncate"><span className="flex justify-center"><BoardCell cat={catMap[p.Category]} bare /></span></td>}
+                      <td className="px-3 h-12 text-left text-[12.5px] text-slate-400 tabular-nums">{numOf.get(p.id)}</td>
+                      {!catKey && <td className="px-3 h-12 truncate"><span className="flex"><BoardCell cat={catMap[p.Category]} bare /></span></td>}
                       <td className="px-3 h-12 min-w-0"><TitleLine p={p} pin={pin} inTable /></td>
-                      <td className="px-3 h-12 text-[12.5px] text-slate-600 truncate text-center"><Hl text={p.AuthorName || "-"} q={field === "a" ? q : ""} /></td>
-                      <td className="px-2 h-12 text-center text-[12.5px] text-slate-500 tabular-nums">{dateCell(p)}</td>
-                      <td className="px-2 h-12 text-center text-[12.5px] text-slate-500 tabular-nums">{vs.views}</td>
-                      {showStatusCol && <td className="px-2 h-12 text-center"><StatusCell p={p} /></td>}
+                      <td className="px-3 h-12 text-[12.5px] text-slate-600 truncate text-left"><Hl text={p.AuthorName || "-"} q={field === "a" ? q : ""} /></td>
+                      <td className="px-3 h-12 text-left text-[12.5px] text-slate-500 tabular-nums whitespace-nowrap" title={fmtDate(p.PublishedAt || p._created)}>{dateCell(p)}</td>
+                      <td className="px-3 h-12 text-left text-[12.5px] text-slate-500 tabular-nums">{vs.views}</td>
+                      {showStatusCol && <td className="px-3 h-12 text-left"><StatusCell p={p} /></td>}
                     </tr>
                   );
                 }) : (
@@ -2078,6 +2116,15 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
       let id;
       if (isEdit) {
         id = post.id;
+        // 동시 수정 확인 — 이 창을 연 뒤 다른 사람이 같은 글을 고쳤거나 지웠으면 덮어쓰기 전에 묻는다
+        setSaving("최신 내용을 확인하고 있습니다...");
+        const cur = await tGetItem(T365_LISTS.posts, id).catch(() => undefined);
+        if (cur === null) { setSaving(""); savingRef.current = false; uiAlert("이 게시물은 그 사이에 삭제되었습니다 — 저장할 수 없습니다."); return; }
+        if (cur && post._modified && cur._modified && cur._modified !== post._modified) {
+          setSaving("");
+          const who = cur.UpdatedBy ? `${cur.UpdatedBy} 님이 ` : "다른 사람이 ";
+          if (!(await uiConfirm(`${who}${fmtDate(cur._modified)} 에 이 글을 먼저 수정했습니다.\n그대로 저장하면 그 변경 내용을 덮어씁니다. 계속할까요?`, { title: "다른 사람이 수정함", okText: "덮어쓰기", danger: true }))) { savingRef.current = false; return; }
+        }
         const uploaded = await upAll(id);
         setSaving("저장하고 있습니다...");
         const allFiles = [...files, ...uploaded];
@@ -3611,7 +3658,7 @@ function AccessLogTab({ ctx }) {
   const ctrl = "h-9 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/40";
   const td = "px-3 py-[6px] text-[12.5px] leading-5 whitespace-nowrap overflow-hidden text-ellipsis";
   const td2 = "px-3 h-10 align-middle overflow-hidden whitespace-nowrap";   // 세션 표 — 한 줄(사용자는 이름만, 메일은 말풍선)
-  const dtShort = (v) => { const t = fmtDate(v); return t && t.length > 5 && t.slice(0, 4) === String(new Date().getFullYear()) ? t.slice(5) : t; };   // 올해면 연도 생략(말풍선에 전체)
+  const dtShort = (v) => { const t = fmtDate(v); return t && t.length > 5 && t.slice(0, 4) === kstToday().slice(0, 4) ? t.slice(5) : t; };   // 올해(KST 기준)   // 올해면 연도 생략(말풍선에 전체)
   const curLen = Math.round((new Date(to + "T00:00:00Z") - new Date(from + "T00:00:00Z")) / 864e5) + 1;
   return (
     <div className="w-full">
@@ -3647,7 +3694,7 @@ function AccessLogTab({ ctx }) {
           {mode === "session" ? (
             <table className="w-full table-fixed" style={{ minWidth: 960 }} data-testid="access-table">
               <colgroup><col style={{ width: "14%" }} /><col style={{ width: "9%" }} /><col style={{ width: "14%" }} /><col style={{ width: "12%" }} /><col style={{ width: "12%" }} /><col style={{ width: "10%" }} /><col style={{ width: "13%" }} /><col style={{ width: "16%" }} /></colgroup>
-              <thead className="bg-slate-50 text-slate-500 text-[11.5px]"><tr>{[["사용자"], ["역할"], ["회사/지점"], ["로그인"], ["로그아웃 · 종료"], ["접속 시간", "r"], ["상태", "c"], ["기기"]].map(([h, a]) => <th key={h} className={`px-3 h-9 font-medium whitespace-nowrap border-b border-slate-200 ${a === "r" ? "text-right" : a === "c" ? "text-center" : "text-left"}`}>{h}</th>)}</tr></thead>
+              <thead className="bg-slate-50 text-slate-500 text-[11.5px]"><tr>{[["사용자"], ["역할"], ["회사/지점"], ["로그인"], ["로그아웃 · 종료"], ["접속 시간"], ["상태"], ["기기"]].map(([h, a]) => <th key={h} className={`px-3 h-9 font-medium whitespace-nowrap border-b border-slate-200 ${a === "r" ? "text-right" : a === "c" ? "text-center" : "text-left"}`}>{h}</th>)}</tr></thead>
               <tbody>
                 {loading ? <tr><td colSpan={8} className="text-center text-slate-400 text-sm py-14"><div className="w-6 h-6 mx-auto mb-2 rounded-full border-2 border-slate-200 animate-spin" style={{ borderTopColor: BRAND.accent }}></div>접속 기록을 불러오는 중입니다...</td></tr>
                   : error ? <tr><td colSpan={8} className="text-center text-red-500 text-sm py-12">{error}</td></tr>
@@ -3658,8 +3705,8 @@ function AccessLogTab({ ctx }) {
                       <td className={`${td2} text-[12.5px] text-slate-600 truncate`} title={r.Company || ""}>{r.Company || <span className="text-slate-300">-</span>}</td>
                       <td className={`${td2} text-[12.5px] text-slate-700 tabular-nums whitespace-nowrap`} title={fmtDate(r.LoginAt)}>{dtShort(r.LoginAt)}</td>
                       <td className={`${td2} text-[12.5px] tabular-nums whitespace-nowrap ${r.st.inferred ? "text-amber-700" : "text-slate-700"}`} title={r.st.end ? fmtDate(r.st.end) + (r.st.inferred ? " — 마지막 활동 시각(추정)" : "") : ""}>{r.st.end ? dtShort(r.st.end) : <span className="text-slate-300">-</span>}</td>
-                      <td className={`${td2} text-[12.5px] text-slate-600 tabular-nums text-right whitespace-nowrap`}>{r.st.label === "접근 차단" ? <span className="text-slate-300">-</span> : fmtDuration(r.dur)}</td>
-                      <td className={`${td2} text-center`}><span className={`text-[11px] px-2 rounded-full font-medium leading-5 inline-block whitespace-nowrap ${r.st.cls}`}>{r.st.label}</span></td>
+                      <td className={`${td2} text-[12.5px] text-slate-600 tabular-nums whitespace-nowrap`}>{r.st.label === "접근 차단" ? <span className="text-slate-300">-</span> : fmtDuration(r.dur)}</td>
+                      <td className={td2}><span className={`text-[11px] px-2 rounded-full font-medium leading-5 inline-block whitespace-nowrap ${r.st.cls}`}>{r.st.label}</span></td>
                       <td className={`${td2} text-[12px] text-slate-500 truncate`} title={r.Device || ""}>{r.Device || "-"}</td>
                     </tr>
                   )) : <tr><td colSpan={8} className="text-center text-slate-400 text-sm py-12">조회 결과가 없습니다.</td></tr>}
@@ -3668,14 +3715,14 @@ function AccessLogTab({ ctx }) {
           ) : (
             <table className="w-full table-fixed" style={{ minWidth: 900 }} data-testid="access-users">
               <colgroup><col style={{ width: "16%" }} /><col style={{ width: "10%" }} /><col style={{ width: "16%" }} /><col style={{ width: "9%" }} /><col style={{ width: "10%" }} /><col style={{ width: "13%" }} /><col style={{ width: "14%" }} /><col style={{ width: "12%" }} /></colgroup>
-              <thead className="bg-slate-50 text-slate-500 text-[11.5px]"><tr>{[["사용자"], ["역할"], ["회사/지점"], ["접속", "r"], ["로그아웃", "r"], ["세션 종료(추정)", "r"], ["마지막 로그인"], ["접속 시간 합", "r"]].map(([h, a]) => <th key={h} className={`px-3 h-9 font-medium whitespace-nowrap border-b border-slate-200 ${a === "r" ? "text-right" : "text-left"}`}>{h}</th>)}</tr></thead>
+              <thead className="bg-slate-50 text-slate-500 text-[11.5px]"><tr>{[["사용자"], ["역할"], ["회사/지점"], ["접속"], ["로그아웃"], ["세션 종료(추정)"], ["마지막 로그인"], ["접속 시간 합"]].map(([h, a]) => <th key={h} className={`px-3 h-9 font-medium whitespace-nowrap border-b border-slate-200 ${a === "r" ? "text-right" : "text-left"}`}>{h}</th>)}</tr></thead>
               <tbody>
                 {pageRows.length ? pageRows.map((u) => (
                   <tr key={u.email} className="border-t border-slate-100 first:border-t-0">
                     <td className={`${td2} text-[13px] text-slate-800 font-medium truncate`} title={u.email}>{u.name}</td>
                     <td className={td2}><RoleBadge role={u.role} small /></td><td className={`${td2} text-[12.5px] text-slate-600 truncate`}>{u.company || <span className="text-slate-300">-</span>}</td>
-                    <td className={`${td2} text-[12.5px] tabular-nums text-right`}>{u.n}</td><td className={`${td2} text-[12.5px] tabular-nums text-right text-emerald-700`}>{u.logouts}</td><td className={`${td2} text-[12.5px] tabular-nums text-right text-amber-700`}>{u.inferred}</td>
-                    <td className={`${td2} text-[12.5px] tabular-nums text-slate-700 whitespace-nowrap`} title={fmtDate(u.last.LoginAt)}>{dtShort(u.last.LoginAt)}</td><td className={`${td2} text-[12.5px] tabular-nums text-right text-slate-600`}>{fmtDuration(u.total)}</td>
+                    <td className={`${td2} text-[12.5px] tabular-nums`}>{u.n}</td><td className={`${td2} text-[12.5px] tabular-nums text-emerald-700`}>{u.logouts}</td><td className={`${td2} text-[12.5px] tabular-nums text-amber-700`}>{u.inferred}</td>
+                    <td className={`${td2} text-[12.5px] tabular-nums text-slate-700 whitespace-nowrap`} title={fmtDate(u.last.LoginAt)}>{dtShort(u.last.LoginAt)}</td><td className={`${td2} text-[12.5px] tabular-nums text-slate-600`}>{fmtDuration(u.total)}</td>
                   </tr>
                 )) : <tr><td colSpan={8} className="text-center text-slate-400 text-sm py-12">{loading ? "불러오는 중..." : "조회 결과가 없습니다."}</td></tr>}
               </tbody>
@@ -3783,7 +3830,7 @@ function ActivityLogTab() {
         <div className="overflow-x-auto">
           <table className="w-full table-fixed" style={{ minWidth: 1000 }}>
             <colgroup><col style={{ width: 150 }} /><col style={{ width: 130 }} /><col style={{ width: 84 }} /><col style={{ width: 100 }} /><col style={{ width: 230 }} /><col /></colgroup>
-            <thead className="bg-slate-50 text-slate-500 text-[11.5px]"><tr>{[["시각(KST)"], ["사용자"], ["구분", "c"], ["작업"], ["대상"], ["내용"]].map(([h, a]) => <th key={h} className={`px-3 h-9 font-medium whitespace-nowrap border-b border-slate-200 ${a === "c" ? "text-center" : "text-left"}`}>{h}</th>)}</tr></thead>
+            <thead className="bg-slate-50 text-slate-500 text-[11.5px]"><tr>{[["시각(KST)"], ["사용자"], ["구분"], ["작업"], ["대상"], ["내용"]].map(([h, a]) => <th key={h} className={`px-3 h-9 font-medium whitespace-nowrap border-b border-slate-200 ${a === "c" ? "text-center" : "text-left"}`}>{h}</th>)}</tr></thead>
             <tbody>
               {loading ? <tr><td colSpan={6} className="text-center text-slate-400 text-sm py-14"><div className="w-6 h-6 mx-auto mb-2 rounded-full border-2 border-slate-200 animate-spin" style={{ borderTopColor: BRAND.accent }}></div>이력을 불러오는 중입니다...</td></tr>
                 : error ? <tr><td colSpan={6} className="text-center text-red-500 text-sm py-12">이력을 불러오지 못했습니다 — {error}</td></tr>
@@ -3791,7 +3838,7 @@ function ActivityLogTab() {
                   <tr key={l._id} onClick={() => setDetail(l)} className="border-t border-slate-100 first:border-t-0 hover:bg-slate-50 cursor-pointer">
                     <td className="px-3 h-10 text-[12.5px] text-slate-600 tabular-nums whitespace-nowrap" title={l.timestampKST}>{String(l.timestampKST || "").slice(0, 16)}</td>
                     <td className="px-3 h-10 text-[12.5px] text-slate-800 font-medium whitespace-nowrap overflow-hidden text-ellipsis" title={l.user}>{l.userName || l.user}</td>
-                    <td className="px-3 h-10 text-center"><span className={`text-[11px] px-2 rounded-full font-medium leading-5 inline-block whitespace-nowrap ${logCatStyle(l.category)}`}>{l.category || "-"}</span></td>
+                    <td className="px-3 h-10"><span className={`text-[11px] px-2 rounded-full font-medium leading-5 inline-block whitespace-nowrap ${logCatStyle(l.category)}`}>{l.category || "-"}</span></td>
                     <td className={`px-3 h-10 text-[12.5px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis ${logVerbStyle(l.verb || "")}`}>{l.verb}</td>
                     <td className="px-3 h-10 text-[12.5px] text-slate-800 whitespace-nowrap overflow-hidden text-ellipsis" title={l.target}>{String(l.target || "-").replace(/\s*\([^()]*@[^()]*\)\s*$/, "")}</td>
                     <td className="px-3 h-10 text-[12px] text-slate-500 whitespace-nowrap overflow-hidden text-ellipsis" title={logSummary(l)}>{logSummary(l) || "-"}</td>
@@ -3953,10 +4000,13 @@ function App({ boot }) {
   const canWrite = (k) => !!catMap[k] && P["cat:" + k] === "e";
   const canEditPost = (p) => canWrite(p.Category) && (isAdmin || normEmail(p.AuthorEmail) === normEmail(me.email));   // 그 게시판 편집 권한 + (관리자 역할이거나 본인 글)
 
+  const reloadSeq = useRef(0);
   async function reload() {
+    const seq = ++reloadSeq.current;   // 겹쳐 부른 경우 늦게 도착한 옛 응답이 새 응답을 덮지 않게 — 마지막 호출만 반영
     setLoading(true);
     const wrap = (pr) => pr.then((v) => ({ v }), (e) => ({ e }));
     const [p, r, u, c, bn] = await Promise.all([wrap(tListAll(T365_LISTS.posts)), wrap(tListAll(T365_LISTS.reads)), wrap(tListAll(T365_LISTS.users)), wrap(tListAll(T365_LISTS.categories)), wrap(tListAll(T365_LISTS.banners))]);
+    if (seq !== reloadSeq.current) return;
     if (p.e) { setPosts([]); setPostsErr(isMissingListError(p.e) ? "missing" : p.e.message); } else { setPosts(p.v); setPostsErr(""); }
     if (r.e) { setReads([]); console.warn("[Training365] 조회 기록 읽기 실패:", r.e.message); } else setReads(r.v);
     if (c.e) setCatRows([]); else setCatRows(c.v);
