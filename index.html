@@ -257,7 +257,7 @@ const T365_PERM_GROUPS = [
   { key: "home", label: "개요", band: "#EEF1F5", ink: "#475569", line: "#CBD5E1", items: [{ key: "overview", label: "Overview", edit: false, locked: true }, { key: "all", label: "전체 게시물", edit: false }] },
   { key: "boards", label: "게시판", band: "#E4F1F0", ink: "#2F7B7A", line: "#9CCBC8", items: T365_DEFAULT_CATEGORIES.map((c) => ({ key: "cat:" + c.key, cat: c.key, label: c.label, edit: true })) },
   { key: "status", label: "확인 현황", band: "#FDEEE6", ink: "#C2410C", line: "#F3B79A", items: [{ key: "status", label: "조회확인 현황", edit: false }] },
-  { key: "admin", label: "관리자 전용", band: "#ECEAF8", ink: "#5B4BA6", line: "#C4BCEB", items: [{ key: "users", label: "사용자 · 권한", edit: true }, { key: "categories", label: "카테고리 설정", edit: true }, { key: "access", label: "접속 기록", edit: false }, { key: "activity", label: "활동 이력", edit: false }] },
+  { key: "admin", label: "관리자 전용", band: "#ECEAF8", ink: "#5B4BA6", line: "#C4BCEB", items: [{ key: "users", label: "사용자 · 권한", edit: true }, { key: "categories", label: "게시판 · 배너", edit: true }, { key: "links", label: "바로가기", edit: true }, { key: "access", label: "접속 기록", edit: false }, { key: "activity", label: "활동 이력", edit: false }] },
 ];
 const T365_PERM_ITEMS = T365_PERM_GROUPS.flatMap((g) => g.items.map((it) => ({ ...it, group: g.key })));
 const T365_PERM_KEYS = new Set(T365_PERM_ITEMS.map((x) => x.key));
@@ -313,7 +313,7 @@ function t365AssertWrite(listName, cats) {
   if (listName === T365_LISTS.reads || listName === T365_LISTS.access) return;
   const P = _tPermNow;
   const ok = !!P && (listName === T365_LISTS.posts ? cats.length > 0 && cats.every((c) => P["cat:" + c] === "e")
-    : listName === T365_LISTS.users ? P.users === "e" : (listName === T365_LISTS.categories || listName === T365_LISTS.banners || listName === T365_LISTS.links) ? P.categories === "e" : false);
+    : listName === T365_LISTS.users ? P.users === "e" : (listName === T365_LISTS.categories || listName === T365_LISTS.banners) ? P.categories === "e" : listName === T365_LISTS.links ? P.links === "e" : false);
   if (!ok) { const e = new Error("편집 권한이 없어 저장하지 않았습니다 — 관리자에게 권한을 요청해 주세요."); e.code = "NO_EDIT"; throw e; }
 }
 
@@ -1173,7 +1173,7 @@ function SetupNotice({ status, infoToo = true }) {
             {infoToo && optCols.map((c) => <li key={c}>선택 목록에 없는 열 — {c} (카테고리 아이콘 · 색 · 문의 담당자 / 배너 값이 저장되지 않습니다 — IT 에 열 추가 요청)</li>)}
             {infoToo && ansMissing.length > 0 && <li data-testid="qna-cols-missing">{T365_LISTS.posts} 에 Q&A 답변 열이 없습니다 — {ansMissing.join(", ")} (Answer: 여러 줄 텍스트 · AnsweredBy: 한 줄 텍스트 · AnsweredAt: 한 줄 텍스트) 를 만들어야 답변이 저장됩니다</li>}
             {infoToo && pinMissing && <li data-testid="pin-col-missing">{T365_LISTS.posts} 에 PinUntil 열(한 줄 텍스트)을 만들면 글쓰기에서 공지 · 필수의 홈 노출 기한을 정할 수 있습니다 — 없으면 게시 후 7일 동안 보입니다</li>}
-            {infoToo && linksMissing && <li data-testid="links-list-missing">{T365_LISTS.links} 목록이 없어 사이드바 「바로가기」 를 쓸 수 없습니다 — 만드는 방법(열 구조)은 「게시판 · 배너 · 바로가기」 화면 아래에 있습니다</li>}
+            {infoToo && linksMissing && <li data-testid="links-list-missing">{T365_LISTS.links} 목록이 없어 사이드바 「바로가기」 를 쓸 수 없습니다 — 만드는 방법(열 구조)은 관리자 전용 「바로가기 관리」 화면에 있습니다</li>}
             {infoToo && bannerMissing && <li>{T365_LISTS.banners} 목록이 없어 게시판 홈에 기본 배너(그림 없음)를 보여 줍니다 — 그림 배너를 쓰려면 목록을 만드세요</li>}
             {optionalMissing && <li>{T365_LISTS.categories} 목록이 없어 기본 카테고리 {T365_DEFAULT_CATEGORIES.length}개(이름 · 설명 · 순서 고정)를 씁니다 — 카테고리 이름 · 설명을 바꾸려면 목록을 만드세요</li>}
           </ul>
@@ -4061,7 +4061,7 @@ function CatStyleModal({ ctx, d, onApply, onClose }) {
 /* Overview 배너. 카테고리는 노란 변경 표시 → 「반영」, 배너는 하나씩 바로 저장                 */
 /* ------------------------------------------------------------------ */
 const catDraftOf = (c) => ({ key: c.key, label: c.label, desc: c.desc, order: c.order, active: c.active, icon: c.iconKey || "", color: c.colorKey || "", contacts: c.contacts || [] });
-function CategoriesTab({ ctx, catRows, bannerRows, linkRows, listStatus, reload }) {
+function CategoriesTab({ ctx, catRows, bannerRows, listStatus, reload }) {
   const missing = !listStatus || !listStatus.categories || listStatus.categories.missing || listStatus.categories.error;
   const missCols = (!missing && listStatus.categories.missingCols) || [];
   const canEd = ctx.canEditMenu("categories");   // 보기만이면 바꾸는 칸 · 반영 단추 없음
@@ -4191,7 +4191,6 @@ function CategoriesTab({ ctx, catRows, bannerRows, linkRows, listStatus, reload 
         </section>
       </div>
       <BannerAdmin ctx={ctx} rows={bannerRows} listStatus={listStatus} reload={reload} canEd={canEd} />
-      <LinkAdmin ctx={ctx} rows={linkRows} listStatus={listStatus} reload={reload} canEd={canEd} />
       {styling && <CatStyleModal ctx={ctx} d={styling} onClose={() => setStyling(null)} onApply={(v) => { setDraft((prev) => prev.map((x) => (x.key === styling.key ? { ...x, ...v } : x))); setStyling(null); }} />}
       {saving && <BlockingOverlay message="저장하고 있습니다..." />}
     </div>
@@ -4332,7 +4331,7 @@ function BannerModal({ b, onClose, onSaved }) {
 }
 /* ------------------------------------------------------------------ */
 /* 바로가기 링크 관리 — 사이드바 「바로가기」(새 창). 이름 · 주소 · 설명 · 아이콘(기본 아이콘 또는 작은 그림) · 색 · 보이는 사람 · 순서 · 사용 */
-/* 목록: training365_Links(선택). 쓰기 권한은 카테고리 설정 편집과 같다                         */
+/* 목록: training365_Links(선택). 관리자 전용 「바로가기 관리」 화면 — 쓰기는 사용자 · 권한의 「바로가기」 편집이 있을 때만      */
 /* ------------------------------------------------------------------ */
 const T365_LINK_SETUP = [
   ["Title", "한 줄 텍스트(기본 「제목」 열)", "이름 — 사이드바에 보이는 글자"],
@@ -4364,8 +4363,10 @@ function LinkTile({ link, size = 28 }) {
 }
 function LinkAdmin({ ctx, rows, listStatus, reload, canEd }) {
   const st = listStatus && listStatus.links;
-  const missing = !st || st.missing || st.error;
   const list = parseLinks(rows);
+  const checking = !st && !list.length;   // 목록 점검 결과를 받기 전 — 「목록 없음」 안내를 먼저 띄우지 않는다
+  const missing = !!st && (st.missing || !!st.error);
+  canEd = canEd && !!st;   // 목록이 있는지 확인한 뒤에만 추가 · 수정
   const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState("");
   async function remove(l) {
@@ -4399,7 +4400,9 @@ function LinkAdmin({ ctx, rows, listStatus, reload, canEd }) {
         <span className="text-[11.5px] text-slate-400 hidden sm:inline truncate">사이드바 「바로가기」 에 보이고 새 창으로 열립니다 · 사용 중 {list.filter((l) => l.active).length}개</span>
         {canEd && !missing && <button onClick={() => setEditing({})} className={`${btnPrimaryCls} h-8 ml-auto shrink-0`} style={{ background: BRAND.accent }} data-testid="link-add"><Plus size={14} />링크 추가</button>}
       </div>
-      {missing ? (
+      {checking ? (
+        <div className="px-4 py-6 text-center text-[12.5px] text-slate-400" data-testid="link-checking">바로가기 목록을 확인하고 있습니다...</div>
+      ) : missing ? (
         <div className="px-4 py-3 bg-blue-50/60 flex items-start gap-2.5" data-testid="link-missing">
           <Info size={15} className="shrink-0 mt-0.5 text-blue-500" />
           <div className="min-w-0 flex-1"><div className="text-[12px] text-blue-900 mb-2">바로가기 목록({T365_LISTS.links})이 없어 사이드바에 「바로가기」 를 보여 주지 않습니다. 아래대로 목록을 만들면 이곳에서 링크를 넣을 수 있습니다.</div><LinkSetupGuide /></div>
@@ -4915,7 +4918,7 @@ function ContactModal({ ctx, onClose }) {
 /* ------------------------------------------------------------------ */
 /* 메인 앱 — MKQR 과 같은 틀(남색 사이드바 · ←| 접기 · 상단 흰 바 · 휴대폰 서랍)  */
 /* ------------------------------------------------------------------ */
-const T365_ADMIN_TABS = ["users", "categories", "access", "activity"];
+const T365_ADMIN_TABS = ["users", "categories", "links", "access", "activity"];
 function parseHash() {
   const h = String(window.location.hash || "").replace(/^#\/?/, "").split("/").map((x) => { try { return decodeURIComponent(x); } catch (e) { return ""; } });
   if (h[0] === "cat" && /^[a-z]+$/.test(h[1] || "")) return { tab: "cat:" + h[1], post: /^\d+$/.test(h[2] || "") ? h[2] : null };
@@ -5024,13 +5027,17 @@ function App({ boot }) {
     if (!p.e) loadedRef.current = true;
     const freshMine = !u.e ? u.v.find((x) => boot.me.ids.includes(normEmail(x.Email)) && x.Active !== false) : boot.myRow;
     const fp = permsOf(freshMine, { bootAdmin: boot.isBootAdmin }).perms;
-    // 접속 기록(사용자 화면의 마지막 접속) · 목록 점검은 관리 쪽 사람에게만, 저장할 때마다가 아니라 5분에 한 번
-    if ((canSee(fp, "access") || canSee(fp, "users") || boot.isBootAdmin) && Date.now() - accessAtRef.current > 5 * 60e3) {
+    // 접속 기록(사용자 화면의 마지막 접속)은 사용자 · 접속 기록을 보는 사람에게만, 목록 점검은 관리 화면(게시판 · 배너 · 바로가기 포함)을 보는 사람에게도.
+    // 저장할 때마다가 아니라 5분에 한 번
+    const seesAccess = canSee(fp, "access") || canSee(fp, "users") || boot.isBootAdmin;
+    if ((seesAccess || canSee(fp, "categories") || canSee(fp, "links")) && Date.now() - accessAtRef.current > 5 * 60e3) {
       accessAtRef.current = Date.now();
-      const since = new Date(Date.now() - 45 * 864e5).toISOString();
-      // 실패하면 목록 전체를 대신 받지 않는다(요청 제한 중에 수만 줄을 받게 되므로) — 이전 값을 두고 다음 새로고침에서 다시
-      tListAll(T365_LISTS.access, `&$filter=${encodeURIComponent(`fields/LoginAt ge '${since}'`)}`)
-        .then((v) => setAccessRows(v || []), (e) => { if (isMissingListError(e)) setAccessRows([]); else { accessAtRef.current = 0; setAccessRows((prev) => prev || []); } });
+      if (seesAccess) {
+        const since = new Date(Date.now() - 45 * 864e5).toISOString();
+        // 실패하면 목록 전체를 대신 받지 않는다(요청 제한 중에 수만 줄을 받게 되므로) — 이전 값을 두고 다음 새로고침에서 다시
+        tListAll(T365_LISTS.access, `&$filter=${encodeURIComponent(`fields/LoginAt ge '${since}'`)}`)
+          .then((v) => setAccessRows(v || []), (e) => { if (isMissingListError(e)) setAccessRows([]); else { accessAtRef.current = 0; setAccessRows((prev) => prev || []); } });
+      }
       tCheckLists().then(setListStatus, () => setListStatus(null));
     }
     setLoading(false); setHasLoadedOnce(true);
@@ -5107,14 +5114,13 @@ function App({ boot }) {
   const todoTotal = boardNav.reduce((a, n) => a + (n.badge && n.badge.tone !== "quiet" ? n.badge.n : 0), 0);   // 할 일(색 숫자) 합 — 휴대폰 메뉴 단추의 점
   const statusNav = canView("status") ? [{ id: "status", label: "조회확인 현황", icon: BarChart3 }] : [];
   const adminNav = [
-    { id: "users", label: "사용자 · 권한 관리", icon: Users }, { id: "categories", label: "게시판 · 배너 · 바로가기", icon: Tags },
+    { id: "users", label: "사용자 · 권한 관리", icon: Users }, { id: "categories", label: "게시판 · 배너", icon: Tags }, { id: "links", label: "바로가기 관리", icon: Link2 },
     { id: "access", label: "접속 기록", icon: LogIn }, { id: "activity", label: "활동 이력", icon: History },
   ].filter((n) => canView(n.id));   // 보기 권한이 있는 메뉴만
-  // 바로가기 — 사용 중이고 이 사람에게 보이는 링크(모두 · Agent 만 · 직원만). 관리할 수 있는 사람에게는 비어 있어도 「추가」 를 보여 준다
-  const canManageLinks = canEditMenu("categories");
+  // 바로가기 — 사용 중이고 이 사람에게 보이는 링크(모두 · Agent 만 · 직원만). 추가 · 수정은 관리자 전용 「바로가기 관리」 에서
   const linkNav = parseLinks(linkRows).filter((l) => l.active && l.url && (l.audience === "all" || (l.audience === "agent" ? isAgent : !isAgent)))
     .map((l) => ({ id: "link:" + l.id, label: l.title || l.url, href: l.url, desc: l.desc, icon: l.icon, color: l.color, img: !!l.iconImg }));
-  const groups = [["TRAINING365", homeNav], ["게시판", boardNav], ...(linkNav.length || canManageLinks ? [["바로가기", linkNav]] : []), ...(statusNav.length ? [["확인 현황", statusNav]] : []), ...(adminNav.length ? [["관리자 전용", adminNav]] : [])];
+  const groups = [["TRAINING365", homeNav], ["게시판", boardNav], ...(linkNav.length ? [["바로가기", linkNav]] : []), ...(statusNav.length ? [["확인 현황", statusNav]] : []), ...(adminNav.length ? [["관리자 전용", adminNav]] : [])];
   const nav = [...homeNav, ...boardNav, ...statusNav, ...adminNav];
   const cur = nav.find((n) => n.id === tab) || homeNav[0];
   const roleLabel = [role || "권한 확인 중", me.company].filter(Boolean).join(" · ");
@@ -5126,7 +5132,8 @@ function App({ boot }) {
     all: [LayoutList, "모든 게시판의 글을 한 번에 찾아봅니다 — 안 읽은 글 · 공지 · 필수 보기와 검색"],
     status: [BarChart3, "게시물마다 대상 Agent 중 몇 명이 조회확인했는지(필수 글을 연 시각) 봅니다 — 눌러서 누가 · 언제 확인했는지 확인"],
     users: [Users, "사용자 · 역할과 메뉴별 보기 · 편집 권한을 관리합니다. 역할이 기본값이고, 칸을 바꾸면 그 사람만 따로 적용됩니다. 변경은 활동 이력에 남습니다."],
-    categories: [Tags, "게시판(이름 · 설명 · 순서 · 아이콘 · 색 · 문의 담당자) · 게시판 홈 배너 · 사이드바 바로가기 링크를 관리합니다"],
+    categories: [Tags, "게시판(이름 · 설명 · 순서 · 아이콘 · 색 · 문의 담당자)과 게시판 홈 배너를 관리합니다"],
+    links: [Link2, "사이드바 「바로가기」 링크(이름 · 주소 · 아이콘 · 색 · 보이는 사람 · 순서)를 관리합니다 — 누르면 새 창으로 열립니다"],
     access: [LogIn, "계정별 로그인 · 로그아웃 시각과 세션 종료(추정)를 조회하고 Excel 로 내보냅니다"],
     activity: [History, "게시물 · 사용자 · 카테고리 관리 이력을 날짜별로 조회합니다 (기본 최근 3일)"],
   }[tab] || [LayoutDashboard, ""]);
@@ -5153,41 +5160,43 @@ function App({ boot }) {
         )}
         <nav className="t365-side-nav flex-1 px-3 py-4 overflow-y-auto overflow-x-hidden" onScroll={() => setSideTip(null)}>
           {groups.map(([label, items], gi) => (
-            <div key={label} className="mb-4">
-              {railCollapsed ? (gi > 0 && <div className="mx-2 mb-3 border-t border-white/10"></div>) : <p className="text-[11px] tracking-wider text-slate-500 font-semibold px-3 mb-1.5 whitespace-nowrap">{label}</p>}
+            <div key={label} className={railCollapsed ? "mb-4" : "mb-3.5"} data-nav-group={label}>
+              {railCollapsed ? (gi > 0 && <div className="mx-2 mb-3 border-t border-white/10"></div>)
+                : <p className="px-3 mb-1 text-[10.5px] font-bold tracking-[0.1em] whitespace-nowrap" style={{ color: "#8592A8" }} data-nav-head>{label}</p>}
+              {/* 소분류 — 큰 분류 이름 아래로 한 칸 들여 세로 안내선으로 묶고 글씨를 한 단계 작게(13px). 고른 메뉴는 안내선 위 초록 막대. 접힌 아이콘 줄은 그대로 */}
+              <div className={railCollapsed ? undefined : "ml-[15px] pl-[9px] border-l border-white/[0.09]"}>
               {items.map((n) => {
                 if (n.href) return (
                   <a key={n.id} href={n.href} target="_blank" rel="noopener noreferrer" data-link={n.id.slice(5)} aria-label={`${n.label} — 새 창으로 열기`} title={railCollapsed ? undefined : (n.desc ? `${n.desc}\n${n.href}` : n.href)}
                     onClick={() => { setSideTip(null); if (isMobile) setDrawerOpen(false); }}
-                    className="group relative w-full flex items-center text-left gap-2.5 px-3 py-2 rounded-lg text-sm mb-0.5 transition-colors whitespace-nowrap min-h-[38px]"
-                    style={{ color: "#B7C0D1", borderLeft: "3px solid transparent" }}
+                    className={`group relative w-full flex items-center text-left rounded-lg transition-colors whitespace-nowrap ${railCollapsed ? "gap-2.5 px-3 py-2 text-sm mb-0.5 min-h-[38px]" : "gap-2 px-2.5 py-[7px] text-[13px] mb-px min-h-[36px]"}`}
+                    style={{ color: "#B7C0D1", borderLeft: railCollapsed ? "3px solid transparent" : undefined }}
                     onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = BRAND.navyHover; e.currentTarget.style.color = "#fff"; showSideTip(e, n.label); }}
                     onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#B7C0D1"; setSideTip(null); }}>
-                    <span className="w-[22px] h-[22px] -mx-[2.5px] rounded-md bg-white flex items-center justify-center shrink-0 shadow-sm shadow-black/20"><n.icon size={13} style={{ color: n.color }} /></span>
+                    <span className={`${railCollapsed ? "w-[22px] h-[22px] -mx-[2.5px] rounded-md" : "w-5 h-5 rounded-[5px]"} bg-white flex items-center justify-center shrink-0 shadow-sm shadow-black/20`}><n.icon size={railCollapsed ? 13 : 12} style={{ color: n.color }} /></span>
                     {!railCollapsed && <span className="leading-snug flex-1 truncate">{n.label}</span>}
-                    {!railCollapsed && <ExternalLink size={12.5} className="shrink-0 opacity-40 group-hover:opacity-80 transition-opacity" aria-hidden="true" />}{/* 늘 옅게 보이게 — 게시판과 달리 새 창으로 열린다는 표시(휴대폰은 마우스를 올릴 수 없으니) */}
+                    {!railCollapsed && <ExternalLink size={12} className="shrink-0 opacity-40 group-hover:opacity-80 transition-opacity" aria-hidden="true" />}{/* 늘 옅게 보이게 — 게시판과 달리 새 창으로 열린다는 표시(휴대폰은 마우스를 올릴 수 없으니) */}
                   </a>
                 );
                 const active = tab === n.id;
                 return (
-                  <button key={n.id} data-nav={n.id} aria-label={n.badge ? `${n.label} — ${n.badge.title} ${n.badge.n}건` : n.label} onClick={() => { setSideTip(null); goTab(n.id); if (isMobile) setDrawerOpen(false); }}
-                    className="relative w-full flex items-center text-left gap-2.5 px-3 py-2.5 rounded-lg text-sm mb-0.5 transition-colors whitespace-nowrap min-h-[40px]"
-                    style={{ backgroundColor: active ? BRAND.navySoft : "transparent", color: active ? "#fff" : "#B7C0D1", borderLeft: active ? `3px solid ${BRAND.accent}` : "3px solid transparent" }}
+                  <button key={n.id} data-nav={n.id} aria-label={n.badge ? `${n.label} — ${n.badge.title} ${n.badge.n}건` : n.label} aria-current={active ? "page" : undefined} onClick={() => { setSideTip(null); goTab(n.id); if (isMobile) setDrawerOpen(false); }}
+                    className={`relative w-full flex items-center text-left rounded-lg transition-colors whitespace-nowrap ${railCollapsed ? "gap-2.5 px-3 py-2.5 text-sm mb-0.5 min-h-[40px]" : `gap-2 px-2.5 py-[7px] text-[13px] mb-px min-h-[36px] ${active ? "font-medium" : ""}`}`}
+                    style={{ backgroundColor: active ? BRAND.navySoft : "transparent", color: active ? "#fff" : "#B7C0D1", borderLeft: railCollapsed ? (active ? `3px solid ${BRAND.accent}` : "3px solid transparent") : undefined }}
                     onMouseEnter={(e) => { if (!active) e.currentTarget.style.backgroundColor = BRAND.navyHover; showSideTip(e, n.label); }}
                     onMouseLeave={(e) => { if (!active) e.currentTarget.style.backgroundColor = "transparent"; setSideTip(null); }}>
-                    <n.icon size={17} className="shrink-0" />
+                    {active && !railCollapsed && <span aria-hidden="true" className="absolute top-2 bottom-2 w-[3px] rounded-full" style={{ left: -11, background: BRAND.accent }} data-nav-active></span>}
+                    <n.icon size={railCollapsed ? 17 : 15} className="shrink-0" style={railCollapsed || active ? undefined : { opacity: 0.85 }} />
                     {!railCollapsed && <span className="leading-snug flex-1 truncate">{n.label}</span>}
                     {n.badge && (railCollapsed ? (
                       <span className="absolute top-1 left-[26px] text-[9px] leading-none font-bold rounded-full px-1 min-w-[16px] h-[16px] flex items-center justify-center" style={{ backgroundColor: n.badge.tone === "quiet" ? "#475569" : n.badge.color, color: n.badge.tone === "quiet" ? "#E2E8F0" : "#fff", boxShadow: `0 0 0 2px ${BRAND.navy}` }} title={`${n.badge.title} ${n.badge.n}건`} aria-hidden="true">{n.badge.n > 99 ? "99+" : n.badge.n}</span>
                     ) : (
-                      <span className="shrink-0 text-[11px] font-semibold rounded-full px-1.5 min-w-[18px] text-center tabular-nums" style={n.badge.tone === "quiet" ? { backgroundColor: "rgba(255,255,255,.1)", color: "#AEB8C9" } : { backgroundColor: n.badge.color, color: "#fff" }} data-badge={n.id} data-badge-kind={n.badge.title} data-badge-tone={n.badge.tone || "todo"} title={`${n.badge.title} ${n.badge.n}건`} aria-hidden="true">{n.badge.n > 99 ? "99+" : n.badge.n}</span>
+                      <span className="shrink-0 text-[10.5px] font-semibold rounded-full px-1.5 min-w-[18px] leading-[17px] text-center tabular-nums" style={n.badge.tone === "quiet" ? { backgroundColor: "rgba(255,255,255,.1)", color: "#AEB8C9" } : { backgroundColor: n.badge.color, color: "#fff" }} data-badge={n.id} data-badge-kind={n.badge.title} data-badge-tone={n.badge.tone || "todo"} title={`${n.badge.title} ${n.badge.n}건`} aria-hidden="true">{n.badge.n > 99 ? "99+" : n.badge.n}</span>
                     ))}
                   </button>
                 );
               })}
-              {label === "바로가기" && canManageLinks && (railCollapsed
-                ? <button onClick={() => setTab("categories")} aria-label="바로가기 관리" title="바로가기 관리" className="w-full h-8 rounded-lg flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10" data-testid="links-manage"><Plus size={15} /></button>
-                : <button onClick={() => { setTab("categories"); if (isMobile) setDrawerOpen(false); setTimeout(() => { const el = document.querySelector("[data-testid=link-admin]"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 250); }} className="w-full flex items-center gap-2 px-3 h-8 rounded-lg text-[12px] text-slate-500 hover:text-white hover:bg-white/5 whitespace-nowrap" data-testid="links-manage"><Plus size={14} className="shrink-0" />{items.length ? "바로가기 관리" : "바로가기 추가"}</button>)}
+              </div>
             </div>
           ))}
         </nav>
@@ -5271,7 +5280,8 @@ function App({ boot }) {
                 {(tab === "all" || tab.startsWith("cat:")) && <BoardTab ctx={ctx} catKey={tab === "all" ? null : tab.slice(4)} openId={openPostId} setOpenId={setOpenId} seed={boardSeed && boardSeed.tab === tab ? boardSeed : null} onSeedUsed={() => setBoardSeed(null)} />}
                 {tab === "status" && <ConfirmStatusTab ctx={ctx} openPost={openPost} />}
                 {tab === "users" && <UsersTab ctx={ctx} users={users} bootstrap={boot.isBootAdmin} accessRows={accessRows} listStatus={listStatus} reload={reload} />}
-                {tab === "categories" && <CategoriesTab ctx={ctx} catRows={catRows} bannerRows={bannerRows} linkRows={linkRows} listStatus={listStatus} reload={reload} />}
+                {tab === "categories" && <CategoriesTab ctx={ctx} catRows={catRows} bannerRows={bannerRows} listStatus={listStatus} reload={reload} />}
+                {tab === "links" && <LinkAdmin ctx={ctx} rows={linkRows} listStatus={listStatus} reload={reload} canEd={canEditMenu("links")} />}
                 {tab === "access" && <AccessLogTab ctx={ctx} />}
                 {tab === "activity" && <ActivityLogTab />}
               </>
