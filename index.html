@@ -4608,7 +4608,7 @@ function AccessLogTab({ ctx }) {
   const [page, setPage] = useState(1);
   const [detail, setDetail] = useState(null);
   const [loaded, setLoaded] = useState("");
-  const PAGE_SIZE = 25;
+  const PAGE_SIZE = 20;   // 20건씩(10-12 · t365-access-dense)
   async function load(f = from, t = to) {
     if (!f || !t || f > t) { uiAlert("조회 기간을 확인해 주세요."); return; }
     if (dayAdd(f, 92) < t) { uiAlert("한 번에 93일까지 조회할 수 있습니다."); return; }
@@ -4657,7 +4657,7 @@ function AccessLogTab({ ctx }) {
   function preset(days) { const f = days === 1 ? today : dayAdd(today, -(days - 1)); setFrom(f); setTo(today); load(f, today); }
   const ctrl = "h-9 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/40";
   const td = "px-3 py-[6px] text-[12.5px] leading-5 whitespace-nowrap overflow-hidden text-ellipsis";
-  const td2 = "px-3 h-10 align-middle overflow-hidden whitespace-nowrap";   // 세션 표 — 한 줄(사용자는 이름만, 메일은 말풍선)
+  const td2 = "px-3 h-8 align-middle overflow-hidden whitespace-nowrap";   // 세션 표 — 한 줄(사용자는 이름만, 메일은 말풍선) · 줄 높이 40→32(10-12 · t365-access-dense)
   const dtShort = (v) => { const t = fmtDate(v); return t && t.length > 5 && t.slice(0, 4) === kstToday().slice(0, 4) ? t.slice(5) : t; };   // 올해(KST 기준)   // 올해면 연도 생략(말풍선에 전체)
   const curLen = Math.round((new Date(to + "T00:00:00Z") - new Date(from + "T00:00:00Z")) / 864e5) + 1;
   return (
@@ -4694,7 +4694,7 @@ function AccessLogTab({ ctx }) {
           {mode === "session" ? (
             <table className="w-full table-fixed" style={{ minWidth: 960 }} data-testid="access-table">
               <colgroup><col style={{ width: "14%" }} /><col style={{ width: "9%" }} /><col style={{ width: "14%" }} /><col style={{ width: "12%" }} /><col style={{ width: "12%" }} /><col style={{ width: "10%" }} /><col style={{ width: "13%" }} /><col style={{ width: "16%" }} /></colgroup>
-              <thead className="bg-slate-50 text-slate-500 text-[11.5px]"><tr>{[["사용자"], ["역할"], ["회사/지점"], ["로그인"], ["로그아웃 · 종료"], ["접속 시간"], ["상태"], ["기기"]].map(([h, a]) => <th key={h} className={`px-3 h-9 font-medium whitespace-nowrap border-b border-slate-200 ${a === "r" ? "text-right" : a === "c" ? "text-center" : "text-left"}`}>{h}</th>)}</tr></thead>
+              <thead className="bg-slate-50 text-slate-500 text-[11.5px]"><tr>{[["사용자"], ["역할"], ["회사/지점"], ["로그인"], ["로그아웃 · 종료"], ["접속 시간"], ["상태"], ["기기"]].map(([h, a]) => <th key={h} className={`px-3 h-8 font-medium whitespace-nowrap border-b border-slate-200 ${a === "r" ? "text-right" : a === "c" ? "text-center" : "text-left"}`}>{h}</th>)}</tr></thead>
               <tbody>
                 {loading ? <tr><td colSpan={8} className="text-center text-slate-400 text-sm py-14"><div className="w-6 h-6 mx-auto mb-2 rounded-full border-2 border-slate-200 animate-spin" style={{ borderTopColor: BRAND.accent }}></div>접속 기록을 불러오는 중입니다...</td></tr>
                   : error ? <tr><td colSpan={8} className="text-center text-red-500 text-sm py-12">{error}</td></tr>
@@ -4715,7 +4715,7 @@ function AccessLogTab({ ctx }) {
           ) : (
             <table className="w-full table-fixed" style={{ minWidth: 900 }} data-testid="access-users">
               <colgroup><col style={{ width: "16%" }} /><col style={{ width: "10%" }} /><col style={{ width: "16%" }} /><col style={{ width: "9%" }} /><col style={{ width: "10%" }} /><col style={{ width: "13%" }} /><col style={{ width: "14%" }} /><col style={{ width: "12%" }} /></colgroup>
-              <thead className="bg-slate-50 text-slate-500 text-[11.5px]"><tr>{[["사용자"], ["역할"], ["회사/지점"], ["접속"], ["로그아웃"], ["세션 종료(추정)"], ["마지막 로그인"], ["접속 시간 합"]].map(([h, a]) => <th key={h} className={`px-3 h-9 font-medium whitespace-nowrap border-b border-slate-200 ${a === "r" ? "text-right" : "text-left"}`}>{h}</th>)}</tr></thead>
+              <thead className="bg-slate-50 text-slate-500 text-[11.5px]"><tr>{[["사용자"], ["역할"], ["회사/지점"], ["접속"], ["로그아웃"], ["세션 종료(추정)"], ["마지막 로그인"], ["접속 시간 합"]].map(([h, a]) => <th key={h} className={`px-3 h-8 font-medium whitespace-nowrap border-b border-slate-200 ${a === "r" ? "text-right" : "text-left"}`}>{h}</th>)}</tr></thead>
               <tbody>
                 {pageRows.length ? pageRows.map((u) => (
                   <tr key={u.email} className="border-t border-slate-100 first:border-t-0">
