@@ -779,6 +779,7 @@ const T365Session = {
   },
 };
 async function t365Logout() {
+  _idbOff = true;   // 이 뒤로는 캐시를 쓰지 않는다(진행 중이던 불러오기 포함)
   try { await idbClear(); } catch (e) {}   // 조회 기록 캐시 — 공용 PC 에 남기지 않는다
   await T365Session.logout();
   msalApp.logoutRedirect();
@@ -1194,7 +1195,8 @@ function idbReq(mode, fn) {
   });
 }
 const idbGet = (k) => idbReq("readonly", (st) => st.get(k));
-const idbSet = (k, v) => idbReq("readwrite", (st) => st.put(v, k));
+let _idbOff = false;   // 로그아웃 중 — 늦게 끝난 불러오기가 지운 캐시를 다시 쓰지 않게
+const idbSet = (k, v) => (_idbOff ? Promise.resolve() : idbReq("readwrite", (st) => st.put(v, k)));
 const idbClear = () => idbReq("readwrite", (st) => st.clear());
 const isoNoMs = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
 let _readsLoadMode = "";   // full | delta — 시험 · 진단용
@@ -1439,6 +1441,9 @@ function SearchPopup({ ctx, initialQ, hidden, suspended, onClose, onOpen, onAsk,
   const inputRef = useRef(null);
   const listRef = useRef(null);
   useEffect(() => { const t = setTimeout(() => { if (inputRef.current) { inputRef.current.focus(); inputRef.current.select(); } }, 40); return () => clearTimeout(t); }, []);
+  // 결과에서 연 글을 닫고 돌아오면(이전/다음 글로 옮겨 다녔어도) 검색 칸으로 — ↑↓ · Enter 가 그대로 되게
+  const wasHidden = useRef(!!hidden);
+  useEffect(() => { if (wasHidden.current && !hidden) { const t = setTimeout(() => { if (inputRef.current) inputRef.current.focus(); }, 30); wasHidden.current = false; return () => clearTimeout(t); } wasHidden.current = !!hidden; }, [hidden]);
   const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6);
   const key = terms.join(" ");
   // 찾을 글자는 한 번만 만든다 — 제목 · 본문 · Q&A 답변 · 첨부 이름 · 작성자
@@ -1559,7 +1564,7 @@ function SearchPopup({ ctx, initialQ, hidden, suspended, onClose, onOpen, onAsk,
       {/* 아래 띠 */}
       <div className="shrink-0 px-4 md:px-6 h-12 border-t border-slate-100 bg-slate-50/70 flex items-center gap-3 text-[12px] text-slate-500">
         <span data-testid="sp-count">{terms.length ? <>검색 결과 <b className="text-slate-800 tabular-nums">{list.length}</b>건{cat && catMap[cat] ? <> · {catMap[cat].label}</> : null}</> : "모든 게시판"}</span>
-        {terms.length > 0 && <button onClick={() => onMore(q.trim())} className="ml-auto inline-flex items-center gap-0.5 font-medium hover:text-slate-800" style={{ color: BRAND.accent }} data-testid="sp-full">전체 게시물에서 보기<ChevronRight size={14} /></button>}
+        {terms.length > 0 && onMore && <button onClick={() => onMore(q.trim())} className="ml-auto inline-flex items-center gap-0.5 font-medium hover:text-slate-800" style={{ color: BRAND.accent }} data-testid="sp-full">전체 게시물에서 보기<ChevronRight size={14} /></button>}
       </div>
     </PostModalShell>
   );
@@ -1582,12 +1587,15 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
   const reqAll = ctx.isAgent ? vis.filter((p) => p.RequireConfirm) : [];
   const reqDone = reqAll.length - todo.length;
   // 공지 · 필수 — 게시 후 7일(기한을 정한 글은 그날까지). Agent 는 아직 확인 안 한 필수 자료가 먼저, 그다음 공지, 그다음 최신순
+  const NOTICE_MAX_C = 6;
   const notice = vis.filter(onNoticeBox).sort((a, b) => (isTodo(b) ? 1 : 0) - (isTodo(a) ? 1 : 0) || (pinActive(b) ? 1 : 0) - (pinActive(a) ? 1 : 0) || byNewest(a, b));
-  const noticeTodo = notice.filter(isTodo).length;   // 상자 안의 확인할 자료(머리 숫자는 상자에 보이는 것 기준)
-  const noticeAny = vis.some((p) => pinActive(p) || p.RequireConfirm);
-  const NOTICE_MAX = 6;
+  const noticeShown = notice.slice(0, NOTICE_MAX_C);
+  const noticeTodo = noticeShown.filter(isTodo).length;   // 머리 숫자는 상자에 보이는 줄 기준(넘치는 것은 「더 보기」 · 내 확인 대기에서)
+  const noticeAny = vis.some((p) => p.IsPinned || p.RequireConfirm);   // 지난 공지(기한 지남 포함)까지 — 「지난 글」 링크
+  const canAll = ctx.canView("all");   // 전체 게시물을 볼 수 없는 사람에게는 그쪽으로 가는 링크를 보이지 않는다
+  const NOTICE_MAX = NOTICE_MAX_C;
   // 최근 게시물 — 최근 7일 새 글. 공지 · 필수는 위 상자에서, Q&A 는 오른쪽 Q&A 상자에서 보여 주므로 뺀다
-  const recent = vis.filter((p) => p.Category !== "qna" && !pinActive(p) && !p.RequireConfirm && inLastDays(p, T365_HOME_DAYS));
+  const recent = vis.filter((p) => p.Category !== "qna" && !p.IsPinned && !p.RequireConfirm && inLastDays(p, T365_HOME_DAYS));   // 기한이 지난 공지도 공지 — 다시 섞지 않는다
   // 많이 본 글 — 오래된 인기 글이 계속 자리를 차지하지 않게 최근 90일 글 중에서(3건이 안 되면 전체에서)
   const ranked = (list) => list.map((p) => ({ p, v: viewStats(readIdx, p.id).views })).filter((x) => x.v > 0).sort((a, b) => b.v - a.v || byNewest(a.p, b.p));
   const since90 = Date.now() - 90 * 864e5;
@@ -1613,10 +1621,12 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
   const open = openId ? vis.find((p) => String(p.id) === String(openId)) : null;
   const fromSearch = !!(open && searching !== null && searchList && searchList.some((x) => String(x.id) === String(open.id)));
   const searchRef = useRef(null);
+  const overlayOpen = searching !== null || !!openId || !!editing;   // 검색 창 · 글 · 글쓰기 창이 떠 있으면 「/」 로 뒤의 배너 검색 칸을 잡지 않는다
   useEffect(() => {
+    if (overlayOpen) return;
     const k = (e) => { if (e.key === "/" && !isTyping(e) && !e.ctrlKey && !e.metaKey && searchRef.current) { e.preventDefault(); searchRef.current.focus(); } };
     window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k);
-  }, []);
+  }, [overlayOpen]);
 
   return (
     <div className="w-full">
@@ -1650,7 +1660,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                 <span className="inline-flex items-center gap-1 px-1.5 rounded-md bg-slate-100 text-slate-500 font-medium leading-[18px] shrink-0 whitespace-nowrap"><Clock size={11} /><span className="sm:hidden">7일</span><span className="hidden sm:inline">게시 후 7일간 노출</span></span>
                 <span className="truncate hidden md:inline">{ctx.isAgent ? "필수 자료는 열어 보면 자동으로 조회확인됩니다" : "꼭 읽어야 할 공지와 필수 자료입니다"}</span>
               </span>
-              {noticeAny && <button onClick={() => onSearch("", "notice")} title="지난 공지 · 필수까지 모두 보기" className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 whitespace-nowrap shrink-0 inline-flex items-center" data-testid="notice-more">지난 글<ChevronRight size={13} /></button>}
+              {noticeAny && canAll && <button onClick={() => onSearch("", "notice")} title="지난 공지 · 필수까지 모두 보기" className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 whitespace-nowrap shrink-0 inline-flex items-center" data-testid="notice-more">지난 글<ChevronRight size={13} /></button>}
             </div>
             {notice.length > 0 && <HomeColHead>
               <span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
@@ -1675,7 +1685,8 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                   </span>}
                 </button>
               );
-            }) : <SmallEmpty icon={CheckCircle2}>최근 7일 동안 올라온 공지 · 필수 자료가 없습니다.{noticeAny && <> <button onClick={() => onSearch("", "notice")} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>지난 공지 · 필수 보기</button></>}</SmallEmpty>}
+            }) : <SmallEmpty icon={CheckCircle2}>최근 7일 동안 올라온 공지 · 필수 자료가 없습니다.{noticeAny && canAll && <> <button onClick={() => onSearch("", "notice")} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>지난 공지 · 필수 보기</button></>}</SmallEmpty>}
+            {notice.length > NOTICE_MAX && canAll && <button onClick={() => onSearch("", "notice")} className="w-full h-9 border-t border-[#E9EEF3] text-[12px] font-medium text-slate-500 hover:bg-slate-50 inline-flex items-center justify-center gap-0.5" data-testid="notice-overflow">이번 주 공지 · 필수 {notice.length - NOTICE_MAX}건 더 보기<ChevronRight size={13} /></button>}
           </section>
 
           {/* 최근 게시물 — 모든 게시판을 하나의 목록으로 */}
@@ -1688,7 +1699,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                 <span className="truncate hidden sm:inline">공지 · 필수 글은 제외하고 보여 드립니다</span>
                 <span className="hidden lg:inline-flex items-center gap-1.5 shrink-0"><span className="text-slate-300">·</span><NewDot />안 읽은 글</span>
               </span>
-              <button onClick={() => setTab("all")} className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 inline-flex items-center shrink-0" data-testid="recent-more">전체 게시물<ChevronRight size={13} /></button>
+              {canAll && <button onClick={() => setTab("all")} className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 inline-flex items-center shrink-0" data-testid="recent-more">전체 게시물<ChevronRight size={13} /></button>}
             </div>
             {recent.length > 0 && <HomeColHead>
               <span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
@@ -1710,7 +1721,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                   {ctx.isAgent && <span className="w-[100px] shrink-0 hidden sm:flex items-center" data-read-col={p.id}>{myRow(p) ? <SeenMark r={myRow(p)} /> : <span className="text-[11.5px] text-slate-300">-</span>}</span>}
                 </button>
               );
-            }) : <SmallEmpty>최근 7일 동안 올라온 새 글이 없습니다. <button onClick={() => setTab("all")} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>전체 게시물 보기</button></SmallEmpty>}
+            }) : <SmallEmpty>최근 7일 동안 올라온 새 글이 없습니다.{canAll && <> <button onClick={() => setTab("all")} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>전체 게시물 보기</button></>}</SmallEmpty>}
           </section>
         </div>
 
@@ -1734,7 +1745,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                   <span className="text-[11px] text-slate-400 tabular-nums shrink-0" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
                 </button>
               ); }) : <SmallEmpty icon={CheckCircle2}>필수 자료를 모두 확인했습니다.</SmallEmpty>}
-              {todo.length > 5 && <button onClick={() => onSearch("", "todo")} className="w-full h-9 border-t border-slate-100 text-[12px] font-medium text-orange-700 hover:bg-orange-50/50" data-testid="todo-more">확인할 자료 {todo.length - 5}건 더 보기</button>}
+              {todo.length > 5 && canAll && <button onClick={() => onSearch("", "todo")} className="w-full h-9 border-t border-slate-100 text-[12px] font-medium text-orange-700 hover:bg-orange-50/50" data-testid="todo-more">확인할 자료 {todo.length - 5}건 더 보기</button>}
             </WidgetCard>
           )}
           {catMap.qna && (
@@ -1795,7 +1806,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
       {searching !== null && <SearchPopup ctx={ctx} initialQ={searching} hidden={!!openId} suspended={!!openId || !!editing}
         onClose={(last) => { setSearching(null); setSearchList(null); setQ(last || ""); }} onOpen={(p, l) => { setSearchList(l || null); openPost(p); }}
         onAsk={ctx.isAgent && ctx.canWrite("qna") ? () => setEditing({ cat: "qna" }) : null}
-        onMore={(qq) => { setSearching(null); onSearch(qq); }} />}
+        onMore={canAll ? (qq) => { setSearching(null); onSearch(qq); } : null} />}
       {/* 홈에서 누른 글은 홈 위 팝업으로(게시판으로 옮겨 가지 않음) — 위 · 아래 단추는 홈 목록(최신순) 기준 */}
       {openId && (open
         ? <PostDetail key={open.id} ctx={ctx} post={open} siblings={fromSearch ? searchList : vis} listLabel={fromSearch ? "검색 결과" : "Overview"} onOpen={(id) => setOpenId(id)} onBack={() => setOpenId(null)} onEdit={() => setEditing({ post: open })} suspended={!!editing} />
@@ -1860,7 +1871,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
   const isMine = (p) => normEmail(p.AuthorEmail) === normEmail(me.email);
   // 게시판 종류 — Q&A(답변 상태) · 필수 교육자료(조회확인) · 그 밖(공지 · 필수). 종류마다 보기 탭 · 상태 칸이 다르다
   const kind = catKey === "qna" ? "qna" : catKey && catMap[catKey] && catMap[catKey].required ? "required" : "normal";
-  const passFilter = (p, f) => f === "all" ? true : f === "unread" ? !seenBy(p, myRow(p), me) : f === "notice" ? (pinActive(p) || p.RequireConfirm) : f === "pinned" ? pinActive(p)
+  const passFilter = (p, f) => f === "all" ? true : f === "unread" ? !seenBy(p, myRow(p), me) : f === "notice" ? (p.IsPinned || p.RequireConfirm) : f === "pinned" ? pinActive(p)
     : f === "todo" ? isTodo(p) : f === "done" ? (p.RequireConfirm && !isTodo(p)) : f === "required" ? p.RequireConfirm
     : f === "incomplete" ? (() => { const r = rateOf(p); return !!r && r.total > 0 && r.done < r.total; })()
     : f === "qwait" ? !qnaAnswered(p) : f === "qdone" ? qnaAnswered(p) : f === "mine" ? isMine(p) : true;
@@ -2190,7 +2201,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
         <article className="min-h-full flex flex-col" data-testid="article">
           {/* 제목 · 정보 */}
           <header className="px-5 md:px-10 pt-6 pb-5 border-b border-slate-200 bg-white">
-            {(pinActive(post) || post.RequireConfirm || post.Category === "qna") && (
+            {(pinActive(post) || post.RequireConfirm || post.Category === "qna" || (!ctx.isAgent && post.IsPinned && pinUntilOf(post))) && (
               <div className="flex items-center gap-1 mb-2">
                 {post.Category === "qna" && <QnaPill p={post} />}
                 {post.Category === "qna" && normEmail(post.AuthorEmail) === normEmail(me.email) && <span className="t365-pill bg-slate-100 text-slate-500" data-mine="1">내 질문</span>}
@@ -4650,7 +4661,7 @@ function App({ boot }) {
   }
   const setOpenId = (id) => setTab(tab, id ? String(id) : null);
   const openPost = (p) => setTab(catMap[p.Category] ? "cat:" + p.Category : "all", String(p.id));
-  const openSearch = (q, filter) => { setBoardSeed({ tab: "all", q: q || "", filter: filter || "all", n: Date.now() }); setTab("all"); };
+  const openSearch = (q, filter) => { if (!canView("all")) return; setBoardSeed({ tab: "all", q: q || "", filter: filter || "all", n: Date.now() }); setTab("all"); };
   useEffect(() => { const on = () => { const x = parseHash(); setTabRaw(x.tab); setOpenPostRaw(x.post); }; window.addEventListener("popstate", on); return () => window.removeEventListener("popstate", on); }, []);
   const upsertRead = (row) => setReads((prev) => { const i = prev.findIndex((x) => x.Title === row.Title); if (i < 0) return [...prev, row]; const n = prev.slice(); n[i] = { ...n[i], ...row }; return n; });
 
