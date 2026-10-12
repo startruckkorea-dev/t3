@@ -1402,7 +1402,7 @@ const SeenMark = ({ r, confirm, tight }) => {
   if (!r) return null;
   const at = confirm ? r.ConfirmedAt : (r.FirstViewedAt || r.LastViewedAt);
   if (!at) return null;
-  const tip = `${confirm ? "조회확인" : "처음 열람"} ${fmtDate(at)}${r.LastViewedAt && r.LastViewedAt !== at ? ` · 마지막 열람 ${fmtDate(r.LastViewedAt)}` : ""}${Number(r.ViewCount) > 1 ? ` · ${r.ViewCount}회` : ""}`;
+  const tip = `${confirm ? "처음 확인" : "처음 열람"} ${fmtDate(at)}${r.LastViewedAt && r.LastViewedAt !== at ? ` · 마지막 열람 ${fmtDate(r.LastViewedAt)}` : ""}${Number(r.ViewCount) > 1 ? ` · ${r.ViewCount}회` : ""}`;
   return <span className="inline-flex items-center gap-1 text-[11.5px] font-medium text-emerald-700 tabular-nums whitespace-nowrap" title={tip} data-confirm-state={confirm ? "done" : undefined} data-seen="1"><CheckCircle2 size={13} className="shrink-0" />{tight ? <span className="hidden sm:inline">{shortDate(at)}</span> : shortDate(at)}</span>;
 };
 // 게시물 앞의 작은 표시 — 공지 · 필수(제목 왼쪽)
@@ -2220,7 +2220,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
               <div className="sm:ml-auto flex items-center gap-1.5 flex-wrap">
                 <span className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-white border border-slate-200 text-[12px] text-slate-600 tabular-nums" title="열어 본 횟수의 합 — 같은 사람이 다시 열어도 1씩 늘어납니다"><Eye size={13} className="text-slate-400" />조회 <b className="text-slate-800" data-testid="meta-views">{vs.views}</b></span>
                 {files.length > 0 && <button onClick={() => { const el = scrollRef.current && scrollRef.current.querySelector("[data-testid=attachments]"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-white border border-slate-200 text-[12px] text-slate-600 hover:border-[#9CCBC8] hover:text-[#2F7B7A]" data-testid="meta-files"><Paperclip size={13} className="text-slate-400" />첨부 <b className="text-slate-800">{files.length}</b></button>}
-                {ctx.isAgent && (post.RequireConfirm || confirmed) && <span className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold ${confirmed ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-orange-50 text-orange-700 border border-orange-200"}`} data-testid="meta-mine" title={confirmed ? `조회확인 ${fmtDate(mine.ConfirmedAt)}` : undefined}>{confirmed ? <><CheckCircle2 size={13} /><span className="tabular-nums">{shortDate(mine.ConfirmedAt)}</span></> : <><BellRing size={12} />확인 필요</>}</span>}
+                {ctx.isAgent && (post.RequireConfirm || confirmed) && <span className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold ${confirmed ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-orange-50 text-orange-700 border border-orange-200"}`} data-testid="meta-mine" title={confirmed ? `처음 확인 ${fmtDate(mine.ConfirmedAt)} — 조회확인은 처음 연 시각만 남습니다` : undefined}>{confirmed ? <><CheckCircle2 size={13} /><span className="tabular-nums">{shortDate(mine.ConfirmedAt)}</span></> : <><BellRing size={12} />확인 필요</>}</span>}
               </div>
             </div>
           </header>
@@ -2304,7 +2304,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
             {showState ? (confirmed ? (
               <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 <CheckCircle2 size={20} className="text-emerald-600 shrink-0" />
-                <div className="min-w-0"><div className="text-[13.5px] font-semibold text-emerald-800" data-testid="confirmed-label">조회확인 완료</div><div className="text-[11.5px] text-emerald-700/80 tabular-nums truncate">{fmtDate(mine.ConfirmedAt)} 에 확인하셨습니다</div></div>
+                <div className="min-w-0"><div className="text-[13.5px] font-semibold text-emerald-800" data-testid="confirmed-label">조회확인 완료</div><div className="text-[11.5px] text-emerald-700/80 tabular-nums truncate">{fmtDate(mine.ConfirmedAt)} 에 처음 확인하셨습니다</div></div>
               </div>
             ) : autoState === "error" ? (
               <div className="flex items-center gap-2.5 min-w-0 flex-1">
