@@ -1674,7 +1674,35 @@ function SearchPopup({ ctx, initialQ, hidden, suspended, onClose, onOpen, onAsk,
 /* Overview — 인트라넷 「게시판 홈」: 검색 · 요약 한 줄 · 공지 · 필수 ·           */
 /* 공지 · 필수 · 최근 게시물 · 오른쪽 작은 상자(확인 대기 · 많이 본 글 · Q&A) */
 /* ------------------------------------------------------------------ */
-function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banners, onManageBanners }) {
+// Overview 왼쪽 바로가기 열 — 관리자가 넣은 링크를 세로로(새 창). 사이드바 메뉴와 섞지 않고 홈에서 바로 보이게
+function QuickLinksRail({ links, onManage }) {
+  if (!links.length && !onManage) return null;
+  return (
+    <section className="bg-white rounded-xl border border-slate-200 overflow-hidden t365-portlet" data-testid="quick-links">
+      <div className="t365-portlet-head">
+        <span className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: BRAND.accentSoft }}><Link2 size={13} style={{ color: BRAND.accent }} /></span>
+        <h2 className="text-[15px] font-bold text-slate-900 tracking-[-0.01em] whitespace-nowrap">바로가기</h2>
+        {onManage && <button onClick={onManage} className="ml-auto text-[11.5px] text-slate-400 hover:text-slate-700 whitespace-nowrap" data-testid="links-manage">관리</button>}
+      </div>
+      {links.length ? (
+        <div className="p-2 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-1 gap-1">
+          {links.map((l) => (
+            <a key={l.id} href={l.href} target="_blank" rel="noopener noreferrer" data-link={l.id.slice(5)} title={l.desc ? `${l.desc}\n${l.href}` : l.href} aria-label={`${l.label} — 새 창으로 열기`}
+              className="group flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-slate-50 min-w-0">
+              <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ring-1 ring-slate-200 bg-white shadow-sm"><l.icon size={15} style={{ color: l.color }} /></span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-semibold text-slate-800 truncate group-hover:text-[#2F7B7A]" data-link-title>{l.label}</span>
+                {l.desc && <span className="block text-[11px] text-slate-400 truncate">{l.desc}</span>}
+              </span>
+              <ExternalLink size={12} className="shrink-0 text-slate-300 group-hover:text-slate-500" aria-hidden="true" />
+            </a>
+          ))}
+        </div>
+      ) : <div className="px-4 py-4 text-[12px] text-slate-400">아직 바로가기가 없습니다. <button onClick={onManage} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>추가하기</button></div>}
+    </section>
+  );
+}
+function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banners, onManageBanners, links = [], onManageLinks }) {
   const { posts, cats, catMap, readIdx, me } = ctx;
   // Overview 는 Agent 가 정보를 얻는 첫 화면 — 확인율 · 미확인 Agent · 활성 사용자 같은 관리 숫자는 넣지 않는다(조회확인 현황 · 접속 기록 화면에서)
   const myRow = (p) => (readIdx.get(String(p.id)) || new Map()).get(normEmail(me.email));
@@ -1728,8 +1756,11 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
     window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k);
   }, [overlayOpen]);
 
+  const showLinks = links.length > 0 || !!onManageLinks;
   return (
-    <div className="w-full">
+    <div className={showLinks ? "w-full flex flex-col lg:flex-row lg:items-start gap-4" : "w-full"}>
+      {showLinks && <aside className="lg:w-[220px] shrink-0 lg:sticky lg:top-0"><QuickLinksRail links={links} onManage={onManageLinks} /></aside>}
+      <div className="min-w-0 flex-1">
       <BannerCarousel ctx={ctx} banners={banners || []} onManage={onManageBanners} strip={
         <div className="flex flex-col min-[1400px]:flex-row min-[1400px]:items-end gap-3 min-[1400px]:gap-5">
           <div className="min-w-0 flex-1"><BoardIconStrip ctx={ctx} onGo={(k) => setTab("cat:" + k)} /></div>
@@ -1923,6 +1954,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
         const wasEdit = !!editing.post; setEditing(null); await ctx.reload(); toast(savedToast(wasEdit, savedCat));
         if (id) setOpenId(String(id));
       }} />}
+      </div>
     </div>
   );
 }
@@ -5117,10 +5149,10 @@ function App({ boot }) {
     { id: "users", label: "사용자 · 권한 관리", icon: Users }, { id: "categories", label: "게시판 · 배너", icon: Tags }, { id: "links", label: "바로가기 관리", icon: Link2 },
     { id: "access", label: "접속 기록", icon: LogIn }, { id: "activity", label: "활동 이력", icon: History },
   ].filter((n) => canView(n.id));   // 보기 권한이 있는 메뉴만
-  // 바로가기 — 사용 중이고 이 사람에게 보이는 링크(모두 · Agent 만 · 직원만). 추가 · 수정은 관리자 전용 「바로가기 관리」 에서
+  // 바로가기 — 사용 중이고 이 사람에게 보이는 링크(모두 · Agent 만 · 직원만). Overview 왼쪽 열에 세로로 보인다. 추가 · 수정은 관리자 전용 「바로가기 관리」 에서
   const linkNav = parseLinks(linkRows).filter((l) => l.active && l.url && (l.audience === "all" || (l.audience === "agent" ? isAgent : !isAgent)))
     .map((l) => ({ id: "link:" + l.id, label: l.title || l.url, href: l.url, desc: l.desc, icon: l.icon, color: l.color, img: !!l.iconImg }));
-  const groups = [["TRAINING365", homeNav], ["게시판", boardNav], ...(linkNav.length ? [["바로가기", linkNav]] : []), ...(statusNav.length ? [["확인 현황", statusNav]] : []), ...(adminNav.length ? [["관리자 전용", adminNav]] : [])];
+  const groups = [["TRAINING365", homeNav], ["게시판", boardNav], ...(statusNav.length ? [["확인 현황", statusNav]] : []), ...(adminNav.length ? [["관리자 전용", adminNav]] : [])];
   const nav = [...homeNav, ...boardNav, ...statusNav, ...adminNav];
   const cur = nav.find((n) => n.id === tab) || homeNav[0];
   const roleLabel = [role || "권한 확인 중", me.company].filter(Boolean).join(" · ");
@@ -5276,7 +5308,7 @@ function App({ boot }) {
               <div className="bg-white rounded-xl border p-10 text-center"><ShieldCheck size={28} className="mx-auto text-slate-300 mb-2" /><div className="text-slate-500 text-sm">이 화면에 대한 접근 권한이 없습니다.</div></div>
             ) : (
               <>
-                {tab === "overview" && <OverviewTab ctx={ctx} openPost={(p) => setTab("overview", String(p.id))} openId={openPostId} setOpenId={setOpenId} setTab={(t) => { if (tabAllowed(t)) setTab(t); }} onSearch={openSearch} banners={parseBanners(bannerRows)} onManageBanners={canEditMenu("categories") ? () => setTab("categories") : null} />}
+                {tab === "overview" && <OverviewTab ctx={ctx} openPost={(p) => setTab("overview", String(p.id))} openId={openPostId} setOpenId={setOpenId} setTab={(t) => { if (tabAllowed(t)) setTab(t); }} onSearch={openSearch} banners={parseBanners(bannerRows)} onManageBanners={canEditMenu("categories") ? () => setTab("categories") : null} links={linkNav} onManageLinks={canEditMenu("links") ? () => setTab("links") : null} />}
                 {(tab === "all" || tab.startsWith("cat:")) && <BoardTab ctx={ctx} catKey={tab === "all" ? null : tab.slice(4)} openId={openPostId} setOpenId={setOpenId} seed={boardSeed && boardSeed.tab === tab ? boardSeed : null} onSeedUsed={() => setBoardSeed(null)} />}
                 {tab === "status" && <ConfirmStatusTab ctx={ctx} openPost={openPost} />}
                 {tab === "users" && <UsersTab ctx={ctx} users={users} bootstrap={boot.isBootAdmin} accessRows={accessRows} listStatus={listStatus} reload={reload} />}
