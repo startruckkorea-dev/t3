@@ -188,7 +188,7 @@ const T365_COLUMNS = {
   banners: ["Title", "Subtitle", "LinkUrl", "ImageJson", "SortOrder", "Active"],
 };
 // 선택 열 — 없어도 게시판은 동작하고 그 기능만 저장되지 않는다(관리자 안내)
-const T365_OPT_COLUMNS = { posts: ["Answer", "AnsweredBy", "AnsweredAt"] };   // Q&A 답변
+const T365_OPT_COLUMNS = { posts: ["Answer", "AnsweredBy", "AnsweredAt", "PinUntil"] };   // Q&A 답변 · 공지 · 필수 노출 기한(PinUntil — 한 줄 텍스트 YYYY-MM-DD 또는 날짜 열)
 const T365_FILE_ROOT = "training365";          // (10-12 이전 첨부 위치 — 문서 라이브러리 training365/YYYY-MM/. 새 첨부는 AttachedFiles/Training365_Media-Files/{번호}/)
 const T365_LOG_ROOT = "Logging_data/Training365"; // 관리 행위 이력 — APS 와 같은 파일 방식
 
@@ -376,6 +376,12 @@ async function tListColumns(listName) {
   const res = await apiGet(`/sites/${_siteId}/lists/${await tListId(listName)}/columns?$select=name`);
   return (_tListCols[listName] = new Set((res.value || []).map((c) => c.name)));
 }
+const _tColTypes = {};
+async function tColumnTypes(listName) {
+  if (_tColTypes[listName]) return _tColTypes[listName];
+  const res = await apiGet(`/sites/${_siteId}/lists/${await tListId(listName)}/columns?$select=name,dateTime`);
+  return (_tColTypes[listName] = new Map((res.value || []).map((c) => [c.name, c.dateTime ? "dateTime" : "text"])));
+}
 async function tSafeFields(listName, fields) {
   let cols = null;
   try { cols = await tListColumns(listName); } catch (e) { if (isMissingListError(e)) throw e; }
@@ -385,11 +391,12 @@ async function tSafeFields(listName, fields) {
   return out;
 }
 // 5,000건 임계 대비 nextLink 를 따라 끝까지(MKQR mkListAll 과 같음)
-async function tListAll(listName, extraQuery = "") {
+async function tListAll(listName, extraQuery = "", opts) {
   const token = await getGraphToken();
   const listId = await tListId(listName);
   let items = [];
-  let url = `${GRAPH}/sites/${_siteId}/lists/${listId}/items?expand=fields&$top=500${extraQuery}`;
+  const sel = opts && opts.select ? `(select=${opts.select})` : "";   // 필요한 열만 받으면 응답이 절반 이하로 준다
+  let url = `${GRAPH}/sites/${_siteId}/lists/${listId}/items?expand=fields${sel}&$top=500${extraQuery}`;
   while (url) {
     const res = await gfetch(url, { headers: { Authorization: "Bearer " + token, Prefer: "HonorNonIndexedQueriesWarningMayFailRandomly" } });
     if (!res.ok) { const e = new Error(`${listName} 조회 실패 (${res.status})`); e.status = res.status; throw e; }
@@ -772,6 +779,7 @@ const T365Session = {
   },
 };
 async function t365Logout() {
+  try { await idbClear(); } catch (e) {}   // 조회 기록 캐시 — 공용 PC 에 남기지 않는다
   await T365Session.logout();
   msalApp.logoutRedirect();
 }
@@ -806,6 +814,21 @@ function fmtDuration(ms) { if (!(ms >= 0)) return "-"; if (ms < 60e3) return "1�
 function isNewPost(p) { return Date.now() - (Date.parse(p.PublishedAt || p._created || 0) || 0) < 7 * 864e5; }
 // 내가 이미 본 글 — 열람 기록이 있거나 내가 쓴 글(내 글은 「새 글 · 안 읽은 글」 로 세지 않는다)
 const seenBy = (p, row, me) => !!row || (!!me && !!normEmail(p.AuthorEmail) && normEmail(p.AuthorEmail) === normEmail(me.email));
+// 홈 「공지 · 필수」 · 「최근 게시물」 · 배너 아이콘 숫자는 게시 후 7일 동안(새 글 점과 같은 기간)
+const T365_HOME_DAYS = 7;
+const inLastDays = (p, d) => Date.now() - (Date.parse(p.PublishedAt || p._created || 0) || 0) < d * 864e5;
+// 날짜 값 → 한국 날짜(YYYY-MM-DD). 「한 줄 텍스트」 열은 그대로, 「날짜 및 시간」 열(ISO 시각)은 한국 시각으로 바꿔서
+function kstDateOf(v) {
+  const s = String(v == null ? "" : v).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const t = Date.parse(s); if (!t) return "";
+  const k = new Date(t + 9 * 36e5); return `${k.getUTCFullYear()}-${_p2(k.getUTCMonth() + 1)}-${_p2(k.getUTCDate())}`;
+}
+// 공지 · 필수 노출 기한(Posts 의 PinUntil 열, 선택) — 그날(한국 날짜)까지. 게시판 맨 위 고정도 그날이 지나면 풀린다
+const pinUntilOf = (p) => kstDateOf(p && p.PinUntil);
+const pinActive = (p) => !!(p && p.IsPinned) && (!pinUntilOf(p) || pinUntilOf(p) >= kstToday());
+// 홈 「공지 · 필수」 상자 — 기한을 정한 글은 그날까지, 아니면 게시 후 7일
+const onNoticeBox = (p) => !!(p.IsPinned || p.RequireConfirm) && (pinUntilOf(p) ? pinUntilOf(p) >= kstToday() : inLastDays(p, T365_HOME_DAYS));
 
 /* ---- 링크 — https 만 허용 ---- */
 function safeHttpsUrl(u) {
@@ -1050,8 +1073,10 @@ function SetupNotice({ status, infoToo = true }) {
   const optionalMissing = status.categories && status.categories.missing;
   const bannerMissing = status.banners && status.banners.missing;
   const warn = missing.length || cols.length || errs.length;
-  const ansMissing = (status.posts && !status.posts.missing && status.posts.optMissing) || [];
-  if (!warn && !((optionalMissing || bannerMissing || optCols.length || ansMissing.length) && infoToo)) return null;   // 선택 목록 안내만 남았으면 게시판 화면에서는 숨긴다(Overview · 관리 화면에서만)
+  const postOpt = (status.posts && !status.posts.missing && status.posts.optMissing) || [];
+  const ansMissing = postOpt.filter((c) => c.startsWith("Answer"));
+  const pinMissing = postOpt.includes("PinUntil");
+  if (!warn && !((optionalMissing || bannerMissing || optCols.length || ansMissing.length || pinMissing) && infoToo)) return null;   // 선택 목록 안내만 남았으면 게시판 화면에서는 숨긴다(Overview · 관리 화면에서만)
   return (
     <div className={`rounded-xl border px-4 py-3 mb-5 text-xs leading-relaxed ${warn ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-blue-50 border-blue-100 text-blue-900"}`} data-testid="setup-notice">
       <div className="flex items-start gap-2.5">
@@ -1064,6 +1089,7 @@ function SetupNotice({ status, infoToo = true }) {
             {errs.map((c) => <li key={c}>읽기 실패 — {c}</li>)}
             {infoToo && optCols.map((c) => <li key={c}>선택 목록에 없는 열 — {c} (카테고리 아이콘 · 색 · 문의 담당자 / 배너 값이 저장되지 않습니다 — IT 에 열 추가 요청)</li>)}
             {infoToo && ansMissing.length > 0 && <li data-testid="qna-cols-missing">{T365_LISTS.posts} 에 Q&A 답변 열이 없습니다 — {ansMissing.join(", ")} (Answer: 여러 줄 텍스트 · AnsweredBy: 한 줄 텍스트 · AnsweredAt: 한 줄 텍스트) 를 만들어야 답변이 저장됩니다</li>}
+            {infoToo && pinMissing && <li data-testid="pin-col-missing">{T365_LISTS.posts} 에 PinUntil 열(한 줄 텍스트)을 만들면 글쓰기에서 공지 · 필수의 홈 노출 기한을 정할 수 있습니다 — 없으면 게시 후 7일 동안 보입니다</li>}
             {infoToo && bannerMissing && <li>{T365_LISTS.banners} 목록이 없어 게시판 홈에 기본 배너(그림 없음)를 보여 줍니다 — 그림 배너를 쓰려면 목록을 만드세요</li>}
             {optionalMissing && <li>{T365_LISTS.categories} 목록이 없어 기본 카테고리 {T365_DEFAULT_CATEGORIES.length}개(이름 · 설명 · 순서 고정)를 씁니다 — 카테고리 이름 · 설명을 바꾸려면 목록을 만드세요</li>}
           </ul>
@@ -1099,7 +1125,7 @@ function serialRead(key, fn) {
   return p;
 }
 async function tFindRead(key) {
-  const rows = await tListAll(T365_LISTS.reads, `&$filter=fields/Title eq '${odq(key)}'`);
+  const rows = await tListAll(T365_LISTS.reads, `&$filter=fields/Title eq '${odq(key)}'`, { select: T365_READ_SELECT });
   return rows.filter((r) => r.Title === key).sort((a, b) => Number(a.id) - Number(b.id))[0] || null;
 }
 // opts.confirm — Agent 가 조회확인 필수 글을 열면 열람과 같은 쓰기로 ConfirmedAt 도 채운다(이미 있으면 처음 시각 유지)
@@ -1139,6 +1165,58 @@ function t365Confirm(post, me) {
       return row;
     }
   });
+}
+/* ---- 조회 기록 불러오기 — 사람 × 게시물로 계속 늘어나는 목록이라 매번 전부 받지 않는다 ----
+ * 1) 필요한 열만(select)  2) 이 브라우저(IndexedDB)에 사용자별로 두고, 다음부터는 마지막 동기화 뒤에 바뀐 행만(Modified ≥ 그때 − 10분) 받아 합친다
+ * 3) 일주일에 한 번은 전체를 다시(지워진 행 정리)  4) 캐시를 못 쓰거나(사생활 보호 창 등) 바뀐 행 조회가 실패하면 예전처럼 전체
+ * 5,000건이 넘으면 SharePoint 가 인덱스 없는 열로 거르기를 막으므로 Reads 목록의 「제목」 · 「수정된 날짜」 열에 인덱스를 걸어 둔다. 로그아웃하면 캐시를 지운다 */
+const T365_READ_SELECT = "Title,PostId,UserEmail,UserName,Company,Role,FirstViewedAt,LastViewedAt,ViewCount,ConfirmedAt";
+const T365_READS_FULL_MS = 7 * 864e5;
+const T365_IDB = { name: "training365", store: "cache" };
+function idbReq(mode, fn) {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const fin = (ok, v) => { if (done) return; done = true; clearTimeout(timer); ok ? resolve(v) : reject(v); };
+    const timer = setTimeout(() => fin(false, new Error("idb timeout")), 2500);
+    let open;
+    try { open = indexedDB.open(T365_IDB.name, 1); } catch (e) { fin(false, e); return; }
+    open.onupgradeneeded = () => { try { open.result.createObjectStore(T365_IDB.store); } catch (e) {} };
+    open.onerror = () => fin(false, open.error);
+    open.onblocked = () => fin(false, new Error("idb blocked"));
+    open.onsuccess = () => {
+      const db = open.result;
+      try {
+        const tx = db.transaction(T365_IDB.store, mode); const r = fn(tx.objectStore(T365_IDB.store));
+        tx.oncomplete = () => { db.close(); fin(true, r ? r.result : undefined); };
+        tx.onerror = tx.onabort = () => { db.close(); fin(false, tx.error); };
+      } catch (e) { db.close(); fin(false, e); }
+    };
+  });
+}
+const idbGet = (k) => idbReq("readonly", (st) => st.get(k));
+const idbSet = (k, v) => idbReq("readwrite", (st) => st.put(v, k));
+const idbClear = () => idbReq("readwrite", (st) => st.clear());
+const isoNoMs = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+let _readsLoadMode = "";   // full | delta — 시험 · 진단용
+async function tLoadReads(meEmail) {
+  const listId = await tListId(T365_LISTS.reads);
+  const key = `reads|${_siteId}|${listId}|${normEmail(meEmail)}`;
+  let cache = null;
+  try { cache = await idbGet(key); } catch (e) { cache = null; }
+  const now = Date.now();
+  let rows = null, fullAt = now, base = 0;
+  if (cache && cache.v === 1 && Array.isArray(cache.rows) && cache.maxMod > 0 && now - (cache.fullAt || 0) < T365_READS_FULL_MS) {
+    try {
+      const delta = await tListAll(T365_LISTS.reads, `&$filter=fields/Modified ge '${isoNoMs(cache.maxMod - 10 * 60e3)}'`, { select: T365_READ_SELECT });
+      const byId = new Map(cache.rows.map((r) => [r.id, r]));
+      delta.forEach((r) => byId.set(r.id, r));
+      rows = [...byId.values()]; fullAt = cache.fullAt; base = cache.maxMod; _readsLoadMode = "delta";
+    } catch (e) { rows = null; }
+  }
+  if (!rows) { rows = await tListAll(T365_LISTS.reads, "", { select: T365_READ_SELECT }); _readsLoadMode = "full"; }
+  const maxMod = rows.reduce((m, r) => Math.max(m, Date.parse(r._modified || r._created || 0) || 0), base);
+  idbSet(key, { v: 1, rows, maxMod, fullAt }).catch(() => {});
+  return rows;
 }
 // 게시물별 · 사람별로 묶기 — 혹시 같은 키의 행이 둘이면(고유 값 제약 전 기록) 가장 이른 확인 시각 · 조회 수 합
 function indexReads(reads) {
@@ -1296,7 +1374,7 @@ const HomeColHead = ({ children }) => <div className="t365-cols px-4 h-9 flex it
 const NewDot = () => <span className="t365-newdot" role="img" aria-label="새 글 — 아직 읽지 않음" title="새 글 — 아직 읽지 않았습니다" data-new="1"></span>;
 // 공지 · 필수 종류 — 글씨 없는 아이콘 칩(공지 · 필수 상자 안에서)
 const KindIcons = ({ p }) => (<>
-  {p.IsPinned && <span className="t365-kind" style={{ background: "#FEF3C7", color: "#B45309" }} title="공지 — 목록 맨 위에 고정된 글" aria-label="공지" data-kind="pin"><Pin size={11} /></span>}
+  {pinActive(p) && <span className="t365-kind" style={{ background: "#FEF3C7", color: "#B45309" }} title="공지 — 목록 맨 위에 고정된 글" aria-label="공지" data-kind="pin"><Pin size={11} /></span>}
   {p.RequireConfirm && <span className="t365-kind" style={{ background: "#FDEEE6", color: "#C2410C" }} title="필수 — Agent 조회확인 대상" aria-label="필수" data-kind="req"><BellRing size={11} /></span>}
 </>);
 // 게시물 주소(게시판 기준 — 홈 팝업으로 열었어도 공유 링크는 그 게시판으로)
@@ -1317,12 +1395,175 @@ function mailtoHref({ to = [], bcc = [], subject = "", body = "", link = "" }) {
 // tight = 휴대폰에서는 아이콘만(좁은 칸)
 const UnconfirmedPill = ({ tight }) => <span className="t365-pill whitespace-nowrap" style={{ background: "#FDEEE6", color: "#C2410C" }} data-confirm-state="pending" title={tight ? "미확인" : undefined}><BellRing size={10} />{tight ? <span className="hidden sm:inline">미확인</span> : "미확인"}</span>;
 const ConfirmedPill = ({ tight }) => <span className="t365-pill whitespace-nowrap bg-emerald-50 text-emerald-700" data-confirm-state="done" title={tight ? "확인 완료" : undefined}><CheckCircle2 size={10} />{tight ? <span className="hidden sm:inline">확인 완료</span> : "확인 완료"}</span>;
+// 내가 연 시각(Agent) — 「확인 완료」 글씨 대신 ✓ + 시각. 필수 글은 조회확인 시각, 그 밖은 처음 연 시각. tight = 휴대폰은 ✓ 만
+const SeenMark = ({ r, confirm, tight }) => {
+  if (!r) return null;
+  const at = confirm ? r.ConfirmedAt : (r.FirstViewedAt || r.LastViewedAt);
+  if (!at) return null;
+  const tip = `${confirm ? "조회확인" : "처음 열람"} ${fmtDate(at)}${r.LastViewedAt && r.LastViewedAt !== at ? ` · 마지막 열람 ${fmtDate(r.LastViewedAt)}` : ""}${Number(r.ViewCount) > 1 ? ` · ${r.ViewCount}회` : ""}`;
+  return <span className="inline-flex items-center gap-1 text-[11.5px] font-medium text-emerald-700 tabular-nums whitespace-nowrap" title={tip} data-confirm-state={confirm ? "done" : undefined} data-seen="1"><CheckCircle2 size={13} className="shrink-0" />{tight ? <span className="hidden sm:inline">{shortDate(at)}</span> : shortDate(at)}</span>;
+};
 // 게시물 앞의 작은 표시 — 공지 · 필수(제목 왼쪽)
 const NoticePill = () => <span className="t365-pill bg-amber-100 text-amber-800" data-pill="pin"><Pin size={10} />공지</span>;
 const ReqPill = () => <span className="t365-pill" style={{ background: "#FDEEE6", color: "#C2410C" }} data-pill="req"><BellRing size={10} />필수</span>;
 const dateCell = (p) => shortDate(p.PublishedAt || p._created);   // 게시판 목록 작성일 — 시각까지(KST)
 // 입력 칸에서 치는 글자(검색어 등)와 겹치지 않을 때만 「/」 로 검색 칸 열기
 const isTyping = (e) => { const t = e.target; return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable); };
+
+/* ------------------------------------------------------------------ */
+/* 게시물 검색 창 — 게시판 홈 위에 뜨는 검색 결과(전체 게시물로 옮겨 가지 않음)              */
+/* 치는 대로 찾기 · 게시판별 개수 · 제목/내용/답변/첨부 강조 · ↑↓ · Enter · 결과를 열고 닫으면 다시 결과로 */
+/* ------------------------------------------------------------------ */
+const _reEsc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function HlTerms({ text, terms }) {
+  const s = String(text == null ? "" : text);
+  if (!terms || !terms.length) return s;
+  const parts = s.split(new RegExp(`(${terms.map(_reEsc).join("|")})`, "gi"));
+  return parts.map((x, i) => (i % 2 ? <mark key={i} className="t365-hl">{x}</mark> : x));
+}
+// 낱말이 처음 나오는 곳 앞뒤를 잘라 한 줄 미리 보기로
+function snippetAround(text, terms, len = 120) {
+  const s = String(text || ""), lo = s.toLowerCase();
+  let at = -1;
+  terms.forEach((t) => { const i = lo.indexOf(t); if (i >= 0 && (at < 0 || i < at)) at = i; });
+  if (at < 0) return "";
+  const start = Math.max(0, at - 36);
+  return (start > 0 ? "… " : "") + s.slice(start, start + len).trim() + (start + len < s.length ? " …" : "");
+}
+function SearchPopup({ ctx, initialQ, hidden, suspended, onClose, onOpen, onAsk, onMore }) {
+  const { posts, catMap, cats, readIdx, me } = ctx;
+  const [q, setQ] = useState(initialQ || "");
+  const [cat, setCat] = useState("");
+  const [sel, setSel] = useState(0);
+  const [limit, setLimit] = useState(30);
+  const inputRef = useRef(null);
+  const listRef = useRef(null);
+  useEffect(() => { const t = setTimeout(() => { if (inputRef.current) { inputRef.current.focus(); inputRef.current.select(); } }, 40); return () => clearTimeout(t); }, []);
+  const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6);
+  const key = terms.join(" ");
+  // 찾을 글자는 한 번만 만든다 — 제목 · 본문 · Q&A 답변 · 첨부 이름 · 작성자
+  const docs = useMemo(() => posts.filter((p) => catMap[p.Category]).map((p) => ({ p, t: String(p.Title || ""), b: plainPreview(p.Body, 4000), a: p.Answer ? plainPreview(p.Answer, 4000) : "", f: parseFiles(p.AttachmentsJson).map((x) => x.name).join(" · "), w: String(p.AuthorName || "") })), [posts, catMap]);
+  const hits = useMemo(() => {
+    if (!terms.length) return [];
+    const out = [];
+    docs.forEach((d) => {
+      const L = { t: d.t.toLowerCase(), b: d.b.toLowerCase(), a: d.a.toLowerCase(), f: d.f.toLowerCase(), w: d.w.toLowerCase() };
+      let score = 0;
+      for (const term of terms) {   // 모든 낱말이 어딘가에 있어야(그리고) — 제목에 있으면 더 위로
+        const inT = L.t.includes(term), inB = L.b.includes(term), inA = L.a.includes(term), inF = L.f.includes(term), inW = L.w.includes(term);
+        if (!(inT || inB || inA || inF || inW)) return;
+        score += (inT ? 6 : 0) + (inA ? 2 : 0) + (inB ? 2 : 0) + (inF ? 2 : 0) + (inW ? 1 : 0);
+      }
+      if (terms.length > 1 && L.t.includes(key)) score += 4;
+      // 미리 보기 — 본문 → 답변 → 첨부 순서로 낱말이 나오는 곳
+      const sb = snippetAround(d.b, terms), sa = sb ? "" : snippetAround(d.a, terms), sf = sb || sa ? "" : (terms.some((t) => L.f.includes(t)) ? d.f : "");
+      out.push({ p: d.p, score, snip: sb || sa || sf || d.b.slice(0, 110), label: sb ? "" : sa ? "답변" : sf ? "첨부" : "" });
+    });
+    return out.sort((x, y) => y.score - x.score || byNewest(x.p, y.p));
+  }, [docs, key]);
+  useEffect(() => { setSel(0); setLimit(30); }, [key, cat]);
+  useEffect(() => { if (cat && !hits.some((h) => h.p.Category === cat)) setCat(""); }, [key]);
+  const byCat = new Map(); hits.forEach((h) => byCat.set(h.p.Category, (byCat.get(h.p.Category) || 0) + 1));
+  const list = cat ? hits.filter((h) => h.p.Category === cat) : hits;
+  const shown = list.slice(0, limit);
+  const myRow = (p) => (readIdx.get(String(p.id)) || new Map()).get(normEmail(me.email));
+  function move(d) {
+    if (!shown.length) return;
+    const n = (sel + d + shown.length) % shown.length; setSel(n);
+    const el = listRef.current && listRef.current.querySelector(`[data-sidx="${n}"]`); if (el) el.scrollIntoView({ block: "nearest" });
+  }
+  function onKey(e) {
+    if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
+    else if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); if (shown[sel]) onOpen(shown[sel].p, list.map((h) => h.p)); }
+  }
+  const close = () => onClose(q);
+  return (
+    <PostModalShell onClose={close} label="게시물 검색" suspended={suspended} hidden={hidden} testid="search-pop" panelClass="md:max-w-[880px] md:h-[min(84vh,860px)]">
+      {/* 검색 칸 */}
+      <div className="shrink-0 px-4 md:px-6 pt-4 md:pt-5 pb-3 border-b border-slate-100" style={{ background: "linear-gradient(180deg,#F7FAFB 0%,#FFFFFF 100%)" }}>
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1 min-w-0">
+            <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: BRAND.accent }} />
+            <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} placeholder="찾을 낱말 — 제목 · 내용 · 첨부 이름 · Q&A 답변" aria-label="게시물 검색"
+              className="h-12 w-full rounded-xl border border-slate-300 bg-white pl-11 pr-10 text-[15px] text-slate-900 placeholder:text-slate-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/30 focus:border-[#2F7B7A]" data-testid="sp-input" />
+            {q && <button onClick={() => { setQ(""); if (inputRef.current) inputRef.current.focus(); }} aria-label="검색어 지우기" className="absolute right-2.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-md flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100"><X size={15} /></button>}
+          </div>
+          <button onClick={close} aria-label="닫기" title="닫기 (Esc)" className="w-10 h-10 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-800 hover:bg-slate-100 shrink-0" data-testid="sp-close"><X size={19} /></button>
+        </div>
+        {/* 게시판별 개수 — 눌러서 거르기 */}
+        {hits.length > 0 && (
+          <div className="mt-3 flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 pb-0.5" role="tablist" aria-label="게시판" data-testid="sp-chips">
+            {[["", "전체", hits.length, null], ...cats.filter((c) => byCat.get(c.key)).map((c) => [c.key, c.label, byCat.get(c.key), c])].map(([k, label, n, c]) => {
+              const on = cat === k; const I = c ? c.icon || FileText : LayoutList;
+              return (
+                <button key={k || "all"} role="tab" aria-selected={on} onClick={() => { setCat(k); if (inputRef.current) inputRef.current.focus(); }} data-sp-cat={k || "all"}
+                  className={`h-8 pl-2 pr-2.5 rounded-full border inline-flex items-center gap-1.5 text-[12.5px] whitespace-nowrap shrink-0 transition-colors ${on ? "font-semibold shadow-sm" : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"}`}
+                  style={on ? { background: c ? c.soft : BRAND.accentSoft, borderColor: c ? c.color : BRAND.accent, color: c ? c.color : BRAND.accent } : undefined}>
+                  <I size={13} style={{ color: c ? c.color : on ? BRAND.accent : "#94A3B8" }} />{label}<span className="tabular-nums text-[11px] opacity-80">{n}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 결과 */}
+      <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain" data-testid="sp-results">
+        {!terms.length ? (
+          <div className="px-6 py-14 text-center">
+            <span className="mx-auto w-12 h-12 rounded-2xl flex items-center justify-center mb-3" style={{ background: BRAND.accentSoft }}><Search size={22} style={{ color: BRAND.accent }} /></span>
+            <div className="text-[14px] font-semibold text-slate-700">무엇을 찾으세요?</div>
+            <div className="text-[12.5px] text-slate-400 mt-1">모든 게시판의 제목 · 내용 · 첨부 이름 · Q&A 답변에서 찾습니다</div>
+          </div>
+        ) : !hits.length ? (
+          <div className="px-6 py-14 text-center" data-testid="sp-empty">
+            <span className="mx-auto w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center mb-3"><Inbox size={22} className="text-slate-400" /></span>
+            <div className="text-[14px] font-semibold text-slate-700">「{q.trim()}」 에 맞는 글이 없습니다</div>
+            <div className="text-[12.5px] text-slate-400 mt-1">낱말을 줄이거나 다른 말로 찾아보세요{onAsk ? " — 찾는 내용이 없으면 Q&A 로 물어보세요" : ""}</div>
+            {onAsk && <button onClick={onAsk} className="mt-4 h-9 px-4 rounded-lg text-[13px] font-semibold text-white inline-flex items-center gap-1.5" style={{ background: "#1D4ED8" }} data-testid="sp-ask"><MessageCircleQuestion size={15} />Q&A 에 질문하기</button>}
+          </div>
+        ) : (
+          <>
+            {shown.map(({ p, snip, label }, i) => {
+              const c = catMap[p.Category]; const r = myRow(p); const seen = seenBy(p, r, me); const nf = parseFiles(p.AttachmentsJson).length;
+              return (
+                <button key={p.id} data-sresult={p.id} data-sidx={i} onClick={() => onOpen(p, list.map((h) => h.p))} onMouseMove={() => sel !== i && setSel(i)} aria-selected={i === sel}
+                  className={`w-full text-left px-4 md:px-6 py-3 flex items-start gap-3 border-t border-slate-100 first:border-t-0 transition-colors ${i === sel ? "bg-[#EEF6F5]" : "bg-white"}`}>
+                  <span className="mt-0.5"><CatIconBox cat={c} size={32} icon={15} /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      {isNewPost(p) && !seen && <NewDot />}
+                      {pinActive(p) && <NoticePill />}{p.RequireConfirm && <ReqPill />}
+                      <span className={`truncate text-[14px] ${seen ? "text-slate-800" : "font-semibold text-slate-900"}`}><HlTerms text={p.Title} terms={terms} /></span>
+                      {p.Category === "qna" && <QnaPill p={p} />}
+                    </span>
+                    {snip && <span className="block mt-1 text-[12.5px] text-slate-500 leading-relaxed t365-clamp2">{label && <span className="inline-flex items-center px-1.5 mr-1.5 rounded bg-slate-100 text-slate-500 text-[11px] font-semibold leading-[17px] align-[1px]">{label}</span>}<HlTerms text={snip} terms={terms} /></span>}
+                    <span className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-slate-400 min-w-0">
+                      <span className="font-medium truncate" style={{ color: c && c.color }}>{c ? c.label : ""}</span><span className="text-slate-300">·</span>
+                      <span className="truncate max-w-[120px]">{p.AuthorName || "-"}</span><span className="text-slate-300">·</span>
+                      <span className="tabular-nums shrink-0" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
+                      <span className="text-slate-300">·</span><span className="shrink-0 inline-flex items-center gap-0.5"><Eye size={11} />{viewStats(readIdx, p.id).views}</span>
+                      {nf > 0 && <><span className="text-slate-300">·</span><span className="shrink-0 inline-flex items-center gap-0.5"><Paperclip size={11} />{nf}</span></>}
+                    </span>
+                  </span>
+                  <ChevronRight size={16} className={`mt-2 shrink-0 ${i === sel ? "text-[#2F7B7A]" : "text-slate-300"}`} />
+                </button>
+              );
+            })}
+            {list.length > shown.length && <button onClick={() => setLimit((n) => n + 30)} className="w-full h-11 border-t border-slate-100 text-[12.5px] font-medium text-slate-500 hover:bg-slate-50" data-testid="sp-more">{list.length - shown.length}건 더 보기</button>}
+          </>
+        )}
+      </div>
+
+      {/* 아래 띠 */}
+      <div className="shrink-0 px-4 md:px-6 h-12 border-t border-slate-100 bg-slate-50/70 flex items-center gap-3 text-[12px] text-slate-500">
+        <span data-testid="sp-count">{terms.length ? <>검색 결과 <b className="text-slate-800 tabular-nums">{list.length}</b>건{cat && catMap[cat] ? <> · {catMap[cat].label}</> : null}</> : "모든 게시판"}</span>
+        {terms.length > 0 && <button onClick={() => onMore(q.trim())} className="ml-auto inline-flex items-center gap-0.5 font-medium hover:text-slate-800" style={{ color: BRAND.accent }} data-testid="sp-full">전체 게시물에서 보기<ChevronRight size={14} /></button>}
+      </div>
+    </PostModalShell>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /* Overview — 인트라넷 「게시판 홈」: 검색 · 요약 한 줄 · 공지 · 필수 ·           */
@@ -1340,11 +1581,13 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
   // Agent 의 필수 자료 진행 — 확인한 수 / 전체 필수
   const reqAll = ctx.isAgent ? vis.filter((p) => p.RequireConfirm) : [];
   const reqDone = reqAll.length - todo.length;
-  // 공지 · 필수 — Agent 는 아직 확인 안 한 필수 자료가 먼저, 그다음 공지, 그다음 최신순
-  const notice = vis.filter((p) => p.IsPinned || p.RequireConfirm).sort((a, b) => (isTodo(b) ? 1 : 0) - (isTodo(a) ? 1 : 0) || (b.IsPinned ? 1 : 0) - (a.IsPinned ? 1 : 0) || byNewest(a, b));
+  // 공지 · 필수 — 게시 후 7일(기한을 정한 글은 그날까지). Agent 는 아직 확인 안 한 필수 자료가 먼저, 그다음 공지, 그다음 최신순
+  const notice = vis.filter(onNoticeBox).sort((a, b) => (isTodo(b) ? 1 : 0) - (isTodo(a) ? 1 : 0) || (pinActive(b) ? 1 : 0) - (pinActive(a) ? 1 : 0) || byNewest(a, b));
+  const noticeTodo = notice.filter(isTodo).length;   // 상자 안의 확인할 자료(머리 숫자는 상자에 보이는 것 기준)
+  const noticeAny = vis.some((p) => pinActive(p) || p.RequireConfirm);
   const NOTICE_MAX = 6;
-  // 최근 게시물 — 공식 자료 중심(Q&A 는 오른쪽 Q&A 상자에서)
-  const recent = vis.filter((p) => p.Category !== "qna");
+  // 최근 게시물 — 최근 7일 새 글. 공지 · 필수는 위 상자에서, Q&A 는 오른쪽 Q&A 상자에서 보여 주므로 뺀다
+  const recent = vis.filter((p) => p.Category !== "qna" && !pinActive(p) && !p.RequireConfirm && inLastDays(p, T365_HOME_DAYS));
   // 많이 본 글 — 오래된 인기 글이 계속 자리를 차지하지 않게 최근 90일 글 중에서(3건이 안 되면 전체에서)
   const ranked = (list) => list.map((p) => ({ p, v: viewStats(readIdx, p.id).views })).filter((x) => x.v > 0).sort((a, b) => b.v - a.v || byNewest(a.p, b.p));
   const since90 = Date.now() - 90 * 864e5;
@@ -1365,7 +1608,10 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
   const qnaUrgent = ctx.isAgent ? myNew.length > 0 : duty && qWait.length > 0;   // 할 일이 있으면 많이 본 글보다 위로
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState(null);
+  const [searching, setSearching] = useState(null);   // 검색 창(문자열) — 전체 게시물로 옮겨 가지 않고 홈 위에서 결과를 보여 준다
+  const [searchList, setSearchList] = useState(null);   // 검색 결과에서 연 글의 위 · 아래 단추는 검색 결과 순서로
   const open = openId ? vis.find((p) => String(p.id) === String(openId)) : null;
+  const fromSearch = !!(open && searching !== null && searchList && searchList.some((x) => String(x.id) === String(open.id)));
   const searchRef = useRef(null);
   useEffect(() => {
     const k = (e) => { if (e.key === "/" && !isTyping(e) && !e.ctrlKey && !e.metaKey && searchRef.current) { e.preventDefault(); searchRef.current.focus(); } };
@@ -1378,7 +1624,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
         <div className="flex flex-col min-[1400px]:flex-row min-[1400px]:items-end gap-3 min-[1400px]:gap-5">
           <div className="min-w-0 flex-1"><BoardIconStrip ctx={ctx} onGo={(k) => setTab("cat:" + k)} /></div>
           {/* 전체 검색 — 배너 안 오른쪽 아래(유리 느낌) */}
-          <form onSubmit={(e) => { e.preventDefault(); onSearch(q.trim()); }} className="flex items-center gap-1.5 w-full lg:max-w-[520px] min-[1400px]:w-[340px] shrink-0 min-[1400px]:mb-2" role="search" data-testid="home-search">
+          <form onSubmit={(e) => { e.preventDefault(); setSearching(q.trim()); }} className="flex items-center gap-1.5 w-full lg:max-w-[520px] min-[1400px]:w-[340px] shrink-0 min-[1400px]:mb-2" role="search" data-testid="home-search">
             <div className="relative flex-1">
               <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/60" />
               <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="게시물 검색" title="모든 게시판의 제목 · 내용 · 첨부 이름 · Q&A 답변에서 찾습니다" aria-label="게시물 검색" className="h-10 w-full rounded-lg text-[13px] pl-9 pr-9 text-white placeholder:text-white/55 bg-white/10 border border-white/25 backdrop-blur focus:bg-white focus:text-slate-900 focus:placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7FD1CB]/60 transition-colors" data-testid="home-search-input" />
@@ -1396,12 +1642,15 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
           <section className="bg-white rounded-xl border border-slate-200 overflow-hidden t365-portlet" data-testid="notice-strip">
             <div className="t365-portlet-head">
               <span className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: "#FDEEE6" }}><Megaphone size={13} style={{ color: "#C2410C" }} /></span>
-              <h2 className="text-[15px] font-bold text-slate-900 tracking-[-0.01em]">공지 · 필수</h2>
-              {ctx.isAgent && (todo.length
-                ? <span className="text-[11px] font-bold px-2 rounded-full leading-5 text-white" style={{ background: "#C2410C" }} data-testid="todo-required">확인 필요 {todo.length}건</span>
-                : <span className="text-[11px] font-medium px-2 rounded-full leading-5 bg-emerald-50 text-emerald-700" data-testid="todo-required">모두 확인 완료</span>)}
-              <span className="text-[11.5px] text-slate-400 hidden md:inline truncate">{ctx.isAgent ? "필수 자료는 열어 보면 자동으로 조회확인됩니다" : "꼭 읽어야 하는 공지와 필수 교육자료입니다"}</span>
-              {notice.length > NOTICE_MAX && <button onClick={() => onSearch("", "notice")} className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 whitespace-nowrap shrink-0" data-testid="notice-more">더보기 <ChevronRight size={12} className="inline -mt-0.5" /></button>}
+              <h2 className="text-[15px] font-bold text-slate-900 tracking-[-0.01em] whitespace-nowrap shrink-0">공지 · 필수</h2>
+              {ctx.isAgent && (noticeTodo
+                ? <span className="text-[11px] font-bold px-2 rounded-full leading-5 text-white whitespace-nowrap" style={{ background: "#C2410C" }} data-testid="todo-required">확인 필요 {noticeTodo}건</span>
+                : !todo.length && notice.some((p) => p.RequireConfirm) ? <span className="text-[11px] font-medium px-2 rounded-full leading-5 bg-emerald-50 text-emerald-700 whitespace-nowrap" data-testid="todo-required">모두 확인 완료</span> : null)}
+              <span className="inline-flex items-center gap-1.5 min-w-0 text-[11.5px] text-slate-400" title="공지 · 필수 자료는 게시 후 7일 동안 이곳에 보이고, 지나면 자동으로 내려갑니다(기한을 정한 글은 그날까지). 지난 글은 「지난 글」 에서 볼 수 있습니다." data-testid="notice-window">
+                <span className="inline-flex items-center gap-1 px-1.5 rounded-md bg-slate-100 text-slate-500 font-medium leading-[18px] shrink-0 whitespace-nowrap"><Clock size={11} /><span className="sm:hidden">7일</span><span className="hidden sm:inline">게시 후 7일간 노출</span></span>
+                <span className="truncate hidden md:inline">{ctx.isAgent ? "필수 자료는 열어 보면 자동으로 조회확인됩니다" : "꼭 읽어야 할 공지와 필수 자료입니다"}</span>
+              </span>
+              {noticeAny && <button onClick={() => onSearch("", "notice")} title="지난 공지 · 필수까지 모두 보기" className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 whitespace-nowrap shrink-0 inline-flex items-center" data-testid="notice-more">지난 글<ChevronRight size={13} /></button>}
             </div>
             {notice.length > 0 && <HomeColHead>
               <span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
@@ -1422,24 +1671,29 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                   <span className={`w-[100px] text-[12px] text-slate-500 shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center min-w-0`}><span className="truncate">{p.AuthorName || ""}</span></span>
                   <span className="text-[11.5px] text-slate-400 tabular-nums shrink-0 hidden md:flex items-center w-[96px]" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
                   {ctx.isAgent && <span className="shrink-0 w-[26px] sm:w-[92px] flex items-center">
-                    {p.RequireConfirm ? (r && r.ConfirmedAt ? <ConfirmedPill tight /> : <UnconfirmedPill tight />) : <span className="text-[11.5px] text-slate-300">-</span>}
+                    {p.RequireConfirm ? (r && r.ConfirmedAt ? <SeenMark r={r} confirm tight /> : <UnconfirmedPill tight />) : r ? <SeenMark r={r} tight /> : <span className="text-[11.5px] text-slate-300">-</span>}
                   </span>}
                 </button>
               );
-            }) : <SmallEmpty icon={CheckCircle2}>지금 걸려 있는 공지 · 필수 자료가 없습니다.</SmallEmpty>}
+            }) : <SmallEmpty icon={CheckCircle2}>최근 7일 동안 올라온 공지 · 필수 자료가 없습니다.{noticeAny && <> <button onClick={() => onSearch("", "notice")} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>지난 공지 · 필수 보기</button></>}</SmallEmpty>}
           </section>
 
           {/* 최근 게시물 — 모든 게시판을 하나의 목록으로 */}
           <section className="bg-white rounded-xl border border-slate-200 overflow-hidden t365-portlet" data-testid="recent-board">
             <div className="t365-portlet-head">
               <span className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: BRAND.accentSoft }}><LayoutList size={13} style={{ color: BRAND.accent }} /></span>
-              <h2 className="text-[15px] font-bold text-slate-900 tracking-[-0.01em]">최근 게시물</h2>
-              <span className="text-[11.5px] text-slate-400 hidden sm:inline-flex items-center gap-1.5">모든 게시판 · <NewDot /> 안 읽은 새 글</span>
+              <h2 className="text-[15px] font-bold text-slate-900 tracking-[-0.01em] whitespace-nowrap shrink-0">최근 게시물</h2>
+              <span className="inline-flex items-center gap-1.5 min-w-0 text-[11.5px] text-slate-400" title="최근 7일 동안 올라온 글입니다. 공지 · 필수는 위 「공지 · 필수」 에서, 질문은 오른쪽 Q&A 에서 따로 보여 드립니다." data-testid="recent-window">
+                <span className="inline-flex items-center gap-1 px-1.5 rounded-md bg-slate-100 text-slate-500 font-medium leading-[18px] shrink-0 whitespace-nowrap"><Clock size={11} />최근 7일</span>
+                <span className="truncate hidden sm:inline">공지 · 필수 글은 제외하고 보여 드립니다</span>
+                <span className="hidden lg:inline-flex items-center gap-1.5 shrink-0"><span className="text-slate-300">·</span><NewDot />안 읽은 글</span>
+              </span>
               <button onClick={() => setTab("all")} className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 inline-flex items-center shrink-0" data-testid="recent-more">전체 게시물<ChevronRight size={13} /></button>
             </div>
             {recent.length > 0 && <HomeColHead>
               <span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
-              <span className="w-[108px] shrink-0 hidden md:flex items-center">작성자</span><span className="w-[104px] shrink-0 flex items-center">작성일</span>
+              <span className={`w-[108px] shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center`}>작성자</span><span className="w-[104px] shrink-0 flex items-center">작성일</span>
+              {ctx.isAgent && <span className="w-[92px] shrink-0 hidden sm:flex items-center">열람</span>}
             </HomeColHead>}
             {recent.length ? recent.slice(0, 12).map((p, i) => {
               const c = catMap[p.Category]; const rd = seen(p);
@@ -1448,15 +1702,15 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                   <BoardCell cat={c} />
                   <span className="min-w-0 flex-1 flex items-center gap-1.5">
                     {fresh(p) && <NewDot />}
-                    {p.IsPinned && <NoticePill />}{p.RequireConfirm && <ReqPill />}
                     <span className={`min-w-0 truncate text-[13.5px] ${rd ? "text-slate-600" : "font-semibold text-slate-900"}`}>{p.Title}</span>
                     <PostMarks p={p} compact />
                   </span>
-                  <span className="w-[108px] text-[12px] text-slate-500 shrink-0 hidden md:flex items-center min-w-0"><span className="truncate">{p.AuthorName || ""}</span></span>
+                  <span className={`w-[108px] text-[12px] text-slate-500 shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center min-w-0`}><span className="truncate">{p.AuthorName || ""}</span></span>
                   <span className="w-[104px] text-[11.5px] text-slate-400 tabular-nums shrink-0 flex items-center" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
+                  {ctx.isAgent && <span className="w-[92px] shrink-0 hidden sm:flex items-center" data-read-col={p.id}>{myRow(p) ? <SeenMark r={myRow(p)} /> : <span className="text-[11.5px] text-slate-300">-</span>}</span>}
                 </button>
               );
-            }) : <SmallEmpty>아직 올라온 글이 없습니다.</SmallEmpty>}
+            }) : <SmallEmpty>최근 7일 동안 올라온 새 글이 없습니다. <button onClick={() => setTab("all")} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>전체 게시물 보기</button></SmallEmpty>}
           </section>
         </div>
 
@@ -1537,9 +1791,14 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
           </div>
         </aside>
       </div>
+      {/* 검색 결과 — 글을 열면 그 위에 글 창(검색 창은 숨겨 두었다가 글을 닫으면 그대로 다시) */}
+      {searching !== null && <SearchPopup ctx={ctx} initialQ={searching} hidden={!!openId} suspended={!!openId || !!editing}
+        onClose={(last) => { setSearching(null); setSearchList(null); setQ(last || ""); }} onOpen={(p, l) => { setSearchList(l || null); openPost(p); }}
+        onAsk={ctx.isAgent && ctx.canWrite("qna") ? () => setEditing({ cat: "qna" }) : null}
+        onMore={(qq) => { setSearching(null); onSearch(qq); }} />}
       {/* 홈에서 누른 글은 홈 위 팝업으로(게시판으로 옮겨 가지 않음) — 위 · 아래 단추는 홈 목록(최신순) 기준 */}
       {openId && (open
-        ? <PostDetail key={open.id} ctx={ctx} post={open} siblings={vis} listLabel="Overview" onOpen={(id) => setOpenId(id)} onBack={() => setOpenId(null)} onEdit={() => setEditing({ post: open })} suspended={!!editing} />
+        ? <PostDetail key={open.id} ctx={ctx} post={open} siblings={fromSearch ? searchList : vis} listLabel={fromSearch ? "검색 결과" : "Overview"} onOpen={(id) => setOpenId(id)} onBack={() => setOpenId(null)} onEdit={() => setEditing({ post: open })} suspended={!!editing} />
         : (
           <PostModalShell onClose={() => setOpenId(null)} label="게시물 없음" narrow>
             <div className="p-10 text-center">
@@ -1580,8 +1839,6 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
   useEffect(() => { setPage(1); }, [q, field, filter, catFilter, catKey, sort, size]);
   useEffect(() => { if (firstRun.current) { firstRun.current = false; return; } setQ(""); setFilter("all"); setCatFilter(""); setSort("new"); }, [catKey]);
   useEffect(() => { if (seed && onSeedUsed) onSeedUsed(); }, []);   // 게시판 홈에서 넘긴 검색어 · 보기 탭은 처음 한 번만(다른 게시판을 다녀와도 다시 걸리지 않게)
-  // 「질문하기」 바로 열기(도움말 단추에서) — 이미 이 게시판에 있어도 열리게 seed 번호로
-  useEffect(() => { if (seed && seed.compose) { if (canWriteHere) setEditing({}); if (onSeedUsed) onSeedUsed(); } }, [seed && seed.n]);
   useEffect(() => {
     if (openId) return;
     const k = (e) => { if (e.key === "/" && !isTyping(e) && !e.ctrlKey && !e.metaKey && searchRef.current) { e.preventDefault(); searchRef.current.focus(); } };
@@ -1603,7 +1860,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
   const isMine = (p) => normEmail(p.AuthorEmail) === normEmail(me.email);
   // 게시판 종류 — Q&A(답변 상태) · 필수 교육자료(조회확인) · 그 밖(공지 · 필수). 종류마다 보기 탭 · 상태 칸이 다르다
   const kind = catKey === "qna" ? "qna" : catKey && catMap[catKey] && catMap[catKey].required ? "required" : "normal";
-  const passFilter = (p, f) => f === "all" ? true : f === "unread" ? !seenBy(p, myRow(p), me) : f === "notice" ? (p.IsPinned || p.RequireConfirm) : f === "pinned" ? p.IsPinned
+  const passFilter = (p, f) => f === "all" ? true : f === "unread" ? !seenBy(p, myRow(p), me) : f === "notice" ? (pinActive(p) || p.RequireConfirm) : f === "pinned" ? pinActive(p)
     : f === "todo" ? isTodo(p) : f === "done" ? (p.RequireConfirm && !isTodo(p)) : f === "required" ? p.RequireConfirm
     : f === "incomplete" ? (() => { const r = rateOf(p); return !!r && r.total > 0 && r.done < r.total; })()
     : f === "qwait" ? !qnaAnswered(p) : f === "qdone" ? qnaAnswered(p) : f === "mine" ? isMine(p) : true;
@@ -1613,8 +1870,8 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
     : sort === "rate" ? (a, b) => ((rateOf(a) || {}).pct ?? 101) - ((rateOf(b) || {}).pct ?? 101) || byNewest(a, b) : byNewest;
   // 공지는 쪽마다 맨 위(검색 · 공지 보기 · 정렬을 바꿨을 때는 섞어서 그대로)
   const pinTop = filter === "all" || filter === "unread";
-  const pinnedRows = pinTop && !qq ? view0.filter((p) => p.IsPinned).sort(byNewest) : [];
-  const normalRows = (pinnedRows.length ? view0.filter((p) => !p.IsPinned) : view0).sort(sorter);
+  const pinnedRows = pinTop && !qq ? view0.filter(pinActive).sort(byNewest) : [];
+  const normalRows = (pinnedRows.length ? view0.filter((p) => !pinActive(p)) : view0).sort(sorter);
   const totalPages = Math.max(1, Math.ceil(normalRows.length / PAGE_SIZE));
   const pageSafe = Math.min(page, totalPages);
   const pageRows = normalRows.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
@@ -1637,7 +1894,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
     if (kind === "qna") return <QnaPill p={p} age={ctx.qnaDuty} />;
     if (ctx.isAgent) {
       const r = myRow(p);
-      return r && r.ConfirmedAt ? <ConfirmedPill />
+      return r && r.ConfirmedAt ? <SeenMark r={r} confirm />
         : p.RequireConfirm ? <UnconfirmedPill />
         : <span className="text-[11.5px] text-slate-300">-</span>;
     }
@@ -1658,7 +1915,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
     return (
       <div className="flex items-center gap-1.5 min-w-0">
         {unread && isNewPost(p) && <NewDot />}
-        {(pin || p.IsPinned) && <NoticePill />}
+        {(pin || pinActive(p)) && <NoticePill />}
         {p.RequireConfirm && kind !== "required" && <ReqPill />}
         <span className={`truncate ${big ? "text-[15px]" : "text-[14px]"} ${pin || unread ? "font-semibold text-slate-900" : "text-slate-600"}`} data-unread-title={unread ? "1" : undefined}><Hl text={p.Title} q={field === "t" || field === "tb" ? q : ""} /></span>
         {kind === "qna" && isMine(p) && <span className="t365-pill bg-slate-100 text-slate-500 font-semibold" data-mine="1">내 질문</span>}
@@ -1817,7 +2074,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
 /* 제목 · 정보 줄 · 읽기 폭 본문 · 동영상 16:9 · 첨부 상자 · 확인 현황(본사 · 관리, 접기) ·     */
 /* 이전글/다음글(창 안에서 이동) · 아래 띠(Agent 조회확인 / 목록). Esc · 바깥 = 닫기, 포커스 가둠, 휴대폰은 전체 화면 */
 /* ------------------------------------------------------------------ */
-function PostModalShell({ onClose, children, label, suspended, narrow, panelClass, zClass, testid }) {
+function PostModalShell({ onClose, children, label, suspended, narrow, panelClass, zClass, testid, hidden }) {
   const panel = useRef(null);
   useEffect(() => {
     const prev = document.activeElement;
@@ -1840,7 +2097,7 @@ function PostModalShell({ onClose, children, label, suspended, narrow, panelClas
     return () => window.removeEventListener("keydown", k);
   }, [suspended, onClose]);
   return (
-    <div className={`fixed inset-0 ${zClass || "z-50"} bg-slate-950/60 backdrop-blur-[3px] t365-fade flex items-stretch md:items-center justify-center md:p-8`} onMouseDown={(e) => { if (e.target === e.currentTarget && !suspended) onClose(); }} data-testid={testid ? testid + "-backdrop" : "post-backdrop"}>
+    <div className={`fixed inset-0 ${zClass || "z-50"} bg-slate-950/60 backdrop-blur-[3px] t365-fade ${hidden ? "hidden" : "flex"} items-stretch md:items-center justify-center md:p-8`} aria-hidden={hidden ? true : undefined} onMouseDown={(e) => { if (e.target === e.currentTarget && !suspended) onClose(); }} data-testid={testid ? testid + "-backdrop" : "post-backdrop"}>
       <div ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-label={label} data-testid={testid || "post-modal"}
         className={`bg-white w-full ${panelClass || (narrow ? "md:max-w-[520px] md:h-auto md:max-h-[90vh]" : "md:max-w-[960px] md:h-auto md:max-h-[90vh]")} h-full md:rounded-2xl flex flex-col outline-none t365-pop overflow-hidden ring-1 ring-black/10`} style={{ boxShadow: "0 32px 90px -18px rgba(2,6,23,.6), 0 12px 28px -12px rgba(2,6,23,.35)" }}>
         {children}
@@ -1933,12 +2190,13 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
         <article className="min-h-full flex flex-col" data-testid="article">
           {/* 제목 · 정보 */}
           <header className="px-5 md:px-10 pt-6 pb-5 border-b border-slate-200 bg-white">
-            {(post.IsPinned || post.RequireConfirm || post.Category === "qna") && (
+            {(pinActive(post) || post.RequireConfirm || post.Category === "qna") && (
               <div className="flex items-center gap-1 mb-2">
                 {post.Category === "qna" && <QnaPill p={post} />}
                 {post.Category === "qna" && normEmail(post.AuthorEmail) === normEmail(me.email) && <span className="t365-pill bg-slate-100 text-slate-500" data-mine="1">내 질문</span>}
-                {post.IsPinned && <NoticePill />}
+                {pinActive(post) && <NoticePill />}
                 {post.RequireConfirm && <span className="t365-pill" style={{ background: "#FDEEE6", color: "#C2410C" }}><BellRing size={10} />조회확인 필수</span>}
+                {!ctx.isAgent && pinUntilOf(post) && (post.IsPinned || post.RequireConfirm) && <span className="text-[11.5px] text-slate-400 tabular-nums" title="홈 「공지 · 필수」 노출 기한 — 게시판 맨 위 고정도 이날까지" data-testid="pin-until">홈 노출 {pinUntilOf(post).slice(5).replace("-", ".")}까지{pinUntilOf(post) < kstToday() ? " (지남)" : ""}</span>}
               </div>
             )}
             <h1 className="text-[18px] md:text-[20px] font-bold text-slate-900 leading-[1.4] tracking-[-0.015em] break-words" data-testid="post-title">{post.Title}</h1>
@@ -1952,7 +2210,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
               <div className="sm:ml-auto flex items-center gap-1.5 flex-wrap">
                 <span className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-white border border-slate-200 text-[12px] text-slate-600 tabular-nums" title="열어 본 횟수의 합 — 같은 사람이 다시 열어도 1씩 늘어납니다"><Eye size={13} className="text-slate-400" />조회 <b className="text-slate-800" data-testid="meta-views">{vs.views}</b></span>
                 {files.length > 0 && <button onClick={() => { const el = scrollRef.current && scrollRef.current.querySelector("[data-testid=attachments]"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-white border border-slate-200 text-[12px] text-slate-600 hover:border-[#9CCBC8] hover:text-[#2F7B7A]" data-testid="meta-files"><Paperclip size={13} className="text-slate-400" />첨부 <b className="text-slate-800">{files.length}</b></button>}
-                {ctx.isAgent && (post.RequireConfirm || confirmed) && <span className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold ${confirmed ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-orange-50 text-orange-700 border border-orange-200"}`} data-testid="meta-mine">{confirmed ? <><CheckCircle2 size={13} />확인 완료</> : <><BellRing size={12} />확인 필요</>}</span>}
+                {ctx.isAgent && (post.RequireConfirm || confirmed) && <span className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold ${confirmed ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-orange-50 text-orange-700 border border-orange-200"}`} data-testid="meta-mine" title={confirmed ? `조회확인 ${fmtDate(mine.ConfirmedAt)}` : undefined}>{confirmed ? <><CheckCircle2 size={13} /><span className="tabular-nums">{shortDate(mine.ConfirmedAt)}</span></> : <><BellRing size={12} />확인 필요</>}</span>}
               </div>
             </div>
           </header>
@@ -2036,7 +2294,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
             {showState ? (confirmed ? (
               <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 <CheckCircle2 size={20} className="text-emerald-600 shrink-0" />
-                <div className="min-w-0"><div className="text-[13.5px] font-semibold text-emerald-800" data-testid="confirmed-label">조회확인 완료</div><div className="text-[11.5px] text-emerald-700/80 tabular-nums truncate">{fmtDate(mine.ConfirmedAt)} 에 확인되었습니다</div></div>
+                <div className="min-w-0"><div className="text-[13.5px] font-semibold text-emerald-800" data-testid="confirmed-label">조회확인 완료</div><div className="text-[11.5px] text-emerald-700/80 tabular-nums truncate">{fmtDate(mine.ConfirmedAt)} 에 확인하셨습니다</div></div>
               </div>
             ) : autoState === "error" ? (
               <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -2318,6 +2576,10 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
   const [title, setTitle] = useState(isEdit ? post.Title || "" : "");
   const [body, setBody] = useState(isEdit ? post.Body || "" : "");
   const [pinned, setPinned] = useState(isEdit ? !!post.IsPinned : false);
+  // 홈 노출 기한(PinUntil, 선택 열) — "" 이면 게시 후 7일. 열이 있을 때만 보이고 저장한다(날짜 열이면 ISO 시각)
+  const [pinUntil, setPinUntil] = useState(isEdit ? pinUntilOf(post) : "");
+  const [pinCol, setPinCol] = useState(null);   // null 확인 중 · "" 열 없음 · "text" | "dateTime"
+  useEffect(() => { if (ctx.isAgent) return; let alive = true; tColumnTypes(T365_LISTS.posts).then((m) => { if (alive) setPinCol(m.get("PinUntil") || ""); }, () => { if (alive) setPinCol(""); }); return () => { alive = false; }; }, []);
   const [reqConfirm, setReqConfirm] = useState(isEdit ? !!post.RequireConfirm : !!(ctx.catMap[init] && ctx.catMap[init].required));
   const [files, setFiles] = useState(isEdit ? parseFiles(post.AttachmentsJson) : []);
   const [newFiles, setNewFiles] = useState([]);
@@ -2339,15 +2601,15 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
     if (isEdit) return;
     if (draft) { if (title.trim() || body.trim()) setDraft(null); return; }   // 묻는 동안은 덮어쓰지 않는다 — 불러오지 않고 새로 쓰기 시작하면 새 글이 임시 글이 된다
     const t = setTimeout(() => {
-      try { if (title.trim() || body.trim()) localStorage.setItem(draftKey, JSON.stringify({ cat, title, body, pinned, reqConfirm, at: new Date().toISOString() })); else localStorage.removeItem(draftKey); } catch (e) {}   // 다 지우면 임시 글도 지운다
+      try { if (title.trim() || body.trim()) localStorage.setItem(draftKey, JSON.stringify({ cat, title, body, pinned, reqConfirm, pinUntil, at: new Date().toISOString() })); else localStorage.removeItem(draftKey); } catch (e) {}   // 다 지우면 임시 글도 지운다
     }, 600);
     return () => clearTimeout(t);
-  }, [title, body, cat, pinned, reqConfirm, draft]);
+  }, [title, body, cat, pinned, reqConfirm, pinUntil, draft]);
   const clearDraft = () => { try { localStorage.removeItem(draftKey); } catch (e) {} };
   function restoreDraft() {
     if (draft.cat && ctx.canWrite(draft.cat)) setCat(draft.cat);
     setTitle(draft.title || ""); setBody(draft.body || "");
-    if (!ctx.isAgent) { setPinned(!!draft.pinned); touchedReq.current = true; setReqConfirm(!!draft.reqConfirm); }
+    if (!ctx.isAgent) { setPinned(!!draft.pinned); touchedReq.current = true; setReqConfirm(!!draft.reqConfirm); setPinUntil(/^\d{4}-\d{2}-\d{2}$/.test(draft.pinUntil || "") ? draft.pinUntil : ""); }
     setDraft(null);
   }
   function discardDraft() { clearDraft(); setDraft(null); }
@@ -2406,6 +2668,8 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
     try {
       const now = new Date().toISOString();
       const fields = { Title: t, Category: cat, Body: body, IsPinned: !ctx.isAgent && !!pinned, RequireConfirm: !ctx.isAgent && !!reqConfirm };   // Agent 는 공지 · 필수를 걸 수 없다(Q&A 질문)
+      const pinVal = pinned || reqConfirm ? pinUntil : "";   // 공지 · 필수가 아니면 기한도 비운다
+      if (!ctx.isAgent && pinCol) fields.PinUntil = pinCol === "dateTime" ? (pinVal ? `${pinVal}T03:00:00Z` : null) : pinVal;   // 날짜 열은 한국 정오(날짜가 밀리지 않게)
       let id;
       if (isEdit) {
         id = post.id;
@@ -2426,6 +2690,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
         const labels = { Title: "제목", Category: "카테고리", IsPinned: "중요", RequireConfirm: "조회확인 필수" };
         const changes = {};
         Object.keys(labels).forEach((k) => { if (String(post[k] == null ? "" : post[k]) !== String(fields[k])) changes[labels[k]] = [post[k] == null ? "" : post[k], fields[k]]; });
+        if ("PinUntil" in fields && pinUntilOf(post) !== pinVal) changes["홈 노출 기한"] = [pinUntilOf(post) || "7일 자동", pinVal || "7일 자동"];
         if ((post.Body || "") !== body) changes["본문"] = ["(이전 본문)", "(수정됨)"];
         const before = parseFiles(post.AttachmentsJson).length;
         if (before !== allFiles.length || uploaded.length) changes["첨부"] = [`${before}개`, `${allFiles.length}개`];
@@ -2437,7 +2702,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
         id = row.id;
         const uploaded = await upAll(id);
         if (uploaded.length) { setSaving("첨부 정보를 저장하고 있습니다..."); await tUpdate(T365_LISTS.posts, id, { AttachmentsJson: JSON.stringify(uploaded), Category: cat }); }
-        t365Log("게시물", "등록", t, { info: { 카테고리: (ctx.catMap[cat] || {}).label || cat, 게시물ID: id, 첨부: `${uploaded.length}개`, ...(uploaded.length ? { "첨부 위치": `${T365_ATTACH_LIB}/${T365_ATTACH_ROOT}/${id}` } : {}), 중요: !!pinned, "조회확인 필수": !!reqConfirm } });
+        t365Log("게시물", "등록", t, { info: { 카테고리: (ctx.catMap[cat] || {}).label || cat, 게시물ID: id, 첨부: `${uploaded.length}개`, ...(uploaded.length ? { "첨부 위치": `${T365_ATTACH_LIB}/${T365_ATTACH_ROOT}/${id}` } : {}), 중요: !!pinned, "조회확인 필수": !!reqConfirm, ...(pinVal && "PinUntil" in fields ? { "홈 노출 기한": pinVal } : {}) } });
       }
       setSaving(""); savingRef.current = false;
       if (!isEdit) clearDraft();
@@ -2563,9 +2828,24 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
         {/* 오른쪽 — 설정 */}
         <aside className="md:w-[340px] shrink-0 bg-slate-50/80 border-t md:border-t-0 md:border-l border-slate-200 p-4 space-y-3 md:overflow-y-auto">
           {!ctx.isAgent && <Card title="게시 옵션" icon={Tags}>
-            <Switch on={pinned} onChange={setPinned} testid="ed-pin" label="중요 · 상단 고정" desc="목록 맨 위와 Overview 「공지 · 필수」 에 보입니다" tint="#D97706" />
+            <Switch on={pinned} onChange={setPinned} testid="ed-pin" label="중요 · 상단 고정" desc="게시판 목록 맨 위와 홈 「공지 · 필수」(게시 후 7일)에 보입니다" tint="#D97706" />
             <div className="border-t border-slate-100"></div>
             <Switch on={reqConfirm} onChange={(v) => { touchedReq.current = true; setReqConfirm(v); }} testid="ed-req" label="조회확인 필수" desc="Agent 의 「확인 대기」 목록에 올라가고 확인율을 집계합니다" tint="#C2410C" />
+            {(pinned || reqConfirm) && pinCol && (
+              <div className="mt-1 pt-2.5 pb-1 border-t border-slate-100" data-testid="ed-pinuntil-box">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[13px] font-medium text-slate-800 inline-flex items-center gap-1.5"><Clock size={13} className="text-slate-400" />홈 노출 기한</span>
+                  <span className="text-[11.5px] tabular-nums" style={{ color: pinUntil ? "#B45309" : "#94A3B8" }}>{pinUntil ? `${pinUntil.slice(5).replace("-", ".")} 까지` : "게시 후 7일(자동)"}</span>
+                </div>
+                <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                  <input type="date" value={pinUntil} onChange={(e) => setPinUntil(e.target.value)} aria-label="홈 노출 기한" className="h-8 px-2 border border-slate-300 rounded-md text-[12.5px] bg-white tabular-nums focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/30" data-testid="ed-pinuntil" />
+                  {[[14, "2주"], [30, "한 달"]].map(([d, l]) => <button type="button" key={d} onClick={() => setPinUntil(dayAdd(kstToday(), d))} className="h-8 px-2.5 rounded-md border border-slate-200 text-[12px] text-slate-600 hover:bg-slate-50" data-pin-quick={d}>{l}</button>)}
+                  {pinUntil && <button type="button" onClick={() => setPinUntil("")} className="h-8 px-2 rounded-md text-[12px] text-slate-500 hover:bg-slate-100" data-testid="ed-pinuntil-clear">자동(7일)</button>}
+                </div>
+                <p className="mt-1.5 text-[11.5px] text-slate-500 leading-snug">비워 두면 게시 후 7일 동안 홈 「공지 · 필수」 에 보입니다. 날짜를 정하면 그날까지 보이고, 게시판 맨 위 고정도 그날이 지나면 풀립니다.</p>
+                {pinUntil && pinUntil < kstToday() && <p className="mt-1 text-[11.5px] text-red-600" data-testid="ed-pinuntil-past">이미 지난 날짜입니다 — 홈과 게시판 맨 위에 보이지 않습니다.</p>}
+              </div>
+            )}
           </Card>}
           <Card title="첨부파일" icon={Paperclip} right={<span className="text-[11px] text-slate-400 tabular-nums">{allCount} / {T365_FILES_MAX}{allCount ? ` · ${fmtSize(totalSize)}` : ""}</span>}>
             <label onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); addFiles(e.dataTransfer.files); }}
@@ -2817,8 +3097,11 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
   function setPerm(p, item, nextLv) {
     setOverrides((prev) => {
       const n = { ...prev }; const o = { ...(n[p.email] || {}) };
-      if (p.dirOnly && !T365_ROLES.includes(o.Role)) o.Role = "본사";   // 명부에만 있는 직원 — 권한부터 고르면 본사 역할로 시작
-      const base = o.Perm || (("Role" in o) ? rolePreset(o.Role, catKeysOf(p.row.WriterCategories)) : stored(p).perms);
+      // 명부에만 있는 직원 — 역할보다 권한 칸을 먼저 누르면 역할은 본사로 두되, 권한은 빈 상태(Overview 만)에서 누른 칸만 켠다
+      // (본사 기본값 전부를 켜고 시작하면 칸 하나만 눌렀는데 게시판 · 확인 현황이 한꺼번에 켜져 보인다)
+      const fresh = p.dirOnly && !T365_ROLES.includes(o.Role);
+      if (fresh) o.Role = "본사";
+      const base = o.Perm || (fresh ? noPerms() : ("Role" in o) ? rolePreset(o.Role, catKeysOf(p.row.WriterCategories)) : stored(p).perms);
       const desired = { ...base, [item.key]: capLevel(item, nextLv) };
       const roleChanged = "Role" in o;
       const same = !roleChanged && T365_PERM_ITEMS.every((it) => desired[it.key] === stored(p).perms[it.key]);
@@ -3393,7 +3676,7 @@ function BannerImg({ file, className, alt }) {
   return src ? <img src={src} alt={alt || ""} className={className} draggable={false} /> : <div className={`${className || ""} bg-slate-200 animate-pulse`} aria-hidden="true"></div>;
 }
 // 배너 아래쪽 게시판 아이콘 줄 — 작성 후 하루(24시간) 안의 새 글 수: 안 읽은 글이 있으면 빨간 숫자(안 읽은 수), 모두 읽었으면 회색 숫자(새 글 수), 하루가 지나면 숫자 없음
-const T365_FRESH_MS = 864e5;
+const T365_FRESH_MS = T365_HOME_DAYS * 864e5;   // 배너 아이콘 숫자 — 최근 7일 새 글(안 읽음 빨강 · 모두 읽음 회색)
 function BoardIconStrip({ ctx, onGo }) {
   const { posts, cats, readIdx, me } = ctx;
   const since = Date.now() - T365_FRESH_MS;
@@ -3406,7 +3689,7 @@ function BoardIconStrip({ ctx, onGo }) {
         const n = unread || fresh.length; const red = unread > 0;
         const I = c.icon || FileText;
         return (
-          <button key={c.key} onClick={() => onGo(c.key)} data-bicon={c.key} title={`${c.label}${n ? ` — 오늘 새 글 ${fresh.length}건${red ? ` · 안 읽음 ${unread}건` : " · 모두 읽음"}` : ""}`}
+          <button key={c.key} onClick={() => onGo(c.key)} data-bicon={c.key} title={`${c.label}${n ? ` — 최근 7일 새 글 ${fresh.length}건${red ? ` · 안 읽음 ${unread}건` : " · 모두 읽음"}` : ""}`}
             className="group shrink-0 min-w-[60px] px-2 md:px-2.5 flex flex-col items-center gap-1 pt-2 pb-1 rounded-xl hover:bg-white/10 transition-colors">
             <span className="relative w-9 h-9 md:w-10 md:h-10 rounded-xl flex items-center justify-center bg-white shadow-md shadow-black/20 transition-transform group-hover:-translate-y-0.5">
               <I size={17} style={{ color: c.color }} />
@@ -4296,6 +4579,7 @@ function App({ boot }) {
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [denied, setDenied] = useState(null);
   const [contactOpen, setContactOpen] = useState(false);
+  const [asking, setAsking] = useState(false);   // 도움말 「Q&A 에 질문하기」 — 지금 화면 위에 질문 창(닫으면 그대로)
   const [boardSeed, setBoardSeed] = useState(null);   // 게시판 홈 검색 · 「안 읽은 글」 · 「공지 더보기」 → 전체 게시물에 검색어 · 보기 탭을 넘긴다
 
   const me0 = boot.me;
@@ -4330,7 +4614,7 @@ function App({ boot }) {
     const seq = ++reloadSeq.current;   // 겹쳐 부른 경우 늦게 도착한 옛 응답이 새 응답을 덮지 않게 — 마지막 호출만 반영
     setLoading(true);
     const wrap = (pr) => pr.then((v) => ({ v }), (e) => ({ e }));
-    const [p, r, u, c, bn] = await Promise.all([wrap(tListAll(T365_LISTS.posts)), wrap(tListAll(T365_LISTS.reads)), wrap(tListAll(T365_LISTS.users)), wrap(tListAll(T365_LISTS.categories)), wrap(tListAll(T365_LISTS.banners))]);
+    const [p, r, u, c, bn] = await Promise.all([wrap(tListAll(T365_LISTS.posts)), wrap(tLoadReads(me0.email)), wrap(tListAll(T365_LISTS.users)), wrap(tListAll(T365_LISTS.categories)), wrap(tListAll(T365_LISTS.banners))]);
     if (seq !== reloadSeq.current) return;
     if (p.e) { setPosts([]); setPostsErr(isMissingListError(p.e) ? "missing" : p.e.message); } else { setPosts(p.v); setPostsErr(""); }
     if (r.e) { setReads([]); console.warn("[Training365] 조회 기록 읽기 실패:", r.e.message); } else setReads(r.v);
@@ -4370,7 +4654,7 @@ function App({ boot }) {
   const upsertRead = (row) => setReads((prev) => { const i = prev.findIndex((x) => x.Title === row.Title); if (i < 0) return [...prev, row]; const n = prev.slice(); n[i] = { ...n[i], ...row }; return n; });
 
   const ctx = { goPost: (cat, id) => setTab(catMap[cat] ? "cat:" + cat : "all", String(id)), openContact: () => setContactOpen(true),
-    askQuestion: () => { if (!catMap.qna || !canWrite("qna")) return; setBoardSeed({ tab: "cat:qna", compose: true, n: Date.now() }); setTab("cat:qna"); },   // Q&A 게시판으로 가서 질문 쓰기 창을 바로
+    askQuestion: () => { if (catMap.qna && canWrite("qna")) setAsking(true); },   // 지금 보던 화면 위에 질문 창 — 닫으면 그 화면 그대로
     me, role, isAdmin, isAgent, canWrite, canEditPost, qnaDuty, canView, canEditMenu, perms: P, cats, catMap, users, agents, posts, readIdx, upsertRead, reload };
 
   // 화면 접근 — 관리 화면은 관리자만, 확인 현황은 Agent 제외, 카테고리는 사용 중인 것만
@@ -4568,6 +4852,13 @@ function App({ boot }) {
       </div>
       {contactOpen && <ContactModal ctx={ctx} onClose={() => setContactOpen(false)} />}
       {!contactOpen && <HelpFab ctx={ctx} />}
+      {/* 도움말에서 연 질문 창 — 게시판으로 옮기지 않는다. 올리면 Overview · 전체 게시물 · Q&A 에서는 그 자리에서 글을 열고, 그 밖의 화면에서는 알림만 */}
+      {asking && <PostEditor ctx={ctx} defaultCat="qna" onClose={() => setAsking(false)} onSaved={async (id) => {
+        setAsking(false); await reload();
+        const here = tab === "overview" || tab === "all" || tab === "cat:qna";
+        toast(here ? "질문을 올렸습니다" : "질문을 올렸습니다 — 답변이 달리면 Overview 의 Q&A 상자와 사이드바에 표시됩니다");
+        if (here && id) setTab(tab, String(id));
+      }} />}
       {loading && hasLoadedOnce && <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[80] bg-slate-800 text-white text-xs px-3 py-1.5 rounded-full shadow-lg" role="status">새로 불러오는 중...</div>}
     </div>
   );
