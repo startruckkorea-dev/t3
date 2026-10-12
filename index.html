@@ -1654,8 +1654,8 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
             </div>
             {notice.length > 0 && <HomeColHead>
               <span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
-              <span className={`w-[100px] shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center`}>작성자</span>
-              <span className="w-[96px] shrink-0 hidden md:flex items-center">작성일</span>{ctx.isAgent && <span className="w-[26px] sm:w-[92px] shrink-0 flex items-center"><span className="hidden sm:inline">조회확인</span></span>}
+              <span className={`w-[108px] shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center`}>작성자</span>
+              <span className="w-[104px] shrink-0 hidden md:flex items-center">작성일</span>{ctx.isAgent && <span className="w-[26px] sm:w-[100px] shrink-0 flex items-center"><span className="hidden sm:inline">조회확인</span></span>}
             </HomeColHead>}
             {notice.length ? notice.slice(0, NOTICE_MAX).map((p) => {
               const c = catMap[p.Category]; const r = myRow(p);
@@ -1668,9 +1668,9 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                     <span className={`min-w-0 truncate text-[13.5px] ${seen(p) ? "text-slate-600" : "font-semibold text-slate-900"}`}>{p.Title}</span>
                     <PostMarks p={p} compact />
                   </span>
-                  <span className={`w-[100px] text-[12px] text-slate-500 shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center min-w-0`}><span className="truncate">{p.AuthorName || ""}</span></span>
-                  <span className="text-[11.5px] text-slate-400 tabular-nums shrink-0 hidden md:flex items-center w-[96px]" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
-                  {ctx.isAgent && <span className="shrink-0 w-[26px] sm:w-[92px] flex items-center">
+                  <span className={`w-[108px] text-[12px] text-slate-500 shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center min-w-0`}><span className="truncate">{p.AuthorName || ""}</span></span>
+                  <span className="text-[11.5px] text-slate-400 tabular-nums shrink-0 hidden md:flex items-center w-[104px]" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
+                  {ctx.isAgent && <span className="shrink-0 w-[26px] sm:w-[100px] flex items-center">
                     {p.RequireConfirm ? (r && r.ConfirmedAt ? <SeenMark r={r} confirm tight /> : <UnconfirmedPill tight />) : r ? <SeenMark r={r} tight /> : <span className="text-[11.5px] text-slate-300">-</span>}
                   </span>}
                 </button>
@@ -1693,7 +1693,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
             {recent.length > 0 && <HomeColHead>
               <span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
               <span className={`w-[108px] shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center`}>작성자</span><span className="w-[104px] shrink-0 flex items-center">작성일</span>
-              {ctx.isAgent && <span className="w-[92px] shrink-0 hidden sm:flex items-center">열람</span>}
+              {ctx.isAgent && <span className="w-[100px] shrink-0 hidden sm:flex items-center">열람</span>}
             </HomeColHead>}
             {recent.length ? recent.slice(0, 12).map((p, i) => {
               const c = catMap[p.Category]; const rd = seen(p);
@@ -1707,7 +1707,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                   </span>
                   <span className={`w-[108px] text-[12px] text-slate-500 shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center min-w-0`}><span className="truncate">{p.AuthorName || ""}</span></span>
                   <span className="w-[104px] text-[11.5px] text-slate-400 tabular-nums shrink-0 flex items-center" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
-                  {ctx.isAgent && <span className="w-[92px] shrink-0 hidden sm:flex items-center" data-read-col={p.id}>{myRow(p) ? <SeenMark r={myRow(p)} /> : <span className="text-[11.5px] text-slate-300">-</span>}</span>}
+                  {ctx.isAgent && <span className="w-[100px] shrink-0 hidden sm:flex items-center" data-read-col={p.id}>{myRow(p) ? <SeenMark r={myRow(p)} /> : <span className="text-[11.5px] text-slate-300">-</span>}</span>}
                 </button>
               );
             }) : <SmallEmpty>최근 7일 동안 올라온 새 글이 없습니다. <button onClick={() => setTab("all")} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>전체 게시물 보기</button></SmallEmpty>}
@@ -2669,7 +2669,8 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
       const now = new Date().toISOString();
       const fields = { Title: t, Category: cat, Body: body, IsPinned: !ctx.isAgent && !!pinned, RequireConfirm: !ctx.isAgent && !!reqConfirm };   // Agent 는 공지 · 필수를 걸 수 없다(Q&A 질문)
       const pinVal = pinned || reqConfirm ? pinUntil : "";   // 공지 · 필수가 아니면 기한도 비운다
-      if (!ctx.isAgent && pinCol) fields.PinUntil = pinCol === "dateTime" ? (pinVal ? `${pinVal}T03:00:00Z` : null) : pinVal;   // 날짜 열은 한국 정오(날짜가 밀리지 않게)
+      // 기한은 값이 있을 때, 또는 수정에서 예전 기한을 지울 때만 보낸다. 날짜 열은 한국 정오(UTC 03:00)로 — 「날짜만」 형식이어도 날짜가 밀리지 않게, 지우기는 null
+      if (!ctx.isAgent && pinCol && (pinVal || (isEdit && pinUntilOf(post)))) fields.PinUntil = pinCol === "dateTime" ? (pinVal ? `${pinVal}T03:00:00Z` : null) : pinVal;
       let id;
       if (isEdit) {
         id = post.id;
