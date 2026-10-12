@@ -245,7 +245,7 @@ function parseContacts(v) {
   try { const j = JSON.parse(String(v || "[]")); arr = Array.isArray(j) ? j : []; } catch (e) { arr = []; }
   const seen = new Set();
   return arr.map((x) => ({ name: String((x && x.name) || "").trim().slice(0, 60), email: String((x && x.email) || "").trim().toLowerCase() }))
-    .filter((x) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x.email) && !seen.has(x.email) && seen.add(x.email)).slice(0, T365_CONTACT_MAX);
+    .filter((x) => T365_MAIL_RE.test(x.email) && !seen.has(x.email) && seen.add(x.email)).slice(0, T365_CONTACT_MAX);
 }
 
 /* ---- 메뉴 권한(보기 · 편집) — 역할 기본값 + 사용자별 예외(training365_Users.Permissions 열, JSON) ----
@@ -305,6 +305,10 @@ const canSee = (P, k) => !!P && (P[k] === "v" || P[k] === "e");
 // 쓰기 지킴이 — 화면 단추를 숨기는 것과 별개로, 편집 권한 없이 게시물 · 사용자 · 카테고리 목록과 첨부 폴더에 쓰지 않는다(fail-closed).
 // 조회 · 조회확인(Reads)과 접속 기록(AccessLog)은 본인 기록이라 누구나.
 let _tPermNow = null;
+// 관리 화면의 「반영」 전 변경 수 — 사용자 · 게시판 화면이 올려 두고, 다른 메뉴로 옮기거나 창을 닫을 때 묻는다
+const _pendingEdits = new Map();
+const pendingEditCount = () => [..._pendingEdits.values()].reduce((a, b) => a + (Number(b) || 0), 0);
+function usePendingEdits(key, n) { useEffect(() => { if (n > 0) _pendingEdits.set(key, n); else _pendingEdits.delete(key); return () => { _pendingEdits.delete(key); }; }, [key, n]); }
 function t365AssertWrite(listName, cats) {
   if (listName === T365_LISTS.reads || listName === T365_LISTS.access) return;
   const P = _tPermNow;
@@ -406,7 +410,8 @@ async function tListAll(listName, extraQuery = "", opts) {
     items = items.concat(data.value || []);
     url = data["@odata.nextLink"] || null;
   }
-  return items.map((x) => ({ id: String(x.id), ...x.fields, _created: x.createdDateTime, _modified: x.lastModifiedDateTime || "" }));
+  // _createdBy — SharePoint 가 남기는 실제 작성 계정(행의 AuthorEmail · UserEmail 은 쓰는 사람이 넣는 값이라 대조용)
+  return items.map((x) => ({ id: String(x.id), ...x.fields, _created: x.createdDateTime, _modified: x.lastModifiedDateTime || "", _createdBy: normEmail(((x.createdBy || {}).user || {}).email) }));
 }
 async function tCreate(listName, fields) {
   t365AssertWrite(listName, [fields && fields.Category].filter(Boolean));
@@ -502,6 +507,9 @@ function fmtSize(n) { n = Number(n) || 0; return n >= 1048576 ? `${(n / 1048576)
  * 게시물에는 driveId · itemId 만 저장하므로, 10-12 이전에 문서 라이브러리 training365/YYYY-MM/ 에 올라간 첨부도 그대로 열린다. */
 const T365_ATTACH_LIB = "AttachedFiles";
 const T365_ATTACH_ROOT = "Training365_Media-Files";
+// Q&A 질문 첨부는 따로 _qna/{번호} 에 — Agent 에게는 이 폴더만 쓰기를 주고 공식 자료 폴더는 읽기만 줄 수 있게(리뷰 · 권한 표 참고)
+const T365_QNA_DIR = "_qna";
+const attachFolderOf = (postId, cat) => (cat === "qna" ? `${T365_ATTACH_ROOT}/${T365_QNA_DIR}/${postId}` : `${T365_ATTACH_ROOT}/${postId}`);
 let _tAttachDriveId = null;
 async function tAttachDriveId() {
   if (_tAttachDriveId) return _tAttachDriveId;
@@ -515,7 +523,7 @@ async function tUploadFile(file, postId, cat, onProgress) {
   if (!/^\d+$/.test(String(postId || ""))) throw new Error("게시물 번호가 없어 첨부를 올리지 않았습니다.");
   const token = await getGraphToken();
   const driveId = await tAttachDriveId();
-  const folder = `${T365_ATTACH_ROOT}/${postId}`;
+  const folder = attachFolderOf(postId, cat);
   if (!(await tEnsureFolder(driveId, folder, token))) throw new Error("첨부 폴더를 만들 수 없습니다 — 권한을 확인해 주세요.");
   const enc = `${folder}/${sanitizeFileName(file.name)}`.split("/").map(encodeURIComponent).join("/");
   let item;
@@ -539,6 +547,37 @@ async function tUploadFile(file, postId, cat, onProgress) {
     }
   }
   return { name: String(file.name).slice(0, 200), size: file.size, type: file.type || "", driveId, itemId: item.id };
+}
+/* ---- 첨부 정리 — 글을 지우면 그 글의 번호 폴더를, 수정에서 뺀 파일은 그 파일만 사이트 휴지통으로(93일 동안 되살릴 수 있음) ----
+ * 지우는 것은 언제나 「이 게시물 번호 폴더 안」 의 것만 — 첨부 정보가 다른 곳의 파일을 가리키더라도 그 파일은 건드리지 않는다.
+ * 실패해도(권한 · 네트워크) 글 저장 · 삭제는 그대로 — 콘솔에만 남긴다 */
+async function tDeletePostFolder(postId) {
+  if (!/^\d+$/.test(String(postId || ""))) return;
+  try {
+    const token = await getGraphToken(); const driveId = await tAttachDriveId();
+    for (const folder of [attachFolderOf(postId, ""), attachFolderOf(postId, "qna")]) {
+      const enc = folder.split("/").map(encodeURIComponent).join("/");
+      const res = await fetch(`${GRAPH}/drives/${driveId}/root:/${enc}`, { method: "DELETE", headers: { Authorization: "Bearer " + token } });
+      if (!res.ok && res.status !== 404) console.warn("[Training365] 첨부 폴더 정리 실패:", folder, res.status);
+    }
+  } catch (e) { console.warn("[Training365] 첨부 폴더 정리 실패:", e.message); }
+}
+async function tDeleteRemovedFiles(postId, removed) {
+  if (!removed.length || !/^\d+$/.test(String(postId || ""))) return;
+  try {
+    const token = await getGraphToken(); const driveId = await tAttachDriveId();
+    const homes = [attachFolderOf(postId, ""), attachFolderOf(postId, "qna")].map((f) => `/${f}`);
+    for (const f of removed) {
+      if (f.driveId !== driveId || !T365_ID_RE.test(f.itemId)) continue;
+      try {
+        const it = await apiGet(`/drives/${driveId}/items/${f.itemId}?$select=id,parentReference`, token);
+        const at = String((it.parentReference || {}).path || "");
+        if (!homes.some((h) => at.endsWith(h))) continue;   // 이 글의 폴더 밖 — 손대지 않는다
+        const res = await fetch(`${GRAPH}/drives/${driveId}/items/${encodeURIComponent(f.itemId)}`, { method: "DELETE", headers: { Authorization: "Bearer " + token } });
+        if (!res.ok && res.status !== 404) console.warn("[Training365] 뺀 첨부 정리 실패:", f.name, res.status);
+      } catch (e) { console.warn("[Training365] 뺀 첨부 정리 실패:", f.name, e.message); }
+    }
+  } catch (e) { console.warn("[Training365] 뺀 첨부 정리 실패:", e.message); }
 }
 const T365_ID_RE = /^[A-Za-z0-9!_\-]{1,200}$/;
 // 저장된 첨부 정보(JSON) — 형식이 맞는 것만 받는다(게시물 목록을 손으로 고쳐도 경로가 엉뚱한 곳을 가리키지 않게)
@@ -583,7 +622,7 @@ async function tImageUrl(f) {
 // 바로가기 링크 — 사이드바 「바로가기」. 주소는 http · https 만(그 밖은 버림), 보이는 사람: 모두 · Agent · 직원(Staff)
 const T365_LINK_AUD = { all: "모두", agent: "Agent 만", staff: "직원만" };
 function safeWebUrl(u) {
-  try { const x = new URL(String(u || "").trim()); return (x.protocol === "https:" || x.protocol === "http:") && x.hostname ? x.href : null; } catch (e) { return null; }
+  try { const x = new URL(String(u || "").trim()); return (x.protocol === "https:" || x.protocol === "http:") && x.hostname && !x.username && !x.password ? x.href : null; } catch (e) { return null; }
 }
 function linkAudOf(v) {
   const s = String(v || "").trim().toLowerCase();
@@ -628,7 +667,7 @@ async function loadContactMail() {
   const pick = (key) => {
     const row = rows.find((r) => String((r || [])[0] || "").trim().toUpperCase() === key);
     const mail = row ? String(row[2] || "").trim().toLowerCase() : "";
-    return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail) ? mail : "";
+    return safeMail(mail);
   };
   return { contact: pick("TRAINING365_CONTACT"), it: pick("TRAINING365_IT") };
 }
@@ -683,6 +722,10 @@ function buildIdentity(account, me) {
   return { ids: [...ids], email, name: rawName || email, shortName, isGuest };
 }
 const normEmail = (e) => String(e || "").trim().toLowerCase();
+// 메일 주소(엄격) — 문의 · 담당자 메일처럼 mailto: 에 그대로 넣는 값. 「?cc=…」 · 「&」 · 「#」 같은 글자가 섞인 값은 버린다
+const T365_MAIL_RE = /^[a-z0-9._'+-]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/;
+const safeMail = (e) => { const s = normEmail(e); return T365_MAIL_RE.test(s) ? s : ""; };
+const mailtoOf = (e) => (safeMail(e) ? `mailto:${safeMail(e)}` : undefined);
 function isExternalEmail(e) { const d = normEmail(e).split("@")[1] || ""; return !!d && !/(^|\.)hyosung\.com$|(^|\.)startruckkorea\.com$/.test(d); }
 
 /* ---- 관리 행위 이력(MKQR mkLog 와 같은 파일 방식) — Logging_data/Training365/YYYY-MM-DD/HHmmss_사용자_rand.json ---- */
@@ -799,6 +842,12 @@ const T365Session = {
   },
 };
 async function t365Logout() {
+  // 임시 글도 이 기기(공용 PC)에 남기지 않는다 — 있으면 지워진다고 한 번 묻는다
+  let drafts = [];
+  try { drafts = Object.keys(localStorage).filter((k) => k.startsWith("t365.draft.")); } catch (e) {}
+  const named = drafts.map((k) => { try { const d = JSON.parse(localStorage.getItem(k) || "null"); return d && (String(d.title || "").trim() || String(d.body || "").trim()) ? String(d.title || "").trim() || "제목 없음" : null; } catch (e) { return null; } }).filter(Boolean);
+  if (named.length && !(await uiConfirm(`작성 중이던 임시 글 「${named[0].slice(0, 40)}」 이 이 기기에 남아 있습니다.\n로그아웃하면 다른 사람이 볼 수 없도록 함께 지워집니다. 로그아웃할까요?`, { title: "로그아웃", okText: "로그아웃", cancelText: "취소" }))) return;
+  try { drafts.forEach((k) => localStorage.removeItem(k)); } catch (e) {}
   _idbOff = true;   // 이 뒤로는 캐시를 쓰지 않는다(진행 중이던 불러오기 포함)
   try { await idbClear(); } catch (e) {}   // 조회 기록 캐시 — 공용 PC 에 남기지 않는다
   await T365Session.logout();
@@ -852,8 +901,9 @@ const pinActive = (p) => !!(p && p.IsPinned) && (!pinUntilOf(p) || pinUntilOf(p)
 const onNoticeBox = (p) => !!(p.IsPinned || p.RequireConfirm) && (pinUntilOf(p) ? pinUntilOf(p) >= kstToday() : inLastDays(p, T365_HOME_DAYS));
 
 /* ---- 링크 — https 만 허용 ---- */
+// 「https://회사주소@다른곳」 처럼 앞에 아이디 · 비밀번호 칸을 넣어 진짜 주소를 숨긴 링크는 받지 않는다
 function safeHttpsUrl(u) {
-  try { const x = new URL(String(u || "").trim()); return x.protocol === "https:" && x.hostname ? x.href : null; } catch (e) { return null; }
+  try { const x = new URL(String(u || "").trim()); return x.protocol === "https:" && x.hostname && !x.username && !x.password ? x.href : null; } catch (e) { return null; }
 }
 function youtubeId(u) {
   const s = safeHttpsUrl(u); if (!s) return null;
@@ -878,8 +928,17 @@ function renderInline(text, kb) {
   while ((m = re.exec(text))) {
     if (m.index > last) out.push(text.slice(last, m.index));
     if (m[1]) out.push(<strong key={`${kb}b${i}`}>{m[2]}</strong>);
-    else if (m[3]) { const u = safeHttpsUrl(m[5]); out.push(u ? <a key={`${kb}a${i}`} href={u} target="_blank" rel="noopener noreferrer">{m[4]}</a> : m[0]); }
-    else if (m[6]) { const u = safeHttpsUrl(m[6]); out.push(u ? <a key={`${kb}u${i}`} href={u} target="_blank" rel="noopener noreferrer">{m[6]}</a> : m[6]); }
+    else if (m[3]) {
+      const u = safeHttpsUrl(m[5]);
+      if (!u) out.push(m[0]);
+      else {   // 링크 글자에 적힌 주소와 실제 주소가 다르면(「crm.회사.com」 이라 써 놓고 다른 곳으로) 실제 주소를 빨갛게 붙여 보여 준다
+        const host = new URL(u).hostname.toLowerCase();
+        const shown = /((?:[a-z0-9-]+\.)+(?:com|net|org|kr|co|io|biz|info|gov|edu|xyz|top|me|app|site|online|ly|gl))(?![a-z0-9-])/i.exec(m[4]);
+        const differs = !!shown && !host.endsWith(shown[1].toLowerCase().replace(/^www\./, ""));
+        out.push(<a key={`${kb}a${i}`} href={u} target="_blank" rel="noopener noreferrer" title={u}>{m[4]}{differs && <span className="text-red-600 text-[0.85em] font-medium" title="링크 글자와 실제 주소가 다릅니다" data-link-host> ({host})</span>}</a>);
+      }
+    }
+    else if (m[6]) { const u = safeHttpsUrl(m[6]); out.push(u ? <a key={`${kb}u${i}`} href={u} target="_blank" rel="noopener noreferrer" title={u}>{m[6]}</a> : m[6]); }
     last = re.lastIndex; i++;
   }
   if (last < text.length) out.push(text.slice(last));
@@ -1086,7 +1145,9 @@ function SetupNotice({ status, infoToo = true }) {
   const [open, setOpen] = useState(false);
   if (!status) return null;
   const req = ["posts", "reads", "users", "access"];
-  const missing = Object.entries(status).filter(([k, v]) => v.missing && req.includes(k)).map(([k]) => T365_LISTS[k]);
+  // 없는 목록마다 실제로 멈추는 기능만 적는다(예전에는 어느 목록이든 「게시 · 조회확인 · 사용자 · 접속 기록」 을 모두 적어 겁을 줬다)
+  const IMPACT = { posts: "게시물 · Q&A 를 보거나 올릴 수 없습니다", reads: "열람 · 조회확인이 기록되지 않고 확인 현황이 비어 보입니다", users: "로그인 판정 · 사용자 관리를 할 수 없습니다", access: "접속 기록만 남지 않습니다(다른 기능은 그대로)" };
+  const missing = Object.entries(status).filter(([k, v]) => v.missing && req.includes(k)).map(([k]) => k);
   const colsOf = (keep) => Object.entries(status).filter(([k, v]) => keep(k) && !v.missing && v.missingCols && v.missingCols.length).map(([k, v]) => `${T365_LISTS[k]}: ${v.missingCols.join(", ")}`);
   const cols = colsOf((k) => req.includes(k));
   const optCols = colsOf((k) => !req.includes(k));   // 선택 목록(카테고리 · 배너)의 새 열 — 안내만
@@ -1106,7 +1167,7 @@ function SetupNotice({ status, infoToo = true }) {
         <div className="flex-1 min-w-0">
           <div className="font-semibold mb-1">{warn ? "SharePoint 목록 준비가 필요합니다" : "선택 목록 안내"} <span className="font-normal opacity-60">· 관리자에게만 보입니다</span></div>
           <ul className="space-y-0.5 list-disc list-inside">
-            {missing.map((n) => <li key={n}>목록이 없습니다: <b>{n}</b> — 만들기 전까지 관련 기능(게시 · 조회확인 · 사용자 · 접속 기록)이 동작하지 않습니다</li>)}
+            {missing.map((k) => <li key={k} data-missing-list={k}>목록이 없습니다: <b>{T365_LISTS[k]}</b> — 만들기 전까지 {IMPACT[k]}</li>)}
             {cols.map((c) => <li key={c}>없는 열 — {c} (그 값은 저장되지 않습니다)</li>)}
             {errs.map((c) => <li key={c}>읽기 실패 — {c}</li>)}
             {infoToo && optCols.map((c) => <li key={c}>선택 목록에 없는 열 — {c} (카테고리 아이콘 · 색 · 문의 담당자 / 배너 값이 저장되지 않습니다 — IT 에 열 추가 요청)</li>)}
@@ -1149,7 +1210,8 @@ function serialRead(key, fn) {
   return p;
 }
 async function tFindRead(key) {
-  const rows = await tListAll(T365_LISTS.reads, `&$filter=fields/Title eq '${odq(key)}'`, { select: T365_READ_SELECT });
+  // 값은 주소용으로 감싼다 — 메일의 「+」 가 공백으로 바뀌거나 「#」 에서 주소가 잘려 다시 열람이 기록되지 않던 문제
+  const rows = await tListAll(T365_LISTS.reads, `&$filter=${encodeURIComponent(`fields/Title eq '${odq(key)}'`)}`, { select: T365_READ_SELECT });
   return rows.filter((r) => r.Title === key).sort((a, b) => Number(a.id) - Number(b.id))[0] || null;
 }
 // opts.confirm — Agent 가 조회확인 필수 글을 열면 열람과 같은 쓰기로 ConfirmedAt 도 채운다(이미 있으면 처음 시각 유지)
@@ -1158,13 +1220,16 @@ function t365RecordView(post, me, opts) {
   const confirm = !!(opts && opts.confirm) && me.role === "Agent";
   return serialRead(key, async () => {
     const now = new Date().toISOString();
+    // 답변이 달린 질문을 봤으면 마지막 열람은 답변 시각보다 뒤로 — 답변한 PC 의 시계가 빨라도 「새 답변」 이 남지 않게(하루 넘게 앞선 값은 무시)
+    const ans = post.Answer && String(post.Answer).trim() ? Date.parse(post.AnsweredAt || 0) || 0 : 0;
+    const seenAt = ans > Date.now() && ans < Date.now() + 864e5 ? new Date(ans + 1).toISOString() : now;
     let row = await tFindRead(key);
     if (row) {
-      const f = { LastViewedAt: now, ViewCount: (Number(row.ViewCount) || 0) + 1, ...(confirm && !row.ConfirmedAt ? { ConfirmedAt: now } : {}) };
+      const f = { LastViewedAt: seenAt, ViewCount: (Number(row.ViewCount) || 0) + 1, ...(confirm && !row.ConfirmedAt ? { ConfirmedAt: now } : {}) };
       await tUpdate(T365_LISTS.reads, row.id, f);
       return { ...row, ...f };
     }
-    const fields = { Title: key, PostId: String(post.id), UserEmail: normEmail(me.email), UserName: me.name, Company: me.company || "", Role: me.role, FirstViewedAt: now, LastViewedAt: now, ViewCount: 1, ...(confirm ? { ConfirmedAt: now } : {}) };
+    const fields = { Title: key, PostId: String(post.id), UserEmail: normEmail(me.email), UserName: me.name, Company: me.company || "", Role: me.role, FirstViewedAt: now, LastViewedAt: seenAt, ViewCount: 1, ...(confirm ? { ConfirmedAt: now } : {}) };
     try { return await tCreate(T365_LISTS.reads, fields); }
     catch (e) {   // 다른 탭이 먼저 만든 경우(고유 값 제약)
       row = await tFindRead(key); if (!row) throw e;
@@ -1221,6 +1286,17 @@ const idbGet = (k) => idbReq("readonly", (st) => st.get(k));
 let _idbOff = false;   // 로그아웃 중 — 늦게 끝난 불러오기가 지운 캐시를 다시 쓰지 않게
 const idbSet = (k, v) => (_idbOff ? Promise.resolve() : idbReq("readwrite", (st) => st.put(v, k)));
 const idbClear = () => idbReq("readwrite", (st) => st.clear());
+// 이 기기에 남은 다른 계정의 임시 글 · 조회 기록 캐시를 지운다(로그아웃 없이 창만 닫고 간 공용 PC) — 로그인한 사람 것만 남긴다
+async function t365PurgeOthers(meEmail) {
+  const mine = normEmail(meEmail);
+  if (!mine) return;
+  try { Object.keys(localStorage).filter((k) => k.startsWith("t365.draft.") && k !== `t365.draft.${mine}`).forEach((k) => localStorage.removeItem(k)); } catch (e) {}
+  try {
+    const keys = await idbReq("readonly", (st) => st.getAllKeys());
+    const others = (keys || []).filter((k) => typeof k === "string" && k.startsWith("reads|") && !k.endsWith(`|${mine}`));
+    if (others.length) await idbReq("readwrite", (st) => { others.forEach((k) => st.delete(k)); return null; });
+  } catch (e) {}
+}
 const isoNoMs = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
 let _readsLoadMode = "";   // full | delta — 시험 · 진단용
 async function tLoadReads(meEmail) {
@@ -1232,7 +1308,7 @@ async function tLoadReads(meEmail) {
   let rows = null, fullAt = now, base = 0;
   if (cache && cache.v === 1 && Array.isArray(cache.rows) && cache.maxMod > 0 && now - (cache.fullAt || 0) < T365_READS_FULL_MS) {
     try {
-      const delta = await tListAll(T365_LISTS.reads, `&$filter=fields/Modified ge '${isoNoMs(cache.maxMod - 10 * 60e3)}'`, { select: T365_READ_SELECT });
+      const delta = await tListAll(T365_LISTS.reads, `&$filter=${encodeURIComponent(`fields/Modified ge '${isoNoMs(cache.maxMod - 10 * 60e3)}'`)}`, { select: T365_READ_SELECT });
       const byId = new Map(cache.rows.map((r) => [r.id, r]));
       delta.forEach((r) => byId.set(r.id, r));
       rows = [...byId.values()]; fullAt = cache.fullAt; base = cache.maxMod; _readsLoadMode = "delta";
@@ -1243,13 +1319,15 @@ async function tLoadReads(meEmail) {
   idbSet(key, { v: 1, rows, maxMod, fullAt }).catch(() => {});
   return rows;
 }
-// 게시물별 · 사람별로 묶기 — 혹시 같은 키의 행이 둘이면(고유 값 제약 전 기록) 가장 이른 확인 시각 · 조회 수 합
-function indexReads(reads) {
+// 게시물별 · 사람별로 묶기 — 혹시 같은 키의 행이 둘이면(고유 값 제약 전 기록) 가장 이른 확인 시각 · 조회 수 합.
+// known(등록된 메일)을 주면, 다른 등록 사용자가 만든 행(SharePoint 작성 계정 ≠ 행의 메일)은 세지 않는다 — 남의 조회확인을 꾸며 넣지 못하게
+function indexReads(reads, known) {
   const byPost = new Map();
   (reads || []).forEach((r) => {
     const pid = String(r.PostId || String(r.Title || "").split("|")[0] || "");
     const em = normEmail(r.UserEmail || String(r.Title || "").split("|")[1]);
     if (!pid || !em) return;
+    if (known && r._createdBy && r._createdBy !== em && known.has(r._createdBy)) return;
     if (!byPost.has(pid)) byPost.set(pid, new Map());
     const m = byPost.get(pid);
     const cur = m.get(em);
@@ -1260,10 +1338,10 @@ function indexReads(reads) {
   });
   return byPost;
 }
-// 확인 대상 = 사용 중인 Agent 전원
+// 확인 대상 = 사용 중인 Agent 가운데 그 게시판을 볼 수 있는 사람(사용자별로 그 게시판 보기를 끈 Agent 는 열 수 없으니 미확인으로 세지 않는다)
 function confirmStats(post, readIdx, agents) {
   const m = readIdx.get(String(post.id)) || new Map();
-  const rows = agents.map((u) => { const r = m.get(normEmail(u.Email)); return { user: u, confirmedAt: (r && r.ConfirmedAt) || "", viewedAt: (r && r.FirstViewedAt) || "" }; });
+  const rows = agents.filter((u) => !u._perms || canSee(u._perms, "cat:" + post.Category)).map((u) => { const r = m.get(normEmail(u.Email)); return { user: u, confirmedAt: (r && r.ConfirmedAt) || "", viewedAt: (r && r.FirstViewedAt) || "" }; });
   const done = rows.filter((x) => x.confirmedAt).length;
   return { rows, done, total: rows.length, pct: rows.length ? Math.round((done / rows.length) * 100) : 0, viewers: m.size };
 }
@@ -1357,20 +1435,6 @@ function usePref(key, def, allowed) {
   const set = (x) => { setV(x); try { localStorage.setItem("t365.pref." + key, x); } catch (e) {} };
   return [v, set];
 }
-// 검색어 강조 — 글자를 나눠 <mark> 로만 감싼다(HTML 해석 없음)
-function Hl({ text, q }) {
-  const s = String(text == null ? "" : text), qq = String(q || "").trim();
-  if (!qq) return s;
-  const lo = s.toLowerCase(), ql = qq.toLowerCase(), out = [];
-  let i = 0, k = 0;
-  for (let j = lo.indexOf(ql); j >= 0; j = lo.indexOf(ql, i)) {
-    if (j > i) out.push(s.slice(i, j));
-    out.push(<mark key={k++} className="t365-hl">{s.slice(j, j + qq.length)}</mark>);
-    i = j + qq.length;
-  }
-  out.push(s.slice(i));
-  return out;
-}
 // 짧은 알림 띠 — 링크 복사 · 조회확인 같은 가벼운 결과(확인 창을 띄울 정도가 아닌 것)
 let _toastSet = null;
 function toast(msg) { if (_toastSet) _toastSet({ msg, id: Date.now() }); }
@@ -1418,7 +1482,8 @@ function mailtoHref({ to = [], bcc = [], subject = "", body = "", link = "" }) {
 }
 // Agent 조회확인 상태 — 버튼이 아니라 표시(글을 열면 자동으로 확인 완료)
 // tight = 휴대폰에서는 아이콘만(좁은 칸)
-const UnconfirmedPill = ({ tight }) => <span className="t365-pill whitespace-nowrap" style={{ background: "#FDEEE6", color: "#C2410C" }} data-confirm-state="pending" title={tight ? "미확인" : undefined}><BellRing size={10} />{tight ? <span className="hidden sm:inline">미확인</span> : "미확인"}</span>;
+// tight(휴대폰 좁은 칸)에서는 종 아이콘을 빼고 「미확인」 글자만 — 제목 앞 종(필수 표시)과 겹쳐 무슨 뜻인지 모르던 문제
+const UnconfirmedPill = ({ tight }) => <span className="t365-pill whitespace-nowrap" style={{ background: "#FDEEE6", color: "#C2410C" }} data-confirm-state="pending" title={tight ? "미확인 — 열면 조회확인됩니다" : undefined}><BellRing size={10} className={tight ? "hidden sm:block" : undefined} />미확인</span>;
 const ConfirmedPill = ({ tight }) => <span className="t365-pill whitespace-nowrap bg-emerald-50 text-emerald-700" data-confirm-state="done" title={tight ? "확인 완료" : undefined}><CheckCircle2 size={10} />{tight ? <span className="hidden sm:inline">확인 완료</span> : "확인 완료"}</span>;
 // 내가 연 시각(Agent) — 「확인 완료」 글씨 대신 ✓ + 시각. 필수 글은 조회확인 시각, 그 밖은 처음 연 시각. tight = 휴대폰은 ✓ 만
 const SeenMark = ({ r, confirm, tight }) => {
@@ -1440,6 +1505,7 @@ const isTyping = (e) => { const t = e.target; return !!t && (t.tagName === "INPU
 /* 치는 대로 찾기 · 게시판별 개수 · 제목/내용/답변/첨부 강조 · ↑↓ · Enter · 결과를 열고 닫으면 다시 결과로 */
 /* ------------------------------------------------------------------ */
 const _reEsc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// 검색 낱말 강조 — 글자를 나눠 <mark> 로만 감싼다(HTML 해석 없음). 게시판 목록 · 검색 창 공통
 function HlTerms({ text, terms }) {
   const s = String(text == null ? "" : text);
   if (!terms || !terms.length) return s;
@@ -1487,8 +1553,18 @@ function SearchPopup({ ctx, initialQ, hidden, suspended, onClose, onOpen, onAsk,
       const sb = snippetAround(d.b, terms), sa = sb ? "" : snippetAround(d.a, terms), sf = sb || sa ? "" : (terms.some((t) => L.f.includes(t)) ? d.f : "");
       out.push({ p: d.p, score, snip: sb || sa || sf || d.b.slice(0, 110), label: sb ? "" : sa ? "답변" : sf ? "첨부" : "" });
     });
+    // 모든 낱말이 맞는 글이 없으면(낱말 하나만 달라도 0건이 되어 같은 질문을 또 올리게 되던 문제) — 일부 낱말이 맞는 글을, 맞는 낱말이 많은 순으로
+    if (!out.length && terms.length > 1) docs.forEach((d) => {
+      const L = { t: d.t.toLowerCase(), b: d.b.toLowerCase(), a: d.a.toLowerCase(), f: d.f.toLowerCase(), w: d.w.toLowerCase() };
+      const hitT = terms.filter((term) => L.t.includes(term) || L.b.includes(term) || L.a.includes(term) || L.f.includes(term) || L.w.includes(term));
+      if (!hitT.length) return;
+      const score = hitT.length * 10 + hitT.filter((term) => L.t.includes(term)).length * 3;
+      const sb = snippetAround(d.b, hitT), sa = sb ? "" : snippetAround(d.a, hitT);
+      out.push({ p: d.p, score, partial: true, snip: sb || sa || d.b.slice(0, 110), label: sb ? "" : sa ? "답변" : "" });
+    });
     return out.sort((x, y) => y.score - x.score || byNewest(x.p, y.p));
   }, [docs, key]);
+  const partial = hits.length > 0 && !!hits[0].partial;
   useEffect(() => { setSel(0); setLimit(30); }, [key, cat]);
   useEffect(() => { if (cat && !hits.some((h) => h.p.Category === cat)) setCat(""); }, [key]);
   const byCat = new Map(); hits.forEach((h) => byCat.set(h.p.Category, (byCat.get(h.p.Category) || 0) + 1));
@@ -1553,6 +1629,7 @@ function SearchPopup({ ctx, initialQ, hidden, suspended, onClose, onOpen, onAsk,
           </div>
         ) : (
           <>
+            {partial && <div className="px-4 md:px-6 py-2 text-[12px] text-amber-900 bg-amber-50 border-b border-amber-100 leading-relaxed" data-testid="sp-partial">「{q.trim()}」 의 낱말이 모두 들어간 글은 없어, <b>일부 낱말이 맞는 글</b>을 보여 드립니다{onAsk ? <> — 찾는 내용이 없으면 <button onClick={onAsk} className="font-semibold underline underline-offset-2" data-testid="sp-ask">Q&A 에 질문하기</button></> : null}</div>}
             {shown.map(({ p, snip, label }, i) => {
               const c = catMap[p.Category]; const r = myRow(p); const seen = seenBy(p, r, me); const nf = parseFiles(p.AttachmentsJson).length;
               return (
@@ -1688,7 +1765,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
             {notice.length > 0 && <HomeColHead>
               <span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
               <span className={`w-[108px] shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center`}>작성자</span>
-              <span className="w-[104px] shrink-0 hidden md:flex items-center">작성일</span>{ctx.isAgent && <span className="w-[26px] sm:w-[100px] shrink-0 flex items-center"><span className="hidden sm:inline">조회확인</span></span>}
+              <span className="w-[104px] shrink-0 hidden md:flex items-center">작성일</span>{ctx.isAgent && <span className="w-[46px] sm:w-[100px] shrink-0 flex items-center"><span className="hidden sm:inline">조회확인</span></span>}
             </HomeColHead>}
             {notice.length ? notice.slice(0, NOTICE_MAX).map((p) => {
               const c = catMap[p.Category]; const r = myRow(p);
@@ -1703,7 +1780,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                   </span>
                   <span className={`w-[108px] text-[12px] text-slate-500 shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center min-w-0`}><span className="truncate">{p.AuthorName || ""}</span></span>
                   <span className="text-[11.5px] text-slate-400 tabular-nums shrink-0 hidden md:flex items-center w-[104px]" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
-                  {ctx.isAgent && <span className="shrink-0 w-[26px] sm:w-[100px] flex items-center">
+                  {ctx.isAgent && <span className="shrink-0 w-[46px] sm:w-[100px] flex items-center">
                     {p.RequireConfirm ? (r && r.ConfirmedAt ? <SeenMark r={r} confirm tight /> : <UnconfirmedPill tight />) : r ? <SeenMark r={r} tight /> : <span className="text-[11.5px] text-slate-300">-</span>}
                   </span>}
                 </button>
@@ -1767,7 +1844,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                   <span className="min-w-0 flex-1 flex items-center gap-1.5">{fresh(p) && <NewDot />}<span className="truncate text-[13px] text-slate-800 font-medium">{p.Title}</span></span>
                   <span className="text-[11px] text-slate-400 tabular-nums shrink-0" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
                 </button>
-              ); }) : <SmallEmpty icon={CheckCircle2}>필수 자료를 모두 확인했습니다.</SmallEmpty>}
+              ); }) : <SmallEmpty icon={CheckCircle2}>{reqAll.length ? "필수 자료를 모두 확인했습니다." : "확인할 필수 자료가 없습니다."}</SmallEmpty>}
               {todo.length > 5 && canAll && <button onClick={() => onSearch("", "todo")} className="w-full h-9 border-t border-slate-100 text-[12px] font-medium text-orange-700 hover:bg-orange-50/50" data-testid="todo-more">확인할 자료 {todo.length - 5}건 더 보기</button>}
             </WidgetCard>
           )}
@@ -1842,8 +1919,8 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
             </div>
           </PostModalShell>
         ))}
-      {editing && <PostEditor ctx={ctx} post={editing.post} defaultCat={editing.cat || (editing.post && editing.post.Category)} onClose={() => setEditing(null)} onSaved={async (id) => {
-        const wasEdit = !!editing.post; setEditing(null); await ctx.reload(); toast(wasEdit ? "게시물을 수정했습니다" : "질문을 올렸습니다");
+      {editing && <PostEditor ctx={ctx} post={editing.post} defaultCat={editing.cat || (editing.post && editing.post.Category)} onClose={() => setEditing(null)} onSaved={async (id, savedCat) => {
+        const wasEdit = !!editing.post; setEditing(null); await ctx.reload(); toast(savedToast(wasEdit, savedCat));
         if (id) setOpenId(String(id));
       }} />}
     </div>
@@ -1883,12 +1960,14 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
   const scope = posts.filter((p) => (catKey ? p.Category === catKey : !!catMap[p.Category]));
   const numOf = new Map([...scope].sort((a, b) => postTs(a) - postTs(b) || Number(a.id) - Number(b.id)).map((p, i) => [p.id, i + 1]));   // 번호 = 게시 순서(APS 공통)
   const qq = q.trim().toLowerCase();
-  const hit = (p) => {
-    if (!qq) return true;
+  // 검색 — 낱말로 나눠 모두 들어간 글(예전에는 띄어쓰기까지 통째로 같아야 찾았다). 그런 글이 없으면 일부 낱말이 맞는 글(아래 partialSearch)
+  const words = qq.split(/\s+/).filter(Boolean);
+  const hayOf = (p) => {
     // 내용 = 본문 + 첨부 이름 + Q&A 답변(답변까지 찾아져야 Q&A 가 「먼저 찾아보는」 자료가 된다)
     const t = String(p.Title || "").toLowerCase(), b = (plainPreview(p.Body, 4000) + " " + parseFiles(p.AttachmentsJson).map((f) => f.name).join(" ") + (p.Answer ? " " + plainPreview(p.Answer, 4000) : "")).toLowerCase(), a = String(p.AuthorName || "").toLowerCase();
-    return field === "t" ? t.includes(qq) : field === "b" ? b.includes(qq) : field === "a" ? a.includes(qq) : t.includes(qq) || b.includes(qq);
+    return field === "t" ? t : field === "b" ? b : field === "a" ? a : t + "\n" + b;
   };
+  const hitWith = (any) => (p) => { if (!words.length) return true; const h = hayOf(p); return any ? words.some((w) => h.includes(w)) : words.every((w) => h.includes(w)); };
   const rateOf = (p) => (p.RequireConfirm ? confirmStats(p, readIdx, ctx.agents) : null);
   const isTodo = (p) => p.RequireConfirm && !(myRow(p) && myRow(p).ConfirmedAt);
   const isMine = (p) => normEmail(p.AuthorEmail) === normEmail(me.email);
@@ -1898,7 +1977,10 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
     : f === "todo" ? isTodo(p) : f === "done" ? (p.RequireConfirm && !isTodo(p)) : f === "required" ? p.RequireConfirm
     : f === "incomplete" ? (() => { const r = rateOf(p); return !!r && r.total > 0 && r.done < r.total; })()
     : f === "qwait" ? !qnaAnswered(p) : f === "qdone" ? qnaAnswered(p) : f === "mine" ? isMine(p) : true;
-  const base = scope.filter((p) => !catFilter || p.Category === catFilter).filter(hit);
+  const scope2 = scope.filter((p) => !catFilter || p.Category === catFilter);
+  const strictBase = words.length ? scope2.filter(hitWith(false)) : scope2;
+  const partialSearch = words.length > 1 && !strictBase.length;   // 낱말이 모두 맞는 글이 없을 때만 — 일부 낱말이 맞는 글
+  const base = partialSearch ? scope2.filter(hitWith(true)) : strictBase;
   const view0 = base.filter((p) => passFilter(p, filter));
   const sorter = sort === "old" ? (a, b) => -byNewest(a, b) : sort === "views" ? (a, b) => viewStats(readIdx, b.id).views - viewStats(readIdx, a.id).views || byNewest(a, b)
     : sort === "rate" ? (a, b) => ((rateOf(a) || {}).pct ?? 101) - ((rateOf(b) || {}).pct ?? 101) || byNewest(a, b) : byNewest;
@@ -1924,8 +2006,10 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
     : kind === "required" ? (ctx.isAgent ? [["all", "전체"], ["todo", "확인 필요"], ["done", "확인 완료"]] : [["all", "전체"], showRate ? ["incomplete", "확인 미완료"] : null, ["unread", "안 읽은 글"]])
     : [["all", "전체"], ["unread", "안 읽은 글"], ["notice", "공지 · 필수"], ctx.isAgent && (cnt("todo") > 0 || filter === "todo") ? ["todo", "확인 필요"] : null]).filter(Boolean);
   const ctrl = "h-9 border border-slate-300 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/40";
+  // 내 질문에 내가 아직 보지 않은 답변(Overview Q&A 상자 · 사이드바 파란 숫자와 같은 기준) — 게시판 목록에서도 「새 답변」 으로
+  const newAnswerMine = (p) => p.Category === "qna" && normEmail(p.AuthorEmail) === normEmail(me.email) && qnaAnswered(p) && (!myRow(p) || String(myRow(p).LastViewedAt || "") < String(p.AnsweredAt || ""));
   const StatusCell = ({ p }) => {
-    if (kind === "qna") return <QnaPill p={p} age={ctx.qnaDuty} />;
+    if (kind === "qna") return ctx.isAgent && newAnswerMine(p) ? <span className="t365-pill text-white whitespace-nowrap" style={{ background: "#1D4ED8" }} data-qna="new"><Sparkles size={10} />새 답변</span> : <QnaPill p={p} age={ctx.qnaDuty} />;
     if (ctx.isAgent) {
       const r = myRow(p);
       return r && r.ConfirmedAt ? <SeenMark r={r} confirm />
@@ -1951,7 +2035,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
         {unread && isNewPost(p) && <NewDot />}
         {(pin || pinActive(p)) && <NoticePill />}
         {p.RequireConfirm && kind !== "required" && <ReqPill />}
-        <span className={`truncate ${big ? "text-[15px]" : "text-[14px]"} ${pin || unread ? "font-semibold text-slate-900" : "text-slate-600"}`} data-unread-title={unread ? "1" : undefined}><Hl text={p.Title} q={field === "t" || field === "tb" ? q : ""} /></span>
+        <span className={`truncate ${big ? "text-[15px]" : "text-[14px]"} ${pin || unread ? "font-semibold text-slate-900" : "text-slate-600"}`} data-unread-title={unread ? "1" : undefined}><HlTerms text={p.Title} terms={field === "t" || field === "tb" ? words : null} /></span>
         {kind === "qna" && isMine(p) && <span className="t365-pill bg-slate-100 text-slate-500 font-semibold" data-mine="1">내 질문</span>}
         <PostMarks p={p} compact noQna={inTable && kind === "qna"} />
       </div>
@@ -1998,7 +2082,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
         </div>
         {/* 건수 · 분류 · 정렬 · 보기 방식 · 쪽당 글 수 */}
         <div className="px-3 md:px-4 py-2 border-b border-slate-200 bg-white flex items-center gap-2 flex-wrap text-[12.5px] text-slate-500">
-          <span data-testid="board-count">총 <b className="text-slate-800 tabular-nums">{view0.length}</b>건{qq ? <> · 「<span className="text-slate-700">{q.trim()}</span>」 검색 결과</> : null}<span className="hidden sm:inline"> · {pageSafe}/{totalPages}쪽</span></span>
+          <span data-testid="board-count">총 <b className="text-slate-800 tabular-nums">{view0.length}</b>건{qq ? <> · 「<span className="text-slate-700">{q.trim()}</span>」 {partialSearch ? <span className="text-amber-700 font-medium" data-testid="board-partial" title="낱말이 모두 들어간 글이 없어 일부 낱말이 맞는 글을 보여 드립니다">일부 낱말이 맞는 글</span> : "검색 결과"}</> : null}<span className="hidden sm:inline"> · {pageSafe}/{totalPages}쪽</span></span>
           <div className="ml-auto flex items-center gap-1.5">
             {!catKey && (
               <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="h-8 border border-slate-300 rounded-md text-[12.5px] bg-white px-2 max-w-[132px]" aria-label="게시판">
@@ -2035,7 +2119,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
                       <td className="px-3 h-12 text-left text-[12.5px] text-slate-400 tabular-nums">{numOf.get(p.id)}</td>
                       {!catKey && <td className="px-3 h-12 truncate"><span className="flex"><BoardCell cat={catMap[p.Category]} bare /></span></td>}
                       <td className="px-3 h-12 min-w-0"><TitleLine p={p} pin={pin} inTable /></td>
-                      <td className="px-3 h-12 text-[12.5px] text-slate-600 truncate text-left"><Hl text={p.AuthorName || "-"} q={field === "a" ? q : ""} /></td>
+                      <td className="px-3 h-12 text-[12.5px] text-slate-600 truncate text-left"><HlTerms text={p.AuthorName || "-"} terms={field === "a" ? words : null} /></td>
                       <td className="px-3 h-12 text-left text-[12.5px] text-slate-500 tabular-nums whitespace-nowrap" title={fmtDate(p.PublishedAt || p._created)}>{dateCell(p)}</td>
                       <td className="px-3 h-12 text-left text-[12.5px] text-slate-500 tabular-nums">{vs.views}</td>
                       {showStatusCol && <td className="px-3 h-12 text-left"><StatusCell p={p} /></td>}
@@ -2056,7 +2140,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
             return (
               <button key={(pin ? "pin" : "") + p.id} onClick={() => setOpenId(p.id)} data-post={p.id} className={`w-full text-left px-4 ${view === "summary" ? "md:px-5 py-3.5" : "py-3"} border-t border-slate-100 first:border-t-0 block ${pin ? "bg-amber-50/50 hover:bg-amber-50" : "hover:bg-slate-50"}`}>
                 <TitleLine p={p} pin={pin} big={view === "summary"} />
-                {pv && <p className="text-[13px] text-slate-500 leading-relaxed mt-1 t365-clamp2 hidden md:block"><Hl text={pv} q={field === "b" || field === "tb" ? q : ""} /></p>}
+                {pv && <p className="text-[13px] text-slate-500 leading-relaxed mt-1 t365-clamp2 hidden md:block"><HlTerms text={pv} terms={field === "b" || field === "tb" ? words : null} /></p>}
                 <div className="flex items-center gap-1.5 mt-1.5 text-[11.5px] text-slate-400 min-w-0">
                   {!catKey && <><CatTag cat={catMap[p.Category]} /><span>·</span></>}
                   <span className="truncate max-w-[110px]">{p.AuthorName || "-"}</span><span>·</span>
@@ -2094,7 +2178,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
           </PostModalShell>
         ))}
       {editing && <PostEditor ctx={ctx} post={editing.post} defaultCat={catKey || catFilter} onClose={() => setEditing(null)} onSaved={async (id, savedCat) => {
-        const wasEdit = !!(editing && editing.post); setEditing(null); await ctx.reload(); toast(wasEdit ? "게시물을 수정했습니다" : "게시물을 올렸습니다");
+        const wasEdit = !!(editing && editing.post); setEditing(null); await ctx.reload(); toast(savedToast(wasEdit, savedCat));
         if (!id) return;
         if (catKey && savedCat && savedCat !== catKey) ctx.goPost(savedCat, id);   // CRM 에서 글쓰기 → 일반게시판에 올린 경우(10-11 「게시물을 찾을 수 없습니다」)
         else setOpenId(id);
@@ -2178,7 +2262,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
     busyRef.current = false; setBusy(false);
   }
   async function remove() {
-    if (!(await uiConfirm(`「${post.Title}」 게시물을 삭제할까요?\n삭제하면 되돌릴 수 없고, 이 게시물의 조회확인 기록은 확인 현황에서 빠집니다.`, { title: "게시물 삭제", okText: "삭제", danger: true }))) return;
+    if (!(await uiConfirm(`「${post.Title}」 게시물을 삭제할까요?\n삭제하면 되돌릴 수 없고, 첨부파일도 함께 지워지며 이 게시물의 조회확인 기록은 확인 현황에서 빠집니다.`, { title: "게시물 삭제", okText: "삭제", danger: true }))) return;
     setDeleting(true);
     try {
       if (post.Category === "qna" && !ctx.isAdmin) {   // 이 창을 연 뒤 답변이 달렸으면 지우지 않는다(다른 Agent 가 볼 답이 사라지지 않게)
@@ -2186,7 +2270,8 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
         if (cur && qnaAnswered(cur)) { setDeleting(false); uiAlert("이 질문에 그 사이 답변이 달려 지울 수 없습니다."); await ctx.reload(); return; }
       }
       await tDelete(T365_LISTS.posts, post.id, { cat: post.Category });
-      t365Log("게시물", "삭제", post.Title, { info: { 카테고리: cat ? cat.label : post.Category, 게시물ID: post.id, 작성자: post.AuthorName || post.AuthorEmail || "" } });
+      tDeletePostFolder(post.id);   // 첨부 폴더도 휴지통으로(지운 글의 파일이 라이브러리에 남아 계속 받을 수 있던 문제) — 실패해도 삭제는 그대로
+      t365Log("게시물", "삭제", post.Title, { info: { 카테고리: cat ? cat.label : post.Category, 게시물ID: post.id, 작성자: post.AuthorName || post.AuthorEmail || "", ...(parseFiles(post.AttachmentsJson).length ? { 첨부: `${parseFiles(post.AttachmentsJson).length}개 함께 삭제(휴지통)` } : {}) } });
       onBack();
       await ctx.reload();
     } catch (e) { uiAlert(e.message); }
@@ -2378,7 +2463,18 @@ function QnaAnswer({ ctx, post }) {
     try {
       const cols = await tListColumns(T365_LISTS.posts);
       if (!cols.has("Answer")) { uiAlert(`게시물 목록에 Answer 열이 없어 답변을 저장할 수 없습니다 — IT 에 열 추가(Answer · AnsweredBy · AnsweredAt)를 요청해 주세요.`); setBusy(false); return; }
-      await tUpdate(T365_LISTS.posts, post.id, { Answer: v, AnsweredBy: ctx.me.name, AnsweredAt: new Date().toISOString() }, { prevCat: post.Category });   // 쓰기 확인은 그 글의 게시판(Q&A) 편집 권한
+      // 동시 답변 확인 — 이 화면을 연 뒤 다른 담당자가 답변을 달았거나 고쳤으면 덮어쓰기 전에 묻는다(취소하면 쓰던 답변은 그대로)
+      const cur = await tGetItem(T365_LISTS.posts, post.id).catch(() => undefined);
+      if (cur === null) { setBusy(false); uiAlert("이 질문은 그 사이에 삭제되었습니다."); await ctx.reload(); return; }
+      if (cur && String(cur.Answer || "").trim() !== String(post.Answer || "").trim()) {
+        const who = cur.AnsweredBy ? `${cur.AnsweredBy} 님이` : "다른 담당자가";
+        const ex = plainPreview(cur.Answer, 160);
+        if (!(await uiConfirm(`${who}${cur.AnsweredAt ? ` ${fmtDate(cur.AnsweredAt)} 에` : ""} 이 질문에 먼저 ${has ? "답변을 고쳤습니다" : "답변했습니다"}.${ex ? `\n\n「${ex}」` : ""}\n\n그대로 저장하면 그 답변을 덮어씁니다. 계속할까요?`, { title: "다른 담당자가 답변함", okText: "덮어쓰기", cancelText: "저장 안 함", danger: true }))) { setBusy(false); return; }
+      }
+      // 답변 시각은 질문자가 마지막으로 본 시각보다 뒤로 — PC 시계가 늦어도 질문자에게 「새 답변」 이 뜨게
+      const lastSeen = askerRow ? Date.parse(askerRow.LastViewedAt || 0) || 0 : 0;
+      const at = new Date(Math.max(Date.now(), lastSeen && lastSeen < Date.now() + 864e5 ? lastSeen + 1000 : 0)).toISOString();   // 하루 넘게 앞선 값은 무시
+      await tUpdate(T365_LISTS.posts, post.id, { Answer: v, AnsweredBy: ctx.me.name, AnsweredAt: at }, { prevCat: post.Category });   // 쓰기 확인은 그 글의 게시판(Q&A) 편집 권한
       t365Log("게시물", has ? "답변 수정" : "답변", post.Title, { info: { 게시물ID: post.id } });
       await ctx.reload();
       setEditing(false); toast(has ? "답변을 수정했습니다" : asker && asker !== normEmail(ctx.me.email) ? "답변을 등록했습니다 — 「질문자에게 알리기」 로 메일을 보낼 수 있습니다" : "답변을 등록했습니다");
@@ -2601,6 +2697,8 @@ function ConfirmPanel({ ctx, post }) {
 // 글쓰기 창 — 왼쪽: 카테고리 · 제목 · 본문(도구 · 쓰기/미리 보기/나란히), 오른쪽: 게시 옵션 · 첨부(끌어 놓기) · 목록 미리보기 · 작성 안내.
 // Ctrl+Enter = 게시, Esc · ✕ · 바깥 = 닫기(쓴 내용이 있으면 확인). 휴대폰은 위아래로 쌓인다. 동영상 입력은 없앴다(10-12) — 기존 글의 동영상은 보기에서 그대로 재생.
 const T365_TITLE_MAX = 200, T365_BODY_MAX = 60000, T365_FILES_MAX = 10;
+// 저장 뒤 알림 — Q&A 는 어디서 올려도 「질문」 으로
+const savedToast = (wasEdit, cat) => (cat === "qna" ? (wasEdit ? "질문을 수정했습니다" : "질문을 올렸습니다") : wasEdit ? "게시물을 수정했습니다" : "게시물을 올렸습니다");
 function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
   const writable = ctx.cats.filter((c) => ctx.canWrite(c.key));
   const isEdit = !!(post && post.id);
@@ -2632,7 +2730,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
   });
   useEffect(() => {
     if (isEdit) return;
-    if (draft) { if (title.trim() || body.trim()) setDraft(null); return; }   // 묻는 동안은 덮어쓰지 않는다 — 불러오지 않고 새로 쓰기 시작하면 새 글이 임시 글이 된다
+    if (draft) return;   // 「불러오기 · 버리기」 를 고르기 전에는 예전 임시 글을 덮어쓰지 않는다(새로 쓰기 시작해도 안내는 그대로)
     const t = setTimeout(() => {
       try { if (title.trim() || body.trim()) localStorage.setItem(draftKey, JSON.stringify({ cat, title, body, pinned, reqConfirm, pinUntil, at: new Date().toISOString() })); else localStorage.removeItem(draftKey); } catch (e) {}   // 다 지우면 임시 글도 지운다
     }, 600);
@@ -2647,6 +2745,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
   }
   function discardDraft() { clearDraft(); setDraft(null); }
   const isQna = cat === "qna";
+  const canFlag = !ctx.isAgent && !isQna;   // 공지(상단 고정) · 조회확인 필수 — Q&A 질문과 Agent 글에는 걸 수 없다
 
   function wrap(before, after, placeholder) {
     const el = ta.current; if (!el) return;
@@ -2689,6 +2788,8 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
     if (body.length > T365_BODY_MAX) { uiAlert("본문이 너무 깁니다(6만 자까지). 긴 자료는 파일로 첨부해 주세요."); return; }
     savingRef.current = true;
     const failed = [];
+    let createdId = null;
+    const fields0 = { IsPinned: canFlag && !!pinned, RequireConfirm: canFlag && !!reqConfirm };
     const upAll = async (postId) => {
       const out = [];
       for (let i = 0; i < newFiles.length; i++) {
@@ -2700,8 +2801,8 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
     };
     try {
       const now = new Date().toISOString();
-      const fields = { Title: t, Category: cat, Body: body, IsPinned: !ctx.isAgent && !!pinned, RequireConfirm: !ctx.isAgent && !!reqConfirm };   // Agent 는 공지 · 필수를 걸 수 없다(Q&A 질문)
-      const pinVal = pinned || reqConfirm ? pinUntil : "";   // 공지 · 필수가 아니면 기한도 비운다
+      const fields = { Title: t, Category: cat, Body: body, IsPinned: canFlag && !!pinned, RequireConfirm: canFlag && !!reqConfirm };   // Agent 글 · Q&A 질문은 공지 · 필수가 될 수 없다
+      const pinVal = fields.IsPinned || fields.RequireConfirm ? pinUntil : "";   // 공지 · 필수가 아니면 기한도 비운다
       // 기한은 값이 있을 때, 또는 수정에서 예전 기한을 지울 때만 보낸다. 날짜 열은 한국 정오(UTC 03:00)로 — 「날짜만」 형식이어도 날짜가 밀리지 않게, 지우기는 null
       if (!ctx.isAgent && pinCol && (pinVal || (isEdit && pinUntilOf(post)))) fields.PinUntil = pinCol === "dateTime" ? (pinVal ? `${pinVal}T03:00:00Z` : null) : pinVal;
       let id;
@@ -2728,21 +2829,36 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
         if ((post.Body || "") !== body) changes["본문"] = ["(이전 본문)", "(수정됨)"];
         const before = parseFiles(post.AttachmentsJson).length;
         if (before !== allFiles.length || uploaded.length) changes["첨부"] = [`${before}개`, `${allFiles.length}개`];
-        t365Log("게시물", "수정", t, { changes, info: { 게시물ID: id, ...(uploaded.length ? { "첨부 위치": `${T365_ATTACH_LIB}/${T365_ATTACH_ROOT}/${id}` } : {}) } });
+        t365Log("게시물", "수정", t, { changes, info: { 게시물ID: id, ...(uploaded.length ? { "첨부 위치": `${T365_ATTACH_LIB}/${attachFolderOf(id, cat)}` } : {}) } });
+        const removed = parseFiles(post.AttachmentsJson).filter((f) => !allFiles.some((x) => x.itemId === f.itemId));
+        if (removed.length) tDeleteRemovedFiles(id, removed);   // 뺀 첨부는 휴지통으로(이 글 폴더 안의 것만 · 실패해도 저장은 그대로)
       } else {
         setSaving("저장하고 있습니다...");
-        // APS 와 같은 순서 — 글(번호)을 먼저 만들고, 그 번호 폴더에 첨부를 올린 뒤 첨부 정보를 붙인다
-        const row = await tCreate(T365_LISTS.posts, { ...fields, AttachmentsJson: "[]", AuthorEmail: ctx.me.email, AuthorName: ctx.me.name, PublishedAt: now });
-        id = row.id;
+        // APS 와 같은 순서 — 글(번호)을 먼저 만들고, 그 번호 폴더에 첨부를 올린 뒤 첨부 정보를 붙인다.
+        // 첨부가 있으면 공지 · 필수는 첨부까지 붙인 뒤에 켠다 — 큰 파일을 올리는 동안 Agent 가 첨부 없는 필수 글을 열어 조회확인되는 일이 없게
+        const defer = newFiles.length > 0 && (fields.IsPinned || fields.RequireConfirm);
+        const row = await tCreate(T365_LISTS.posts, { ...fields, ...(defer ? { IsPinned: false, RequireConfirm: false } : {}), AttachmentsJson: "[]", AuthorEmail: ctx.me.email, AuthorName: ctx.me.name, PublishedAt: now });
+        id = row.id; createdId = id;   // 여기부터 실패해도 글은 이미 있다 — 다시 「게시」 해서 같은 글이 둘 생기지 않게 아래 catch 에서 창을 닫는다
         const uploaded = await upAll(id);
-        if (uploaded.length) { setSaving("첨부 정보를 저장하고 있습니다..."); await tUpdate(T365_LISTS.posts, id, { AttachmentsJson: JSON.stringify(uploaded), Category: cat }); }
-        t365Log("게시물", "등록", t, { info: { 카테고리: (ctx.catMap[cat] || {}).label || cat, 게시물ID: id, 첨부: `${uploaded.length}개`, ...(uploaded.length ? { "첨부 위치": `${T365_ATTACH_LIB}/${T365_ATTACH_ROOT}/${id}` } : {}), 중요: !!pinned, "조회확인 필수": !!reqConfirm, ...(pinVal && "PinUntil" in fields ? { "홈 노출 기한": pinVal } : {}) } });
+        if (uploaded.length || defer) {
+          setSaving("첨부 정보를 저장하고 있습니다...");
+          await tUpdate(T365_LISTS.posts, id, { ...(uploaded.length ? { AttachmentsJson: JSON.stringify(uploaded) } : {}), ...(defer ? { IsPinned: fields.IsPinned, RequireConfirm: fields.RequireConfirm } : {}), Category: cat });
+        }
+        t365Log("게시물", "등록", t, { info: { 카테고리: (ctx.catMap[cat] || {}).label || cat, 게시물ID: id, 첨부: `${uploaded.length}개`, ...(uploaded.length ? { "첨부 위치": `${T365_ATTACH_LIB}/${attachFolderOf(id, cat)}` } : {}), 중요: !!fields.IsPinned, "조회확인 필수": !!fields.RequireConfirm, ...(pinVal && "PinUntil" in fields ? { "홈 노출 기한": pinVal } : {}) } });
       }
       setSaving(""); savingRef.current = false;
-      if (!isEdit) clearDraft();
+      if (!isEdit && !draft) clearDraft();   // 묻던 예전 임시 글(불러오기 · 버리기 전)은 남겨 둔다
       if (failed.length) uiAlert(`게시물은 저장됐지만 첨부 ${failed.length}개를 올리지 못했습니다 — 「수정」에서 다시 첨부해 주세요.\n\n${failed.join("\n")}`);
       onSaved(id, cat);   // 고른 게시판(cat)을 함께 — 다른 게시판에 올렸으면 그 게시판으로 가서 연다
-    } catch (e) { setSaving(""); savingRef.current = false; uiAlert(e.message); }
+    } catch (e) {
+      setSaving(""); savingRef.current = false;
+      if (createdId) {   // 글은 올라갔는데 첨부 · 설정 마무리에서 실패 — 창을 닫고 그 글을 연다(다시 「게시」 하면 같은 글이 또 생긴다)
+        if (!draft) clearDraft();
+        await uiAlert(`게시물은 올라갔지만 마무리하지 못했습니다${fields0.IsPinned || fields0.RequireConfirm ? " — 공지 · 필수 설정과 첨부가 빠졌을 수 있습니다" : " — 첨부가 빠졌을 수 있습니다"}.\n게시물을 열어 「수정」에서 확인해 주세요.\n\n(${e.message})`);
+        onSaved(createdId, cat); return;
+      }
+      uiAlert(e.message);
+    }
   }
   const closingRef = useRef(false);
   async function requestClose() {
@@ -2750,7 +2866,8 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
     const touched = isEdit ? (title !== (post.Title || "") || body !== (post.Body || "") || newFiles.length || files.length !== parseFiles(post.AttachmentsJson).length) : (title.trim() || body.trim() || newFiles.length);
     if (!touched) { onClose(); return; }
     closingRef.current = true;
-    const ok = await uiConfirm(isEdit ? "수정한 내용을 저장하지 않고 닫을까요? 바꾼 내용은 사라집니다." : "작성 중인 글을 닫을까요?\n제목 · 본문은 이 기기에 임시 저장되어 다음에 「글쓰기」를 열면 불러올 수 있습니다(첨부파일은 다시 올려야 합니다).", { title: isEdit ? "수정 취소" : "작성 중인 글 닫기", okText: "닫기", cancelText: "계속 쓰기", danger: !!isEdit });
+    const ok = await uiConfirm(isEdit ? "수정한 내용을 저장하지 않고 닫을까요? 바꾼 내용은 사라집니다."
+      : draft ? "작성 중인 글을 닫을까요?\n위의 「작성 중이던 글」 을 불러오거나 버리기 전이라 지금 쓴 내용은 임시 저장되지 않았습니다." : "작성 중인 글을 닫을까요?\n제목 · 본문은 이 기기에 임시 저장되어 다음에 「글쓰기」를 열면 불러올 수 있습니다(첨부파일은 다시 올려야 합니다).", { title: isEdit ? "수정 취소" : "작성 중인 글 닫기", okText: "닫기", cancelText: "계속 쓰기", danger: !!isEdit || !!draft });
     closingRef.current = false;
     if (ok) onClose();
   }
@@ -2830,6 +2947,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
             <div className="sm:col-span-2">
               <label className="flex items-center text-[12px] font-medium text-slate-500 mb-1">제목 <span className="text-red-500 ml-0.5">*</span><span className={`ml-auto tabular-nums text-[11px] ${title.length > T365_TITLE_MAX * 0.9 ? "text-amber-600" : "text-slate-400"}`} data-testid="ed-title-count">{title.length} / {T365_TITLE_MAX}</span></label>
               <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={T365_TITLE_MAX} className={`${inputCls} h-10 text-[15px] font-medium`} placeholder={isQna ? "예: 견적서 할인율은 어디서 확인하나요?" : "예: 기프트 세트 링크 접속 방법"} data-testid="ed-title" />
+              {isQna && <p className="sm:hidden mt-1.5 text-[11.5px] text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-2 py-1.5 leading-snug" data-testid="ed-qna-privacy">질문은 다른 Agent 도 볼 수 있습니다 — 고객 이름 · 연락처 · 계약 정보는 쓰지 마세요.</p>}
             </div>
           </div>
           <div className="flex-1 min-h-[340px] flex flex-col border border-slate-300 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-[#2F7B7A]/30 focus-within:border-[#2F7B7A]/50">
@@ -2847,7 +2965,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
             <div className={`flex-1 min-h-0 flex ${mode === "split" ? "divide-x divide-slate-200" : ""}`}>
               {mode !== "preview" && (
                 <textarea ref={ta} value={body} onChange={(e) => setBody(e.target.value)} className="flex-1 min-w-0 w-full px-4 py-3 text-[14.5px] leading-[1.8] focus:outline-none resize-none block min-h-[300px]" data-testid="ed-body"
-                  placeholder={isQna ? "궁금한 점을 자세히 적어 주세요 — 자세할수록 답변이 빠릅니다.\n\n예)\n- 어떤 화면에서: CRM 견적 화면\n- 하려던 일: 할인율 적용\n- 막힌 점: 할인율 칸이 보이지 않습니다\n\n화면 캡처는 오른쪽 「첨부파일」 로 올려 주세요." : "내용을 입력하세요.\n\n예)\n## 접속 방법\n1. CRM 에 로그인합니다\n2. 메뉴에서 **기프트 세트** 를 누릅니다\n> 권한이 없으면 담당자에게 요청해 주세요"}></textarea>
+                  placeholder={isQna ? "궁금한 점을 자세히 적어 주세요 — 자세할수록 답변이 빠릅니다.\n\n예)\n- 어떤 화면에서: CRM 견적 화면\n- 하려던 일: 할인율 적용\n- 막힌 점: 할인율 칸이 보이지 않습니다\n\n화면 캡처는 「첨부파일」 에 올려 주세요." : "내용을 입력하세요.\n\n예)\n## 접속 방법\n1. CRM 에 로그인합니다\n2. 메뉴에서 **기프트 세트** 를 누릅니다\n> 권한이 없으면 담당자에게 요청해 주세요"}></textarea>
               )}
               {mode !== "write" && <div className="flex-1 min-w-0 overflow-y-auto px-5 py-4 bg-white min-h-[300px]" data-testid="ed-preview">{body.trim() ? preview : <p className="text-[13px] text-slate-300">미리 볼 내용이 없습니다.</p>}</div>}
             </div>
@@ -2860,7 +2978,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
 
         {/* 오른쪽 — 설정 */}
         <aside className="md:w-[340px] shrink-0 bg-slate-50/80 border-t md:border-t-0 md:border-l border-slate-200 p-4 space-y-3 md:overflow-y-auto">
-          {!ctx.isAgent && <Card title="게시 옵션" icon={Tags}>
+          {canFlag && <Card title="게시 옵션" icon={Tags}>
             <Switch on={pinned} onChange={setPinned} testid="ed-pin" label="중요 · 상단 고정" desc="게시판 목록 맨 위와 홈 「공지 · 필수」(게시 후 7일)에 보입니다" tint="#D97706" />
             <div className="border-t border-slate-100"></div>
             <Switch on={reqConfirm} onChange={(v) => { touchedReq.current = true; setReqConfirm(v); }} testid="ed-req" label="조회확인 필수" desc="Agent 의 「확인 대기」 목록에 올라가고 확인율을 집계합니다" tint="#C2410C" />
@@ -2884,7 +3002,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
             <label onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); addFiles(e.dataTransfer.files); }}
               className={`flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed px-3 py-4 cursor-pointer text-center transition-colors ${drag ? "border-[#2F7B7A] bg-[#E4F1F0]" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"}`} data-testid="ed-drop">
               <Upload size={18} className={drag ? "text-[#2F7B7A]" : "text-slate-400"} />
-              <span className="text-[12.5px] text-slate-600 font-medium">파일을 끌어다 놓거나 눌러서 선택</span>
+              <span className="text-[12.5px] text-slate-600 font-medium"><span className="hidden md:inline">파일을 끌어다 놓거나 눌러서 선택</span><span className="md:hidden">눌러서 파일 선택</span></span>
               <span className="text-[10.5px] text-slate-400">한 게시물 {T365_FILES_MAX}개 · 파일 하나 {fmtSize(T365_ATTACH_MAX)} · 실행 파일 제외</span>
               <input type="file" multiple onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} className="hidden" data-testid="ed-files" />
             </label>
@@ -2896,11 +3014,11 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
             )}
           </Card>
           <Card title="목록에서 이렇게 보입니다" icon={Eye}>
-            <div className={`rounded-lg border px-3 py-2.5 ${pinned ? "bg-amber-50/70 border-amber-100" : "bg-white border-slate-200"}`} data-testid="ed-card-preview">
+            <div className={`rounded-lg border px-3 py-2.5 ${canFlag && pinned ? "bg-amber-50/70 border-amber-100" : "bg-white border-slate-200"}`} data-testid="ed-card-preview">
               <div className="flex items-center gap-1.5 min-w-0">
-                {pinned && <span className="text-[10px] font-bold px-1 rounded leading-[16px] bg-amber-100 text-amber-800 shrink-0">공지</span>}
+                {canFlag && pinned && <span className="text-[10px] font-bold px-1 rounded leading-[16px] bg-amber-100 text-amber-800 shrink-0">공지</span>}
                 <span className={`truncate text-[13.5px] font-semibold ${title.trim() ? "text-slate-900" : "text-slate-300"}`}>{title.trim() || "제목을 입력하세요"}</span>
-                {reqConfirm && <span className="text-[9.5px] font-bold px-1 rounded leading-[15px] shrink-0" style={{ background: "#FDEEE6", color: "#C2410C" }}>필수</span>}
+                {canFlag && reqConfirm && <span className="text-[9.5px] font-bold px-1 rounded leading-[15px] shrink-0" style={{ background: "#FDEEE6", color: "#C2410C" }}>필수</span>}
                 {allCount > 0 && <Paperclip size={11.5} className="text-slate-400 shrink-0" />}
                 <NewDot />
               </div>
@@ -2912,7 +3030,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
             {isQna ? (
             <ul className="text-[11.5px] text-slate-500 space-y-1.5 leading-snug" data-testid="ed-tips-qna">
               <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>질문은 <b className="text-slate-700">다른 Agent 도 볼 수 있습니다</b> — 고객 이름 · 연락처 · 계약 정보는 쓰지 마세요.</span></li>
-              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>답변이 달리면 Overview 의 Q&A 상자에 <b className="text-slate-700">「새 답변」</b> 으로 표시됩니다.</span></li>
+              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>답변이 달리면 Overview 의 Q&A 상자와 Q&A 게시판에 <b className="text-slate-700">「새 답변」</b> 으로 표시됩니다.</span></li>
               <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>화면 캡처를 첨부하면 더 빨리 답변할 수 있습니다.</span></li>
               <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>올린 질문은 <b>답변이 달리기 전까지</b> 본인만 고치거나 지울 수 있습니다.</span></li>
             </ul>
@@ -2968,7 +3086,8 @@ function ConfirmStatusTab({ ctx, openPost }) {
     const sum = rows.map((x) => ({ 번호: ord.get(x.p.id), 카테고리: (catMap[x.p.Category] || {}).label || x.p.Category, 제목: x.p.Title, "게시일(KST)": fmtDate(x.p.PublishedAt || x.p._created), "조회확인 필수": x.p.RequireConfirm ? "예" : "아니요", 대상: x.s.total, 확인: x.s.done, 미확인: x.s.total - x.s.done, "확인율(%)": x.s.pct, "열람(전 역할)": x.s.viewers }));
     const matrix = agents.map((u) => {
       const o = { 이름: u.Title || "", 메일: u.Email || "", "회사/지점": u.Company || "" };
-      rows.forEach((x, i) => { const r = (readIdx.get(String(x.p.id)) || new Map()).get(normEmail(u.Email)); o[`${i + 1}. ${String(x.p.Title).slice(0, 40)}`] = r && r.ConfirmedAt ? fmtDate(r.ConfirmedAt) : "미확인"; });
+      rows.forEach((x, i) => { const r = (readIdx.get(String(x.p.id)) || new Map()).get(normEmail(u.Email)); const can = !u._perms || canSee(u._perms, "cat:" + x.p.Category);
+        o[`${i + 1}. ${String(x.p.Title).slice(0, 40)}`] = !can ? "대상 아님(게시판 보기 없음)" : r && r.ConfirmedAt ? fmtDate(r.ConfirmedAt) : "미확인"; });
       return o;
     });
     const wb = XLSX.utils.book_new();
@@ -3011,7 +3130,7 @@ function ConfirmStatusTab({ ctx, openPost }) {
           </table>
         </div>
         <div className="px-4 py-2.5 border-t border-slate-100 flex items-center justify-between gap-3 text-xs text-slate-500">
-          <span>총 <b className="text-slate-700 font-semibold">{rows.length}</b>건 · 대상은 사용 중인 Agent 전원</span>
+          <span>총 <b className="text-slate-700 font-semibold">{rows.length}</b>건 · 대상은 그 게시판을 볼 수 있는 사용 중인 Agent</span>
           <Pager page={pageSafe} total={totalPages} onPage={setPage} />
         </div>
       </div>
@@ -3060,7 +3179,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
 
   // 메일 하나에 한 사람 — 같은 메일의 행이 여럿이면 첫 행만 쓰고 표시
   const merged = [];
-  const dupCount = {};
+  const dupCount = Object.create(null);
   users.forEach((r) => {
     const email = normEmail(r.Email); if (!email) return;
     dupCount[email] = (dupCount[email] || 0) + 1;
@@ -3083,7 +3202,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
   const everyone = merged.concat(dirRows);
   const missingRows = merged.filter((p) => p.dirStatus === "missing" || p.dirStatus === "alt");
   const viewCounts = { all: everyone.length, registered: everyone.filter(hasAccess).length, dirOnly: dirRows.length, missing: missingRows.length };
-  const lastLogin = {};
+  const lastLogin = Object.create(null);   // 메일로 찾는 표 — 기본 속성 없는 빈 객체
   (accessRows || []).forEach((r) => { const e = normEmail(r.UserEmail); if (r.EndType !== "접근 차단" && (!lastLogin[e] || r.LoginAt > lastLogin[e])) lastLogin[e] = r.LoginAt; });
   const eff = (p, k) => { const o = overrides[p.email]; return o && k in o ? o[k] : k === "Active" ? p.row.Active !== false : String(p.row[k] || ""); };
   const stored = (p) => permsOf({ ...p.row, Active: true });   // 사용 중지는 「사용」 칸으로 따로 보이므로 권한 칸은 역할 · 예외 기준
@@ -3108,6 +3227,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
   const pageSafe = Math.min(page, totalPages);
   const pageRows = ordered.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
   const dirtyCount = Object.keys(overrides).length;
+  usePendingEdits("users", dirtyCount);
   const counts = T365_ROLES.reduce((m, r) => { m[r] = merged.filter((p) => p.row.Role === r && p.row.Active !== false).length; return m; }, {});
   const listAdmins = merged.filter((p) => p.row.Active !== false && permsOf(p.row).perms.users === "e");
 
@@ -3708,8 +3828,9 @@ function BannerImg({ file, className, alt }) {
   if (!file || err) return <div className={`${className || ""} bg-slate-200`} aria-hidden="true"></div>;
   return src ? <img src={src} alt={alt || ""} className={className} draggable={false} /> : <div className={`${className || ""} bg-slate-200 animate-pulse`} aria-hidden="true"></div>;
 }
-// 배너 아래쪽 게시판 아이콘 줄 — 작성 후 하루(24시간) 안의 새 글 수: 안 읽은 글이 있으면 빨간 숫자(안 읽은 수), 모두 읽었으면 회색 숫자(새 글 수), 하루가 지나면 숫자 없음
-const T365_FRESH_MS = T365_HOME_DAYS * 864e5;   // 배너 아이콘 숫자 — 최근 7일 새 글(안 읽음 빨강 · 모두 읽음 회색)
+// 배너 아래쪽 게시판 아이콘 줄 — 최근 7일 안에 올라온 글 중 안 읽은 글 수(빨간 숫자). 읽으면 줄고 다 읽으면 사라진다
+// (예전에는 다 읽으면 회색으로 「새 글 수」 를 보여 줘서, 읽었더니 숫자가 커지는 것처럼 보였다 — 사용성 점검 10-12)
+const T365_FRESH_MS = T365_HOME_DAYS * 864e5;
 function BoardIconStrip({ ctx, onGo }) {
   const { posts, cats, readIdx, me } = ctx;
   const since = Date.now() - T365_FRESH_MS;
@@ -3719,10 +3840,10 @@ function BoardIconStrip({ ctx, onGo }) {
       {cats.map((c) => {
         const fresh = posts.filter((p) => p.Category === c.key && postTs(p) >= since);
         const unread = fresh.filter((p) => !read(p)).length;
-        const n = unread || fresh.length; const red = unread > 0;
+        const n = unread; const red = unread > 0;
         const I = c.icon || FileText;
         return (
-          <button key={c.key} onClick={() => onGo(c.key)} data-bicon={c.key} title={`${c.label}${n ? ` — 최근 7일 새 글 ${fresh.length}건${red ? ` · 안 읽음 ${unread}건` : " · 모두 읽음"}` : ""}`}
+          <button key={c.key} onClick={() => onGo(c.key)} data-bicon={c.key} title={`${c.label}${n ? ` — 최근 7일 안 읽은 새 글 ${unread}건` : fresh.length ? ` — 최근 7일 새 글 ${fresh.length}건 · 모두 읽음` : ""}`}
             className="group shrink-0 min-w-[60px] px-2 md:px-2.5 flex flex-col items-center gap-1 pt-2 pb-1 rounded-xl hover:bg-white/10 transition-colors">
             <span className="relative w-9 h-9 md:w-10 md:h-10 rounded-xl flex items-center justify-center bg-white shadow-md shadow-black/20 transition-transform group-hover:-translate-y-0.5">
               <I size={17} style={{ color: c.color }} />
@@ -3848,7 +3969,7 @@ function CatStyleModal({ ctx, d, onApply, onClose }) {
   const ic = parseCatIcon(icon);
   const pal = T365_PALETTE.find((x) => x.color === color) || { color: def.color, soft: def.soft };
   const preview = { icon: ic ? ic.icon : def.icon, color: pal.color, soft: pal.soft, label: d.label };
-  const staff = ctx.users.filter((u) => u.Active !== false && u.Role !== "Agent" && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normEmail(u.Email)) && !contacts.some((c) => c.email === normEmail(u.Email)))
+  const staff = ctx.users.filter((u) => u.Active !== false && u.Role !== "Agent" && T365_MAIL_RE.test(normEmail(u.Email)) && !contacts.some((c) => c.email === normEmail(u.Email)))
     .sort((a, b) => String(a.Title || "").localeCompare(String(b.Title || "")));
   async function upload(e) {
     const f = (e.target.files || [])[0]; e.target.value = "";
@@ -3863,7 +3984,7 @@ function CatStyleModal({ ctx, d, onApply, onClose }) {
   }
   function addContact(email, name) {
     email = normEmail(email);
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { uiAlert("메일 주소를 확인해 주세요."); return; }
+    if (!T365_MAIL_RE.test(email)) { uiAlert("메일 주소를 확인해 주세요."); return; }
     if (contacts.some((c) => c.email === email)) return;
     if (contacts.length >= T365_CONTACT_MAX) { uiAlert(`담당자는 ${T365_CONTACT_MAX}명까지 지정할 수 있습니다.`); return; }
     setContacts((p) => [...p, { name: String(name || "").trim().slice(0, 60) || email.split("@")[0], email }]);
@@ -3930,7 +4051,7 @@ function CatStyleModal({ ctx, d, onApply, onClose }) {
         <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-slate-300">취소</button>
         <button onClick={() => onApply({ icon, color, contacts })} className="px-5 py-2 text-sm rounded-lg text-white font-medium" style={{ background: BRAND.accent }} data-testid="cs-apply">적용</button>
       </div>
-      <p className="text-[11px] text-slate-400 mt-2 text-right">적용한 뒤 표 아래 「반영」을 눌러야 저장됩니다.</p>
+      <p className="text-[11px] text-slate-400 mt-2 text-right">적용한 뒤 게시판 표 오른쪽 위 「반영」을 눌러야 저장됩니다.</p>
     </Modal>
   );
 }
@@ -3950,9 +4071,10 @@ function CategoriesTab({ ctx, catRows, bannerRows, linkRows, listStatus, reload 
   const [saving, setSaving] = useState(false);
   const [styling, setStyling] = useState(null);
   useEffect(() => { setDraft(mergeCategories(catRows, true).map(catDraftOf)); }, [catRows]);
-  const counts = {}; ctx.posts.forEach((p) => { counts[p.Category] = (counts[p.Category] || 0) + 1; });
+  const counts = Object.create(null); ctx.posts.forEach((p) => { counts[p.Category] = (counts[p.Category] || 0) + 1; });
   const sameC = (a, b) => JSON.stringify(a || []) === JSON.stringify(b || []);
   const dirty = draft.filter((d) => { const b = base.find((x) => x.key === d.key); return b && (b.label !== d.label || b.desc !== d.desc || Number(b.order) !== Number(d.order) || b.active !== d.active || (b.iconKey || "") !== d.icon || (b.colorKey || "") !== d.color || !sameC(b.contacts, d.contacts)); });
+  usePendingEdits("categories", dirty.length);
   const set = (key, k, v) => setDraft((prev) => prev.map((d) => (d.key === key ? { ...d, [k]: v } : d)));
   const sorted = [...draft].sort((a, b) => a.order - b.order || a.key.localeCompare(b.key));
   // 위 · 아래로 — 이웃과 자리를 바꾸고 10 단위로 다시 번호
@@ -4459,7 +4581,7 @@ function AccessLogTab({ ctx }) {
     const fi = kstDayStartIso(f), ti = kstDayStartIso(dayAdd(t, 1));
     try {
       let list;
-      try { list = await tListAll(T365_LISTS.access, `&$filter=fields/LoginAt ge '${fi}' and fields/LoginAt lt '${ti}'`); }
+      try { list = await tListAll(T365_LISTS.access, `&$filter=${encodeURIComponent(`fields/LoginAt ge '${fi}' and fields/LoginAt lt '${ti}'`)}`); }
       catch (e) { if (isMissingListError(e)) throw e; list = await tListAll(T365_LISTS.access); }   // LoginAt 인덱스가 없을 때 — 전체를 읽어 화면에서 거른다
       setRows(list.filter((r) => r.LoginAt && r.LoginAt >= fi && r.LoginAt < ti).sort((a, b) => String(b.LoginAt).localeCompare(String(a.LoginAt))));
       setLoaded(`${f} ~ ${t}`); setPage(1);
@@ -4475,13 +4597,14 @@ function AccessLogTab({ ctx }) {
   const view = (rows || []).map(enrich)
     .filter((r) => !roleF || r.Role === roleF).filter((r) => !statusF || r.st.label === statusF)
     .filter((r) => !qq || [r.UserEmail, r.UserName, r.Company, r.Device].some((v) => String(v || "").toLowerCase().includes(qq)));
-  const byUser = Object.values(view.reduce((m, r) => {
+  // 사람별 묶음 — Map 으로(메일 칸에 「__proto__」 같은 값이 와도 객체 기본 속성을 건드리지 않게)
+  const byUser = [...view.reduce((m, r) => {
     const k = normEmail(r.UserEmail); const u = uMap.get(k);
-    const o = m[k] || (m[k] = { email: k, name: r.UserName || (u && u.Title) || k, company: r.Company || (u && u.Company) || "", role: r.Role, n: 0, last: null, lastEnd: null, logouts: 0, inferred: 0, total: 0 });
+    let o = m.get(k); if (!o) { o = { email: k, name: r.UserName || (u && u.Title) || k, company: r.Company || (u && u.Company) || "", role: r.Role, n: 0, last: null, lastEnd: null, logouts: 0, inferred: 0, total: 0 }; m.set(k, o); }
     o.n++; o.total += Math.max(0, r.dur); if (r.st.label === "로그아웃") o.logouts++; if (r.st.inferred) o.inferred++;
     if (!o.last || r.LoginAt > o.last.LoginAt) o.last = r;
     return m;
-  }, {})).sort((a, b) => String(b.last.LoginAt).localeCompare(String(a.last.LoginAt)));
+  }, new Map()).values()].sort((a, b) => String(b.last.LoginAt).localeCompare(String(a.last.LoginAt)));
   const list = mode === "user" ? byUser : view;
   const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
   const pageSafe = Math.min(page, totalPages);
@@ -4744,7 +4867,7 @@ function HelpFab({ ctx }) {
               <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-slate-800">자료 · 권한 · 사용법</span><span className="block text-[11.5px] text-slate-400">게시판별 담당자{withC ? ` · ${withC}개 게시판` : ""}</span></span>
               <ChevronRight size={15} className="text-slate-300" />
             </button>
-            <a href={`mailto:${t365ItMail()}`} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50" data-testid="help-it">
+            <a href={mailtoOf(t365ItMail())} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50" data-testid="help-it">
               <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-slate-100 text-slate-600"><ShieldCheck size={15} /></span>
               <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-slate-800">로그인 · 시스템 오류</span><span className="block text-[11.5px] text-slate-400 truncate">{t365ItMail()}</span></span>
               <ChevronRight size={15} className="text-slate-300" />
@@ -4762,7 +4885,7 @@ function HelpFab({ ctx }) {
 function ContactModal({ ctx, onClose }) {
   const withC = ctx.cats.filter((c) => (c.contacts || []).length);
   const Person = ({ name, email, sub, color }) => (
-    <a href={`mailto:${normEmail(email)}`} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 min-w-0" data-contact-mail={normEmail(email)}>
+    <a href={mailtoOf(email)} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 min-w-0" data-contact-mail={normEmail(email)}>
       <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0" style={{ background: color || BRAND.accent }}>{String(name || email || "?").trim().slice(0, 1).toUpperCase()}</div>
       <div className="min-w-0 flex-1"><div className="text-[13px] font-medium text-slate-800 truncate">{name || email}</div><div className="text-[11.5px] text-slate-400 truncate">{sub || normEmail(email)}</div></div>
       <Mail size={15} className="text-slate-400 shrink-0" />
@@ -4812,8 +4935,9 @@ function App({ boot }) {
   const init = parseHash();
   const [tab, setTabRaw] = useState(init.tab);
   const [openPostId, setOpenPostRaw] = useState(init.post);
-  const [posts, setPosts] = useState([]);
+  const [rawPosts, setPosts] = useState([]);
   const [postsErr, setPostsErr] = useState("");
+  const [softErr, setSoftErr] = useState("");   // 한 번 읽은 뒤 잠깐 못 읽은 목록 — 이전 내용을 보여 주는 중(위쪽 노란 띠 · 다시 불러오기)
   const [reads, setReads] = useState([]);
   const [users, setUsers] = useState(boot.users || []);
   const [usersLoaded, setUsersLoaded] = useState(!!boot.usersLoaded);   // 사용자 목록을 제대로 읽었는지 — 못 읽으면 관리 화면은 막는다(fail-closed)
@@ -4844,10 +4968,22 @@ function App({ boot }) {
   const myWriterCats = myRow ? catKeysOf(myRow.WriterCategories) : [];
   const allCats = mergeCategories(catRows, true);
   const cats = allCats.filter((c) => c.active && canView("cat:" + c.key));   // 보기 권한이 있는 게시판만
-  const catMap = Object.fromEntries(cats.map((c) => [c.key, c]));
-  const agents = users.filter((u) => u.Role === "Agent" && u.Active !== false && normEmail(u.Email))
-    .filter((u, i, a) => a.findIndex((x) => normEmail(x.Email) === normEmail(u.Email)) === i);
-  const readIdx = useMemo(() => indexReads(reads), [reads]);
+  const catMap = Object.assign(Object.create(null), Object.fromEntries(cats.map((c) => [c.key, c])));   // 기본 속성 없는 표 — 게시물 Category 가 「constructor」 같은 값이어도 게시판으로 잘못 잡히지 않게
+  // 조회확인 대상 Agent — 사용 중인 Agent 행(메일 중복 제외). _perms: 그 사람의 메뉴 권한(게시판을 볼 수 없는 Agent 는 그 게시판 글의 대상에서 뺀다)
+  const agents = useMemo(() => users.filter((u) => u.Role === "Agent" && u.Active !== false && normEmail(u.Email))
+    .filter((u, i, a) => a.findIndex((x) => normEmail(x.Email) === normEmail(u.Email)) === i)
+    .map((u) => ({ ...u, _perms: permsOf(u).perms })), [users]);
+  // 화면에 쓰는 게시물 — Q&A 질문과 Agent 가 쓴 글은 공지 · 필수가 될 수 없다. 목록을 직접 고쳐(IsPinned · RequireConfirm) 넣어도
+  // 홈 「공지 · 필수」 · 확인 대기 · 확인율에 끼지 않게 여기서 한 번 거른다. Agent 판단은 글의 AuthorEmail 과 SharePoint 작성 계정 둘 다
+  const agentEmails = useMemo(() => {
+    const ag = new Set(), staff = new Set();
+    users.forEach((u) => { const e = normEmail(u.Email); if (!e) return; if (u.Role === "Agent") ag.add(e); else if (u.Active !== false && T365_ROLES.includes(u.Role)) staff.add(e); });
+    staff.forEach((e) => ag.delete(e)); return ag;
+  }, [users]);
+  const posts = useMemo(() => rawPosts.map((p) => ((p.IsPinned || p.RequireConfirm) && (p.Category === "qna" || agentEmails.has(normEmail(p.AuthorEmail)) || (p._createdBy && agentEmails.has(p._createdBy)))
+    ? { ...p, IsPinned: false, RequireConfirm: false } : p)), [rawPosts, agentEmails]);
+  const knownEmails = useMemo(() => new Set(users.map((u) => normEmail(u.Email)).filter(Boolean)), [users]);
+  const readIdx = useMemo(() => indexReads(reads, knownEmails), [reads, knownEmails]);
   const canWrite = (k) => !!catMap[k] && P["cat:" + k] === "e";
   // 그 게시판 편집 권한 + (관리자 역할이거나 본인 글). 답변이 달린 Q&A 질문은 질문자도 고치거나 지울 수 없다(답변과 어긋나거나 다른 Agent 가 볼 답이 사라지지 않게) — 관리자만
   const canEditPost = (p) => canWrite(p.Category) && (isAdmin || (normEmail(p.AuthorEmail) === normEmail(me.email) && !(p.Category === "qna" && qnaAnswered(p))));
@@ -4857,18 +4993,25 @@ function App({ boot }) {
   const qnaDuty = !isAgent && canWrite("qna") && (!qnaContacts.length || qnaContacts.includes(normEmail(me.email)));
 
   const reloadSeq = useRef(0);
+  const loadedRef = useRef(false);     // 게시물을 한 번이라도 읽었는지 — 그 뒤의 일시 오류는 이전 내용 유지
+  const accessAtRef = useRef(0);       // 접속 기록 · 목록 점검을 마지막으로 읽은 때
   async function reload() {
     const seq = ++reloadSeq.current;   // 겹쳐 부른 경우 늦게 도착한 옛 응답이 새 응답을 덮지 않게 — 마지막 호출만 반영
     setLoading(true);
     const wrap = (pr) => pr.then((v) => ({ v }), (e) => ({ e }));
     const [p, r, u, c, bn, lk] = await Promise.all([wrap(tListAll(T365_LISTS.posts)), wrap(tLoadReads(me0.email)), wrap(tListAll(T365_LISTS.users)), wrap(tListAll(T365_LISTS.categories)), wrap(tListAll(T365_LISTS.banners)), wrap(tListAll(T365_LISTS.links))]);
     if (seq !== reloadSeq.current) return;
-    if (p.e) { setPosts([]); setPostsErr(isMissingListError(p.e) ? "missing" : p.e.message); } else { setPosts(p.v); setPostsErr(""); }
-    if (r.e) { setReads([]); console.warn("[Training365] 조회 기록 읽기 실패:", r.e.message); } else setReads(r.v);
-    if (c.e) setCatRows([]); else setCatRows(c.v);
-    if (bn.e) setBannerRows([]); else setBannerRows(bn.v);   // 배너 목록은 선택 — 없으면 기본 배너
-    if (lk.e) setLinkRows([]); else setLinkRows(lk.v);       // 바로가기 목록도 선택 — 없으면 사이드바에 묶음 없음
-    if (u.e) { setUsersLoaded(false); console.warn("[Training365] 사용자 목록 읽기 실패:", u.e.message); }
+    // 한 번 읽은 뒤에 잠깐 실패(요청 제한 · 네트워크)하면 비우지 않고 이전 내용을 그대로 둔다 — 비우면 꺼 둔 게시판이 다시 보이고,
+    // 모두 「안 읽음 · 미확인」 이 되고, 관리자가 관리자 권한을 잃는다. 목록이 정말 없을 때(없는 목록)만 비운다
+    const was = loadedRef.current;
+    const gone = (x) => !!x.e && isMissingListError(x.e);
+    const soft = [];
+    if (p.e) { if (gone(p) || !was) { setPosts([]); setPostsErr(gone(p) ? "missing" : p.e.message); } else soft.push("게시물"); } else { setPosts(p.v); setPostsErr(""); }
+    if (r.e) { console.warn("[Training365] 조회 기록 읽기 실패:", r.e.message); if (gone(r) || !was) setReads([]); else soft.push("조회 기록"); } else setReads(r.v);
+    if (c.e) { if (gone(c) || !was) setCatRows([]); else soft.push("카테고리"); } else setCatRows(c.v);
+    if (bn.e) { if (gone(bn) || !was) setBannerRows([]); else soft.push("배너"); } else setBannerRows(bn.v);   // 배너 목록은 선택 — 없으면 기본 배너
+    if (lk.e) { if (gone(lk) || !was) setLinkRows([]); else soft.push("바로가기"); } else setLinkRows(lk.v);   // 바로가기 목록도 선택 — 없으면 사이드바에 묶음 없음
+    if (u.e) { console.warn("[Training365] 사용자 목록 읽기 실패:", u.e.message); if (!was) setUsersLoaded(false); else soft.push("사용자"); }
     else {
       setUsers(u.v); setUsersLoaded(true);
       // 다시 읽은 목록에서 내 행이 사라졌거나 사용 중지 · 역할 없음이면(비상 관리자 제외) 바로 막는다
@@ -4877,17 +5020,22 @@ function App({ boot }) {
         if (!mine || !T365_ROLES.includes(mine.Role)) setDenied(!mine ? "not-registered" : "no-role");
       }
     }
+    setSoftErr(soft.join(" · "));   // 알림(토스트)은 곧 다른 알림에 덮이므로 화면 위 띠로 — 다음에 제대로 읽으면 사라진다
+    if (!p.e) loadedRef.current = true;
     const freshMine = !u.e ? u.v.find((x) => boot.me.ids.includes(normEmail(x.Email)) && x.Active !== false) : boot.myRow;
     const fp = permsOf(freshMine, { bootAdmin: boot.isBootAdmin }).perms;
-    if (canSee(fp, "access") || canSee(fp, "users") || boot.isBootAdmin) {
+    // 접속 기록(사용자 화면의 마지막 접속) · 목록 점검은 관리 쪽 사람에게만, 저장할 때마다가 아니라 5분에 한 번
+    if ((canSee(fp, "access") || canSee(fp, "users") || boot.isBootAdmin) && Date.now() - accessAtRef.current > 5 * 60e3) {
+      accessAtRef.current = Date.now();
       const since = new Date(Date.now() - 45 * 864e5).toISOString();
-      tListAll(T365_LISTS.access, `&$filter=fields/LoginAt ge '${since}'`).catch((e) => (isMissingListError(e) ? [] : tListAll(T365_LISTS.access)))
-        .then((v) => setAccessRows(v || []), () => setAccessRows([]));
+      // 실패하면 목록 전체를 대신 받지 않는다(요청 제한 중에 수만 줄을 받게 되므로) — 이전 값을 두고 다음 새로고침에서 다시
+      tListAll(T365_LISTS.access, `&$filter=${encodeURIComponent(`fields/LoginAt ge '${since}'`)}`)
+        .then((v) => setAccessRows(v || []), (e) => { if (isMissingListError(e)) setAccessRows([]); else { accessAtRef.current = 0; setAccessRows((prev) => prev || []); } });
       tCheckLists().then(setListStatus, () => setListStatus(null));
     }
     setLoading(false); setHasLoadedOnce(true);
   }
-  useEffect(() => { reload(); }, []);
+  useEffect(() => { t365PurgeOthers(me0.email); reload(); }, []);
 
   function setTab(t, post = null, push = true) {
     setTabRaw(t); setOpenPostRaw(post);
@@ -4896,6 +5044,16 @@ function App({ boot }) {
     const m = document.querySelector("main"); if (m) m.scrollTop = 0;
   }
   const setOpenId = (id) => setTab(tab, id ? String(id) : null);
+  // 사이드바 이동 — 관리 화면에 「반영」 하지 않은 변경이 있으면 먼저 묻는다(그냥 옮기면 말없이 사라지던 문제)
+  async function goTab(id) {
+    const n = pendingEditCount();
+    if (id !== tab && n > 0 && !(await uiConfirm(`「반영」 하지 않은 변경 ${n}건이 있습니다.\n다른 화면으로 옮기면 이 변경은 저장되지 않고 사라집니다. 옮길까요?`, { title: "반영하지 않은 변경", okText: "저장하지 않고 이동", cancelText: "머무르기", danger: true }))) return;
+    setTab(id);
+  }
+  useEffect(() => {   // 새로고침 · 창 닫기도 브라우저가 한 번 묻게
+    const h = (e) => { if (pendingEditCount() > 0) { e.preventDefault(); e.returnValue = ""; } };
+    window.addEventListener("beforeunload", h); return () => window.removeEventListener("beforeunload", h);
+  }, []);
   const openPost = (p) => setTab(catMap[p.Category] ? "cat:" + p.Category : "all", String(p.id));
   const openSearch = (q, filter) => { if (!canView("all")) return; setBoardSeed({ tab: "all", q: q || "", filter: filter || "all", n: Date.now() }); setTab("all"); };
   useEffect(() => { const on = () => { const x = parseHash(); setTabRaw(x.tab); setOpenPostRaw(x.post); }; window.addEventListener("popstate", on); return () => window.removeEventListener("popstate", on); }, []);
@@ -4930,7 +5088,7 @@ function App({ boot }) {
   const showSideTip = (e, label) => { if (!railCollapsed) return; const r = e.currentTarget.getBoundingClientRect(); setSideTip({ label, y: r.top + r.height / 2 }); };
   useEffect(() => { setSideTip(null); }, [sideCollapsed]);
 
-  if (denied) return <AccessDenied ident={boot.me} reason={denied} contacts={[]} />;
+  if (denied) return <AccessDenied ident={boot.me} reason={denied} contact={T365_MAILS.contact} />;   // 쓰는 중에 막힌 경우도 처음 화면과 같은 문의 메일(TRAINING365_CONTACT)
 
   const myRead = (p) => (readIdx.get(String(p.id)) || new Map()).get(normEmail(me.email));
   // 사이드바 숫자 — 역할마다 「할 일」 이 먼저(진한 색): Agent 는 확인할 필수(주황) · 내 질문의 새 답변(파랑), 답변 담당자는 Q&A 답변 대기(주황).
@@ -4946,6 +5104,7 @@ function App({ boot }) {
   };
   const homeNav = [{ id: "overview", label: "Overview", icon: LayoutDashboard }, { id: "all", label: "전체 게시물", icon: LayoutList }].filter((n) => n.id === "overview" || canView(n.id));
   const boardNav = cats.map((c) => ({ id: "cat:" + c.key, label: c.label, icon: c.icon || FileText, badge: badgeFor(c.key) }));
+  const todoTotal = boardNav.reduce((a, n) => a + (n.badge && n.badge.tone !== "quiet" ? n.badge.n : 0), 0);   // 할 일(색 숫자) 합 — 휴대폰 메뉴 단추의 점
   const statusNav = canView("status") ? [{ id: "status", label: "조회확인 현황", icon: BarChart3 }] : [];
   const adminNav = [
     { id: "users", label: "사용자 · 권한 관리", icon: Users }, { id: "categories", label: "게시판 · 배너 · 바로가기", icon: Tags },
@@ -5006,12 +5165,12 @@ function App({ boot }) {
                     onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = "#B7C0D1"; setSideTip(null); }}>
                     <span className="w-[22px] h-[22px] -mx-[2.5px] rounded-md bg-white flex items-center justify-center shrink-0 shadow-sm shadow-black/20"><n.icon size={13} style={{ color: n.color }} /></span>
                     {!railCollapsed && <span className="leading-snug flex-1 truncate">{n.label}</span>}
-                    {!railCollapsed && <ExternalLink size={12.5} className="shrink-0 opacity-0 group-hover:opacity-70 transition-opacity" />}
+                    {!railCollapsed && <ExternalLink size={12.5} className="shrink-0 opacity-40 group-hover:opacity-80 transition-opacity" aria-hidden="true" />}{/* 늘 옅게 보이게 — 게시판과 달리 새 창으로 열린다는 표시(휴대폰은 마우스를 올릴 수 없으니) */}
                   </a>
                 );
                 const active = tab === n.id;
                 return (
-                  <button key={n.id} data-nav={n.id} aria-label={n.badge ? `${n.label} — ${n.badge.title} ${n.badge.n}건` : n.label} onClick={() => { setSideTip(null); setTab(n.id); if (isMobile) setDrawerOpen(false); }}
+                  <button key={n.id} data-nav={n.id} aria-label={n.badge ? `${n.label} — ${n.badge.title} ${n.badge.n}건` : n.label} onClick={() => { setSideTip(null); goTab(n.id); if (isMobile) setDrawerOpen(false); }}
                     className="relative w-full flex items-center text-left gap-2.5 px-3 py-2.5 rounded-lg text-sm mb-0.5 transition-colors whitespace-nowrap min-h-[40px]"
                     style={{ backgroundColor: active ? BRAND.navySoft : "transparent", color: active ? "#fff" : "#B7C0D1", borderLeft: active ? `3px solid ${BRAND.accent}` : "3px solid transparent" }}
                     onMouseEnter={(e) => { if (!active) e.currentTarget.style.backgroundColor = BRAND.navyHover; showSideTip(e, n.label); }}
@@ -5059,7 +5218,8 @@ function App({ boot }) {
         <div className="h-14 shrink-0 bg-white border-b border-slate-100 flex items-center justify-between gap-2 px-4 md:px-6">
           <div className="flex items-center gap-2 text-sm text-slate-400 min-w-0">
             {isMobile ? (
-              <button onClick={() => setDrawerOpen(true)} title="메뉴 열기" aria-label="메뉴 열기" aria-expanded={drawerOpen} className="shrink-0 -ml-1.5 w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"><Menu size={20} /></button>
+              <button onClick={() => setDrawerOpen(true)} title={todoTotal ? `메뉴 열기 — 할 일 ${todoTotal}건` : "메뉴 열기"} aria-label="메뉴 열기" aria-expanded={drawerOpen} className="relative shrink-0 -ml-1.5 w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"><Menu size={20} />
+                {todoTotal > 0 && <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full ring-2 ring-white" style={{ background: "#EA580C" }} data-testid="menu-todo-dot" aria-hidden="true"></span>}</button>
             ) : (
               <button onClick={toggleSide} title={sideCollapsed ? "메뉴 펼치기" : "메뉴 접기"} aria-label={sideCollapsed ? "메뉴 펼치기" : "메뉴 접기"} aria-expanded={!sideCollapsed} className="shrink-0 -ml-2 w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors">
                 {sideCollapsed ? <ArrowRightFromLine size={17} /> : <ArrowLeftToLine size={17} />}
@@ -5087,13 +5247,19 @@ function App({ boot }) {
               <PageHeader icon={meta[0]} title={cur.label} subtitle={meta[1]} tint={meta[2]} right={curCat && curCat.contacts && curCat.contacts.length ? (
                 <div className="hidden sm:flex items-center gap-1.5 text-[12px] text-slate-500" data-testid="board-contacts">
                   <span className="text-slate-400">문의</span>
-                  {curCat.contacts.slice(0, 2).map((c) => <a key={c.email} href={`mailto:${c.email}`} title={c.email} className="inline-flex items-center gap-1.5 h-8 pl-1 pr-2.5 rounded-full border border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm"><span className="w-6 h-6 rounded-full flex items-center justify-center text-[10.5px] font-bold text-white" style={{ background: curCat.color }}>{String(c.name || c.email).slice(0, 1).toUpperCase()}</span><span className="text-slate-700 max-w-[110px] truncate">{c.name}</span></a>)}
+                  {curCat.contacts.slice(0, 2).map((c) => <a key={c.email} href={mailtoOf(c.email)} title={c.email} className="inline-flex items-center gap-1.5 h-8 pl-1 pr-2.5 rounded-full border border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm"><span className="w-6 h-6 rounded-full flex items-center justify-center text-[10.5px] font-bold text-white" style={{ background: curCat.color }}>{String(c.name || c.email).slice(0, 1).toUpperCase()}</span><span className="text-slate-700 max-w-[110px] truncate">{c.name}</span></a>)}
                   {curCat.contacts.length > 2 && <button onClick={() => setContactOpen(true)} className="h-8 px-2.5 rounded-full border border-slate-200 bg-white text-slate-500 hover:text-slate-800">+{curCat.contacts.length - 2}</button>}
                 </div>) : null} />
             )}
             {showSetup && <SetupNotice status={listStatus} infoToo={tab === "overview" || T365_ADMIN_TABS.includes(tab)} />}
             {!showSetup && postsErr && (
               <div className="rounded-xl border px-4 py-3 mb-5 text-sm bg-amber-50 border-amber-200 text-amber-900 flex items-center gap-2" data-testid="board-unavailable"><AlertTriangle size={16} className="text-amber-500 shrink-0" />게시판을 준비하고 있습니다. 잠시 후 다시 확인해 주세요.</div>
+            )}
+            {softErr && hasLoadedOnce && (
+              <div className="rounded-xl border px-4 py-2.5 mb-4 text-[13px] bg-amber-50 border-amber-200 text-amber-900 flex items-center gap-2" role="status" data-testid="soft-error">
+                <AlertTriangle size={15} className="text-amber-500 shrink-0" /><span className="min-w-0 flex-1">잠시 {softErr} 목록을 읽지 못해 이전 내용을 그대로 보여 드립니다.</span>
+                <button onClick={() => reload()} disabled={loading} className="h-7 px-2.5 rounded-md text-[12px] font-semibold bg-white border border-amber-200 hover:bg-amber-100 disabled:opacity-50 shrink-0" data-testid="soft-error-retry">다시 불러오기</button>
+              </div>
             )}
             {!hasLoadedOnce ? (
               <div className="bg-white rounded-xl border border-slate-200 py-16 text-center text-slate-400 text-sm"><div className="w-6 h-6 mx-auto mb-2 rounded-full border-2 border-slate-200 animate-spin" style={{ borderTopColor: BRAND.accent }}></div>불러오는 중...</div>
@@ -5120,10 +5286,10 @@ function App({ boot }) {
       {contactOpen && <ContactModal ctx={ctx} onClose={() => setContactOpen(false)} />}
       {!contactOpen && <HelpFab ctx={ctx} />}
       {/* 도움말에서 연 질문 창 — 게시판으로 옮기지 않는다. 올리면 Overview · 전체 게시물 · Q&A 에서는 그 자리에서 글을 열고, 그 밖의 화면에서는 알림만 */}
-      {asking && <PostEditor ctx={ctx} defaultCat="qna" onClose={() => setAsking(false)} onSaved={async (id) => {
+      {asking && <PostEditor ctx={ctx} defaultCat="qna" onClose={() => setAsking(false)} onSaved={async (id, savedCat) => {
         setAsking(false); await reload();
-        const here = tab === "overview" || tab === "all" || tab === "cat:qna";
-        toast(here ? "질문을 올렸습니다" : "질문을 올렸습니다 — 답변이 달리면 Overview 의 Q&A 상자와 사이드바에 표시됩니다");
+        const here = tab === "overview" || tab === "all" || tab === `cat:${savedCat || "qna"}`;   // 창에서 다른 게시판을 골랐으면 그 게시판 화면일 때만 연다
+        toast(savedCat && savedCat !== "qna" ? savedToast(false, savedCat) : here ? "질문을 올렸습니다" : "질문을 올렸습니다 — 답변이 달리면 Overview 의 Q&A 상자와 사이드바에 표시됩니다");
         if (here && id) setTab(tab, String(id));
       }} />}
       {loading && hasLoadedOnce && <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[80] bg-slate-800 text-white text-xs px-3 py-1.5 rounded-full shadow-lg" role="status">새로 불러오는 중...</div>}
@@ -5156,7 +5322,7 @@ function AccessDenied({ ident, reason, contact }) {
             </>}
           </div>
         </div>
-        <div style={{ fontSize: ".95rem", color: "#94a3b8", marginBottom: 26 }}>문의: <a href={`mailto:${mail}`} style={{ color: "#0078d4", textDecoration: "none" }} data-testid="denied-contact">{mail}</a></div>
+        <div style={{ fontSize: ".95rem", color: "#94a3b8", marginBottom: 26 }}>문의: <a href={mailtoOf(mail)} style={{ color: "#0078d4", textDecoration: "none" }} data-testid="denied-contact">{mail}</a></div>
         {retry ? <button onClick={() => window.location.reload()} style={btn}>🔄 다시 시도</button>
           : internal ? <a href="https://aps.startruckkorea.com/" target="_self" style={btn} data-testid="denied-back"><span style={{ fontSize: "1.15rem", lineHeight: 1 }}>📬</span><span>돌아가기</span></a>
           : <button onClick={t365Logout} style={btn} data-testid="denied-back" title="로그아웃하고 처음 화면으로"><span style={{ fontSize: "1.15rem", lineHeight: 1 }}>📬</span><span>돌아가기</span></button>}
