@@ -2380,6 +2380,21 @@ function PostModalShell({ onClose, children, label, suspended, narrow, panelClas
     </div>
   );
 }
+// 첨부한 동영상(mp4 · webm · mov · m4v) — 글 보기에서 바로 재생. 처음에는 표지(이름 · 크기)만, 누르면 그때 내려받기 주소를 받아 스트리밍
+const isVideoFile = (f) => T365_VIDEO_EXT.includes(fileExt(f && f.name));
+function AttachedVideo({ f }) {
+  const [src, setSrc] = useState(""); const [busy, setBusy] = useState(false);
+  async function play() { if (busy) return; setBusy(true); try { setSrc(await tFileUrl(f)); } catch (e) { uiAlert(`동영상을 열 수 없습니다 — ${e.message}`); } setBusy(false); }
+  return src ? (
+    <figure className="m-0"><video src={src} controls autoPlay playsInline preload="metadata" className="w-full aspect-video rounded-xl bg-black" data-video-player={f.itemId}></video>
+      <figcaption className="mt-1.5 text-[12px] text-slate-500 truncate">{f.name} · {fmtSize(f.size)}</figcaption></figure>
+  ) : (
+    <button onClick={play} className="group relative w-full aspect-video rounded-xl overflow-hidden bg-gradient-to-br from-slate-800 to-slate-950 text-white flex flex-col items-center justify-center gap-3" data-video={f.itemId} title={`${f.name} 재생`}>
+      <span className="w-16 h-16 rounded-full bg-white/15 group-hover:bg-white/25 backdrop-blur flex items-center justify-center transition-colors">{busy ? <span className="w-6 h-6 rounded-full border-2 border-white/40 border-t-white animate-spin"></span> : <Play size={28} className="ml-1" fill="currentColor" />}</span>
+      <span className="text-[13px] text-white/85 px-4 truncate max-w-full">{f.name} · {fmtSize(f.size)}</span>
+    </button>
+  );
+}
 function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, suspended }) {
   const { me, catMap, readIdx } = ctx;
   const cat = catMap[post.Category];
@@ -2494,6 +2509,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
           {/* 본문 */}
           <section className="flex-1 px-5 md:px-10 py-6 md:py-7 min-h-[180px]">
             <div className="max-w-[760px]" data-testid="post-body"><RichText text={post.Body} /></div>
+            {files.some(isVideoFile) && <div className="max-w-[760px] mt-7 space-y-4" data-testid="attached-videos">{files.filter(isVideoFile).map((f) => <AttachedVideo key={f.itemId} f={f} />)}</div>}
             {(vurl || vfile) && (
               <div className="max-w-[760px] mt-7">
                 {yt ? (
@@ -2951,9 +2967,9 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
   function addFiles(list) {
     list = Array.from(list || []);
     const bad = list.filter((f) => T365_BLOCKED_EXT.includes(fileExt(f.name)));
-    const big = list.filter((f) => f.size > T365_ATTACH_MAX);
+    const big = list.filter((f) => f.size > (T365_VIDEO_EXT.includes(fileExt(f.name)) ? T365_VIDEO_MAX : T365_ATTACH_MAX));
     if (bad.length) uiAlert(`실행 파일 · 웹 문서 형식은 올릴 수 없습니다: ${bad.map((f) => f.name).join(", ")}`);
-    if (big.length) uiAlert(`파일 하나는 ${fmtSize(T365_ATTACH_MAX)} 까지 올릴 수 있습니다: ${big.map((f) => f.name).join(", ")}`);
+    if (big.length) uiAlert(`파일 하나는 ${fmtSize(T365_ATTACH_MAX)}(동영상은 ${fmtSize(T365_VIDEO_MAX)}) 까지 올릴 수 있습니다: ${big.map((f) => f.name).join(", ")}`);
     const ok = list.filter((f) => !bad.includes(f) && !big.includes(f));
     if (files.length + newFiles.length + ok.length > T365_FILES_MAX) { uiAlert(`첨부는 한 게시물에 ${T365_FILES_MAX}개까지입니다.`); return; }
     setNewFiles((prev) => [...prev, ...ok]);
@@ -3184,7 +3200,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
               className={`flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed px-3 py-4 cursor-pointer text-center transition-colors ${drag ? "border-[#2F7B7A] bg-[#E4F1F0]" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"}`} data-testid="ed-drop">
               <Upload size={18} className={drag ? "text-[#2F7B7A]" : "text-slate-400"} />
               <span className="text-[12.5px] text-slate-600 font-medium"><span className="hidden md:inline">파일을 끌어다 놓거나 눌러서 선택</span><span className="md:hidden">눌러서 파일 선택</span></span>
-              <span className="text-[10.5px] text-slate-400">한 게시물 {T365_FILES_MAX}개 · 파일 하나 {fmtSize(T365_ATTACH_MAX)} · 실행 파일 제외</span>
+              <span className="text-[10.5px] text-slate-400">한 게시물 {T365_FILES_MAX}개 · 파일 하나 {fmtSize(T365_ATTACH_MAX)} · 동영상(mp4 등) {fmtSize(T365_VIDEO_MAX)} — 글에서 바로 재생</span>
               <input type="file" multiple onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} className="hidden" data-testid="ed-files" />
             </label>
             {allCount > 0 && (
@@ -3218,7 +3234,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
             ) : (
             <ul className="text-[11.5px] text-slate-500 space-y-1.5 leading-snug" data-testid="ed-tips">
               <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>첫 줄에 핵심을 쓰고, 단계는 <b className="text-slate-700">1. 번호 목록</b>으로 정리하면 읽기 쉽습니다.</span></li>
-              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>링크는 <b className="text-slate-700">https://</b> 주소만 연결됩니다. 영상은 공유 링크를 본문에 붙여 주세요.</span></li>
+              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>링크는 <b className="text-slate-700">https://</b> 주소만 연결됩니다. 동영상(mp4 등)은 <b className="text-slate-700">첨부</b>하면 글에서 바로 재생됩니다.</span></li>
               <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>개인정보 · 고객 연락처는 올리지 마세요.</span></li>
               <li className="flex gap-1.5"><span className="text-slate-300">•</span><span><kbd className="px-1 rounded border border-slate-200 bg-white text-[10.5px]">Ctrl</kbd> + <kbd className="px-1 rounded border border-slate-200 bg-white text-[10.5px]">Enter</kbd> 로 바로 게시합니다.</span></li>
               <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>쓰는 동안 이 기기에 <b className="text-slate-700">임시 저장</b>되어, 창이 닫혀도 다음 글쓰기에서 불러올 수 있습니다.</span></li>
