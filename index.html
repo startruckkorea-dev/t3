@@ -2677,7 +2677,27 @@ function QnaAnswer({ ctx, post }) {
   const showSeen = canAnswer && has && !!asker && asker !== normEmail(ctx.me.email);
   const [text, setText] = useState(post.Answer || "");
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setText(post.Answer || ""); setEditing(false); }, [post.id, post.Answer]);
+  const [preview, setPreview] = useState(false);
+  const taRef = useRef(null);
+  useEffect(() => { setText(post.Answer || ""); setEditing(false); setPreview(false); }, [post.id, post.Answer]);
+  // 서식 — 답변은 글자(마크다운)로 저장되고 RichText 가 굵게 · 목록으로 보여 준다
+  function fmt(kind) {
+    const ta = taRef.current; if (!ta) return;
+    const a = ta.selectionStart, b = ta.selectionEnd, v = text;
+    let next, s0, s1;
+    if (kind === "bold") {
+      const sel = v.slice(a, b) || "굵은 글자";
+      next = v.slice(0, a) + "**" + sel + "**" + v.slice(b); s0 = a + 2; s1 = s0 + sel.length;
+    } else {
+      const ls = v.lastIndexOf("\n", a - 1) + 1; const le = v.indexOf("\n", b); const end = le < 0 ? v.length : le;
+      const lines = v.slice(ls, end).split("\n");
+      const marked = lines.every((l, i) => kind === "ul" ? /^- /.test(l) : /^\d+\. /.test(l));
+      const out = lines.map((l, i) => marked ? l.replace(kind === "ul" ? /^- / : /^\d+\. /, "") : (kind === "ul" ? "- " : `${i + 1}. `) + l.replace(/^(- |\d+\. )/, "")).join("\n");
+      next = v.slice(0, ls) + out + v.slice(end); s0 = ls; s1 = ls + out.length;
+    }
+    setText(next);
+    requestAnimationFrame(() => { try { ta.focus(); ta.setSelectionRange(s0, s1); } catch (e) {} });
+  }
   async function save() {
     const v = text.trim();
     if (!v) { uiAlert("답변 내용을 입력해 주세요."); return; }
@@ -2724,9 +2744,21 @@ function QnaAnswer({ ctx, post }) {
         </div>
         {editing ? (
           <div className="mt-2">
-            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} autoFocus placeholder="답변을 입력하세요 — 줄바꿈 · 목록(-) · **굵게** 를 쓸 수 있습니다" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-[13.5px] leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/30 resize-y" data-testid="qna-answer-input" />
+            {/* 서식 단추 — 고른 글자를 굵게 · 줄 앞에 목록 표시(-, 1.)를 넣는다. 미리보기로 실제 모양 확인 */}
+            <div className="rounded-lg border border-slate-300 focus-within:ring-2 focus-within:ring-[#1D4ED8]/30 focus-within:border-[#93B4F0] overflow-hidden bg-white">
+              <div className="flex items-center gap-0.5 px-1.5 h-9 border-b border-slate-200 bg-slate-50/70" data-testid="qna-answer-tools">
+                {[["bold", Bold, "굵게 (Ctrl+B)"], ["ul", List, "글머리 목록"], ["ol", ListOrdered, "번호 목록"]].map(([k, I, t]) => (
+                  <button key={k} type="button" disabled={preview} onMouseDown={(e) => e.preventDefault()} onClick={() => fmt(k)} title={t} aria-label={t} data-ans-cmd={k} className="w-8 h-7 rounded-md flex items-center justify-center text-slate-600 hover:bg-white hover:text-slate-900 hover:shadow-sm disabled:opacity-40"><I size={15} /></button>
+                ))}
+                <span className="ml-2 text-[11.5px] text-slate-400 hidden sm:inline">Enter 로 줄바꿈 · 글자를 고르고 굵게</span>
+                <button type="button" onClick={() => setPreview((v) => !v)} className={`ml-auto h-7 px-2.5 rounded-md text-[12px] inline-flex items-center gap-1 ${preview ? "bg-[#1D4ED8] text-white" : "text-slate-500 hover:bg-white hover:text-slate-800"}`} data-testid="qna-answer-preview-btn"><Eye size={13} />미리보기</button>
+              </div>
+              {preview
+                ? <div className="px-3 py-2.5 min-h-[150px] text-[14px]" data-testid="qna-answer-preview">{text.trim() ? <RichText text={text} /> : <span className="text-[12.5px] text-slate-400">미리 볼 내용이 없습니다.</span>}</div>
+                : <textarea ref={taRef} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && (e.key === "b" || e.key === "B")) { e.preventDefault(); fmt("bold"); } }} rows={6} autoFocus placeholder="답변을 입력하세요" className="block w-full px-3 py-2 text-[13.5px] leading-relaxed focus:outline-none resize-y" data-testid="qna-answer-input" />}
+            </div>
             <div className="mt-2 flex items-center justify-end gap-2">
-              <button onClick={() => { setEditing(false); setText(post.Answer || ""); }} disabled={busy} className={btnCls}>취소</button>
+              <button onClick={() => { setEditing(false); setPreview(false); setText(post.Answer || ""); }} disabled={busy} className={btnCls}>취소</button>
               <button onClick={save} disabled={busy} className="h-9 px-4 rounded-lg text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: "#1D4ED8" }} data-testid="qna-answer-save">{busy ? "저장 중..." : has ? "수정 저장" : "답변 등록"}</button>
             </div>
           </div>
@@ -5562,7 +5594,7 @@ function App({ boot }) {
         </div>
         <main className="t365-main-scroll flex-1 p-4 pb-24 md:px-6 md:pt-4 md:pb-24 overflow-y-auto">
           <div className={`${tab === "overview" ? "max-w-[1840px]" : "max-w-[1600px]"} mx-auto`}>
-            {tab !== "overview" && !(openPostId && (tab.startsWith("cat:") || tab === "all")) && (
+            {tab !== "overview" && (   /* 글은 창으로 떠서 뒤 머리를 숨기지 않는다 — 숨기면 목록이 위로 당겨져 보임 */
               <PageHeader icon={meta[0]} title={cur.label} subtitle={meta[1]} tint={meta[2]} right={curCat && curCat.contacts && curCat.contacts.length ? (
                 <div className="hidden sm:flex items-center gap-2 h-11 pl-3 pr-1.5 rounded-xl border bg-white shadow-sm" style={{ borderColor: curCat.soft }} data-testid="board-contacts">
                   <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold whitespace-nowrap" style={{ color: curCat.color }}><Mail size={14} />문의 담당자</span>
