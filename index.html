@@ -3090,10 +3090,11 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
   );
   const Card = ({ title: t2, icon: I, right, children }) => (
     <section className="bg-white rounded-xl border border-slate-200">
-      <div className="px-3.5 h-10 flex items-center gap-2 border-b border-slate-100"><I size={14} className="text-slate-400" /><span className="text-[12.5px] font-semibold text-slate-700">{t2}</span><span className="ml-auto">{right}</span></div>
-      <div className="px-3.5 py-2.5">{children}</div>
+      <div className="px-3.5 pt-3 pb-1.5 flex items-center gap-1.5"><I size={13} className="text-slate-400" /><span className="text-[12px] font-semibold text-slate-600 tracking-[-0.01em]">{t2}</span><span className="ml-auto">{right}</span></div>
+      <div className="px-3.5 pb-3">{children}</div>
     </section>
   );
+const Tip = ({ icon: I, children }) => <li className="flex items-start gap-2"><span className="w-5 h-5 rounded-md bg-slate-100 flex items-center justify-center shrink-0 mt-px"><I size={11} className="text-slate-500" /></span><span className="min-w-0">{children}</span></li>;
   const FileRow = ({ f, isNew, onRemove }) => { const k = fileKind(f.name); return (
     <div className="flex items-center gap-2.5 py-1.5">
       <span className="w-7 h-7 rounded-md flex items-center justify-center shrink-0" style={{ background: k.bg }}><k.Icon size={14} style={{ color: k.c }} /></span>
@@ -3167,7 +3168,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
               {mode !== "write" && <div className="flex-1 min-w-0 overflow-y-auto px-5 py-4 bg-white min-h-[300px]" data-testid="ed-preview">{body.trim() ? preview : <p className="text-[13px] text-slate-300">미리 볼 내용이 없습니다.</p>}</div>}
             </div>
             <div className="flex items-center gap-3 px-3 h-8 border-t border-slate-100 bg-slate-50/70 text-[11px] text-slate-400">
-              <span className="hidden sm:inline truncate">위 단추로 굵게 · 소제목 · 목록 · 안내 상자 · 링크 — 쓰는 그대로 보입니다 · Ctrl+B 굵게</span>
+              <span className="hidden sm:inline-flex items-center gap-2 truncate"><span>서식은 위 도구 단추로 — 쓰는 그대로 보입니다</span><span className="text-slate-300">|</span><span className="inline-flex items-center gap-1"><kbd className="px-1 rounded border border-slate-200 bg-white text-[10px] leading-4">Ctrl</kbd><kbd className="px-1 rounded border border-slate-200 bg-white text-[10px] leading-4">B</kbd>굵게</span></span>
               <span className={`ml-auto tabular-nums shrink-0 ${body.length > T365_BODY_MAX ? "text-red-600 font-semibold" : ""}`} data-testid="ed-body-count">{body.length.toLocaleString()} / {T365_BODY_MAX.toLocaleString()}자</span>
             </div>
           </div>
@@ -3197,10 +3198,14 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
           </Card>}
           <Card title="첨부파일" icon={Paperclip} right={<span className="text-[11px] text-slate-400 tabular-nums">{allCount} / {T365_FILES_MAX}{allCount ? ` · ${fmtSize(totalSize)}` : ""}</span>}>
             <label onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); addFiles(e.dataTransfer.files); }}
-              className={`flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed px-3 py-4 cursor-pointer text-center transition-colors ${drag ? "border-[#2F7B7A] bg-[#E4F1F0]" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"}`} data-testid="ed-drop">
-              <Upload size={18} className={drag ? "text-[#2F7B7A]" : "text-slate-400"} />
-              <span className="text-[12.5px] text-slate-600 font-medium"><span className="hidden md:inline">파일을 끌어다 놓거나 눌러서 선택</span><span className="md:hidden">눌러서 파일 선택</span></span>
-              <span className="text-[10.5px] text-slate-400">한 게시물 {T365_FILES_MAX}개 · 파일 하나 {fmtSize(T365_ATTACH_MAX)} · 동영상(mp4 등) {fmtSize(T365_VIDEO_MAX)} — 글에서 바로 재생</span>
+              className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed px-3 py-4 cursor-pointer text-center transition-colors ${drag ? "border-[#2F7B7A] bg-[#E4F1F0]" : "border-slate-300 bg-slate-50/60 hover:border-[#2F7B7A]/60 hover:bg-[#F3F9F8]"}`} data-testid="ed-drop">
+              <span className="w-9 h-9 rounded-full bg-white shadow-sm ring-1 ring-slate-200 flex items-center justify-center"><Upload size={16} className={drag ? "text-[#2F7B7A]" : "text-slate-500"} /></span>
+              <span className="text-[12.5px] text-slate-700 font-semibold"><span className="hidden md:inline">끌어다 놓거나 눌러서 선택</span><span className="md:hidden">눌러서 파일 선택</span></span>
+              <span className="flex flex-wrap justify-center gap-1 text-[10.5px] text-slate-500">
+                <span className="px-1.5 rounded bg-white ring-1 ring-slate-200 leading-[18px]">최대 {T365_FILES_MAX}개</span>
+                <span className="px-1.5 rounded bg-white ring-1 ring-slate-200 leading-[18px]">파일 {Math.round(T365_ATTACH_MAX / 1048576)}MB</span>
+                <span className="px-1.5 rounded bg-white ring-1 ring-slate-200 leading-[18px] inline-flex items-center gap-0.5"><PlayCircle size={10} />동영상 {Math.round(T365_VIDEO_MAX / 1048576)}MB · 바로 재생</span>
+              </span>
               <input type="file" multiple onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} className="hidden" data-testid="ed-files" />
             </label>
             {allCount > 0 && (
@@ -3225,19 +3230,18 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
           </Card>
           <Card title={isQna ? "질문 안내" : "작성 안내"} icon={Info}>
             {isQna ? (
-            <ul className="text-[11.5px] text-slate-500 space-y-1.5 leading-snug" data-testid="ed-tips-qna">
-              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>질문은 <b className="text-slate-700">다른 Agent 도 볼 수 있습니다</b> — 고객 이름 · 연락처 · 계약 정보는 쓰지 마세요.</span></li>
-              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>답변이 달리면 Overview 의 Q&A 상자와 Q&A 게시판에 <b className="text-slate-700">「새 답변」</b> 으로 표시됩니다.</span></li>
-              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>화면 캡처를 첨부하면 더 빨리 답변할 수 있습니다.</span></li>
-              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>올린 질문은 <b>답변이 달리기 전까지</b> 본인만 고치거나 지울 수 있습니다.</span></li>
+            <ul className="text-[11.5px] text-slate-500 space-y-2 leading-snug" data-testid="ed-tips-qna">
+              <Tip icon={ShieldCheck}>다른 Agent 도 볼 수 있습니다 — <b className="text-slate-700">고객 개인정보 · 민감정보</b>는 빼 주세요.</Tip>
+              <Tip icon={Sparkles}>답변이 달리면 Overview 와 Q&A 게시판에 <b className="text-slate-700">「새 답변」</b> 으로 알려 드립니다.</Tip>
+              <Tip icon={Camera}>화면 캡처를 첨부하면 더 빨리 답변해 드릴 수 있습니다.</Tip>
+              <Tip icon={LockKeyhole}>답변이 달리기 전까지 본인만 고치거나 지울 수 있습니다.</Tip>
             </ul>
             ) : (
-            <ul className="text-[11.5px] text-slate-500 space-y-1.5 leading-snug" data-testid="ed-tips">
-              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>첫 줄에 핵심을 쓰고, 단계는 <b className="text-slate-700">1. 번호 목록</b>으로 정리하면 읽기 쉽습니다.</span></li>
-              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>링크는 <b className="text-slate-700">https://</b> 주소만 연결됩니다. 동영상(mp4 등)은 <b className="text-slate-700">첨부</b>하면 글에서 바로 재생됩니다.</span></li>
-              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>개인정보 · 고객 연락처는 올리지 마세요.</span></li>
-              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span><kbd className="px-1 rounded border border-slate-200 bg-white text-[10.5px]">Ctrl</kbd> + <kbd className="px-1 rounded border border-slate-200 bg-white text-[10.5px]">Enter</kbd> 로 바로 게시합니다.</span></li>
-              <li className="flex gap-1.5"><span className="text-slate-300">•</span><span>쓰는 동안 이 기기에 <b className="text-slate-700">임시 저장</b>되어, 창이 닫혀도 다음 글쓰기에서 불러올 수 있습니다.</span></li>
+            <ul className="text-[11.5px] text-slate-500 space-y-2 leading-snug" data-testid="ed-tips">
+              <Tip icon={ListOrdered}>첫 줄에 핵심을, 단계는 <b className="text-slate-700">번호 목록</b>으로 정리하면 읽기 쉽습니다.</Tip>
+              <Tip icon={PlayCircle}>링크는 https 주소만 연결됩니다. 동영상은 <b className="text-slate-700">첨부</b>하면 글에서 바로 재생됩니다.</Tip>
+              <Tip icon={ShieldCheck}>고객 개인정보 · 연락처는 올리지 마세요.</Tip>
+              <Tip icon={History}>쓰는 동안 이 기기에 <b className="text-slate-700">임시 저장</b>됩니다 · <kbd className="px-1 rounded border border-slate-200 bg-white text-[10px]">Ctrl</kbd>+<kbd className="px-1 rounded border border-slate-200 bg-white text-[10px]">Enter</kbd> 로 바로 게시</Tip>
             </ul>
             )}
             {hasOldVideo && <p className="mt-2 text-[11px] text-slate-500 bg-slate-50 rounded-md px-2 py-1.5" data-testid="ed-old-video"><PlayCircle size={11} className="inline -mt-0.5 mr-1" />이 글에 연결된 동영상은 보기 화면에서 그대로 재생됩니다.</p>}
