@@ -165,7 +165,7 @@ import { createRoot } from "react-dom/client";
 import {
   LayoutDashboard, LayoutList, MonitorSmartphone, Package, Headphones, GraduationCap, BookOpenCheck, Megaphone, MessagesSquare,
   Pin, Paperclip, Video, CheckCircle2, Eye, Users, KeyRound, History, LogIn, Search, Plus, Pencil, Trash2, X, Download, Upload,
-  ExternalLink, ArrowUpRight, Mail, ShieldCheck, AlertTriangle, ArrowLeftToLine, ArrowRightFromLine, Menu, LockKeyhole, ChevronLeft, FileText,
+  ExternalLink, ArrowUpRight, Mail, ShieldCheck, AlertTriangle, ArrowLeftToLine, ArrowRightFromLine, ArrowLeft, Home, Menu, LockKeyhole, ChevronLeft, FileText,
   Bold, List, ListOrdered, Heading2, Link2, Clock, BarChart3, Tags, HelpCircle, ListChecks, UserPlus, FileSpreadsheet, PlayCircle,
   Circle, Quote, BookOpen, LogOut, SquarePen, Truck, Container, Bus, Car, Gauge, Fuel, Wrench, Cog, HardHat, ClipboardList, Newspaper, Bell, Calendar, Gift, Star, Trophy, Award, Lightbulb, Target, Rocket, Zap, CircleDollarSign, Handshake, Briefcase, Building2, Phone, MapPin, Globe, Leaf, Flag, Camera, Sparkles, ImagePlus, Palette, GalleryHorizontal, ArrowRight, Pause, Play, AlignLeft, Rows3, ChevronRight, ChevronDown, ChevronUp, ChevronsLeft, ChevronsRight, TrendingUp, FileArchive, FileImage, FileVideo, Info, Inbox,
   BellRing, MessageCircleQuestion, MessageSquareReply, Copy,
@@ -222,7 +222,7 @@ const T365_COLUMNS = {
   links: ["Title", "Url", "Description", "Icon", "Color", "Audience", "SortOrder", "Active"],
 };
 // 선택 열 — 없어도 게시판은 동작하고 그 기능만 저장되지 않는다(관리자 안내)
-const T365_OPT_COLUMNS = { posts: ["Answer", "AnsweredBy", "AnsweredAt", "PinUntil"] };   // Q&A 답변 · 공지 · 필수 노출 기한(PinUntil — 한 줄 텍스트 YYYY-MM-DD 또는 날짜 열)
+const T365_OPT_COLUMNS = { posts: ["Answer", "AnsweredBy", "AnsweredAt", "PinUntil", "AnswerFilesJson"] };   // AnswerFilesJson — 답변 첨부(여러 줄 텍스트)   // Q&A 답변 · 공지 · 필수 노출 기한(PinUntil — 한 줄 텍스트 YYYY-MM-DD 또는 날짜 열)
 const T365_FILE_ROOT = "training365";          // (10-12 이전 첨부 위치 — 문서 라이브러리 training365/YYYY-MM/. 새 첨부는 AttachedFiles/Training365_Media-Files/{번호}/)
 const T365_LOG_ROOT = "Logging_data/Training365"; // 관리 행위 이력 — APS 와 같은 파일 방식
 
@@ -598,7 +598,7 @@ async function tDeleteRemovedFiles(postId, removed) {
   if (!removed.length || !/^\d+$/.test(String(postId || ""))) return;
   try {
     const token = await getGraphToken(); const driveId = await tAttachDriveId();
-    const homes = [attachFolderOf(postId, ""), attachFolderOf(postId, "qna")].flatMap((f) => [`/${f}`, `/${f}/play`]);
+    const homes = [attachFolderOf(postId, ""), attachFolderOf(postId, "qna")].flatMap((f) => [`/${f}`, `/${f}/play`, `/${f}/answer`]);
     for (const f of removed) {
       if (f.driveId !== driveId || !T365_ID_RE.test(f.itemId)) continue;
       try {
@@ -613,6 +613,23 @@ async function tDeleteRemovedFiles(postId, removed) {
 }
 const T365_ID_RE = /^[A-Za-z0-9!_\-]{1,200}$/;
 // 저장된 첨부 정보(JSON) — 형식이 맞는 것만 받는다(게시물 목록을 손으로 고쳐도 경로가 엉뚱한 곳을 가리키지 않게)
+// 받기 줄 — 글 보기 첨부 · 답변 첨부 같은 꼴(아이콘 · 이름 · 크기 · 받기)
+function FileRows({ files, testid }) {
+  return (
+    <ul className="-mx-2" data-testid={testid}>
+      {files.map((f) => { const k = fileKind(f.name); return (
+        <li key={f.itemId}>
+          <button onClick={() => tDownload(f)} title={`${f.name} 내려받기`} className="group w-full flex items-center gap-2.5 px-2 h-9 rounded-md hover:bg-slate-50 text-left min-w-0" data-file={f.itemId}>
+            <k.Icon size={15} className="shrink-0" style={{ color: k.c }} />
+            <span className="min-w-0 truncate text-[13px] text-slate-700 group-hover:text-[#2F7B7A] group-hover:underline underline-offset-2">{f.name}</span>
+            <span className="shrink-0 text-[11.5px] text-slate-400 tabular-nums">{fmtSize(f.size)}</span>
+            <Download size={14} className="ml-auto shrink-0 text-slate-300 group-hover:text-[#2F7B7A]" aria-label="받기" />
+          </button>
+        </li>
+      ); })}
+    </ul>
+  );
+}
 function parseFiles(json) {
   let arr = [];
   try { const v = JSON.parse(json || "[]"); arr = Array.isArray(v) ? v : v && typeof v === "object" ? [v] : []; } catch (e) { arr = []; }
@@ -1325,9 +1342,10 @@ function SetupNotice({ status, infoToo = true }) {
   const linksMissing = status.links && status.links.missing;
   const warn = missing.length || cols.length || errs.length;
   const postOpt = (status.posts && !status.posts.missing && status.posts.optMissing) || [];
-  const ansMissing = postOpt.filter((c) => c.startsWith("Answer"));
+  const ansMissing = postOpt.filter((c) => c.startsWith("Answer") && c !== "AnswerFilesJson");
   const pinMissing = postOpt.includes("PinUntil");
-  if (!warn && !((optionalMissing || bannerMissing || linksMissing || optCols.length || ansMissing.length || pinMissing) && infoToo)) return null;   // 선택 목록 안내만 남았으면 게시판 화면에서는 숨긴다(Overview · 관리 화면에서만)
+  const ansFilesMissing = postOpt.includes("AnswerFilesJson");
+  if (!warn && !((optionalMissing || bannerMissing || linksMissing || optCols.length || ansMissing.length || pinMissing || ansFilesMissing) && infoToo)) return null;   // 선택 목록 안내만 남았으면 게시판 화면에서는 숨긴다(Overview · 관리 화면에서만)
   return (
     <div className={`rounded-xl border px-4 py-3 mb-5 text-xs leading-relaxed ${warn ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-blue-50 border-blue-100 text-blue-900"}`} data-testid="setup-notice">
       <div className="flex items-start gap-2.5">
@@ -1340,6 +1358,7 @@ function SetupNotice({ status, infoToo = true }) {
             {errs.map((c) => <li key={c}>읽기 실패 — {c}</li>)}
             {infoToo && optCols.map((c) => <li key={c}>선택 목록에 없는 열 — {c} (카테고리 아이콘 · 색 · 문의 담당자 / 배너 값이 저장되지 않습니다 — IT 에 열 추가 요청)</li>)}
             {infoToo && ansMissing.length > 0 && <li data-testid="qna-cols-missing">{T365_LISTS.posts} 에 Q&A 답변 열이 없습니다 — {ansMissing.join(", ")} (Answer: 여러 줄 텍스트 · AnsweredBy: 한 줄 텍스트 · AnsweredAt: 한 줄 텍스트) 를 만들어야 답변이 저장됩니다</li>}
+            {infoToo && ansFilesMissing && <li data-testid="ans-files-col-missing">{T365_LISTS.posts} 에 AnswerFilesJson 열(여러 줄 텍스트)을 만들면 Q&A 답변에 파일을 붙일 수 있습니다</li>}
             {infoToo && pinMissing && <li data-testid="pin-col-missing">{T365_LISTS.posts} 에 PinUntil 열(한 줄 텍스트)을 만들면 글쓰기에서 공지 · 필수의 홈 노출 기한을 정할 수 있습니다 — 없으면 게시 후 7일 동안 보입니다</li>}
             {infoToo && linksMissing && <li data-testid="links-list-missing">{T365_LISTS.links} 목록이 없어 사이드바 「바로가기」 를 쓸 수 없습니다 — 만드는 방법(열 구조)은 관리자 전용 「바로가기 관리」 화면에 있습니다</li>}
             {infoToo && bannerMissing && <li>{T365_LISTS.banners} 목록이 없어 게시판 홈에 기본 배너(그림 없음)를 보여 줍니다 — 그림 배너를 쓰려면 목록을 만드세요</li>}
@@ -2597,18 +2616,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
                   <Paperclip size={13} /><span className="font-medium text-slate-500">첨부</span><span className="tabular-nums">{files.length}</span>
                   <span className="ml-auto tabular-nums">{fmtSize(totalSize)}</span>
                 </div>
-                <ul className="-mx-2">
-                  {files.map((f) => { const k = fileKind(f.name); return (
-                    <li key={f.itemId}>
-                      <button onClick={() => tDownload(f)} title={`${f.name} 내려받기`} className="group w-full flex items-center gap-2.5 px-2 h-9 rounded-md hover:bg-slate-50 text-left min-w-0" data-file={f.itemId}>
-                        <k.Icon size={15} className="shrink-0" style={{ color: k.c }} />
-                        <span className="min-w-0 truncate text-[13px] text-slate-700 group-hover:text-[#2F7B7A] group-hover:underline underline-offset-2">{f.name}</span>
-                        <span className="shrink-0 text-[11.5px] text-slate-400 tabular-nums">{fmtSize(f.size)}</span>
-                        <Download size={14} className="ml-auto shrink-0 text-slate-300 group-hover:text-[#2F7B7A]" aria-label="받기" />
-                      </button>
-                    </li>
-                  ); })}
-                </ul>
+                <FileRows files={files} />
               </div>
             </section>
           )}
@@ -2683,7 +2691,23 @@ function QnaAnswer({ ctx, post }) {
   const [text, setText] = useState(post.Answer || "");
   const [busy, setBusy] = useState(false);
   const taRef = useRef(null);
-  useEffect(() => { setText(post.Answer || ""); setEditing(false); }, [post.id, post.Answer]);
+  // 답변 첨부 — AnswerFilesJson(그 글 폴더/answer). keep = 남길 기존 파일, adds = 새로 붙일 파일
+  const ansFiles = parseFiles(post.AnswerFilesJson);
+  const [keep, setKeep] = useState(ansFiles);
+  const [adds, setAdds] = useState([]);
+  const [upMsg, setUpMsg] = useState("");
+  const fileIn = useRef(null);
+  useEffect(() => { setText(post.Answer || ""); setEditing(false); setKeep(parseFiles(post.AnswerFilesJson)); setAdds([]); }, [post.id, post.Answer, post.AnswerFilesJson]);
+  function addAnsFiles(list) {
+    list = Array.from(list || []);
+    const bad = list.filter((f) => T365_BLOCKED_EXT.includes(fileExt(f.name)));
+    const big = list.filter((f) => f.size > (T365_VIDEO_EXT.includes(fileExt(f.name)) ? T365_VIDEO_MAX : T365_ATTACH_MAX));
+    if (bad.length) uiAlert(`실행 파일 · 웹 문서 형식은 올릴 수 없습니다: ${bad.map((f) => f.name).join(", ")}`);
+    if (big.length) uiAlert(`파일 하나는 ${fmtSize(T365_ATTACH_MAX)}(동영상은 ${fmtSize(T365_VIDEO_MAX)}) 까지 올릴 수 있습니다: ${big.map((f) => f.name).join(", ")}`);
+    const ok = list.filter((f) => !bad.includes(f) && !big.includes(f));
+    if (keep.length + adds.length + ok.length > T365_FILES_MAX) { uiAlert(`답변 첨부는 ${T365_FILES_MAX}개까지입니다.`); return; }
+    setAdds((prev) => [...prev, ...ok]);
+  }
   useEffect(() => { if (editing && taRef.current) { const el = taRef.current; el.focus(); const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); } }, [editing]);
   // 서식 단추 — 편집 칸 안에서만(커서가 밖이면 끝으로 옮긴 뒤)
   function fmt(name) {
@@ -2701,6 +2725,8 @@ function QnaAnswer({ ctx, post }) {
     try {
       const cols = await tListColumns(T365_LISTS.posts);
       if (!cols.has("Answer")) { uiAlert(`게시물 목록에 Answer 열이 없어 답변을 저장할 수 없습니다 — IT 에 열 추가(Answer · AnsweredBy · AnsweredAt)를 요청해 주세요.`); setBusy(false); return; }
+      const filesTouched = adds.length > 0 || keep.length !== ansFiles.length;
+      if (filesTouched && !cols.has("AnswerFilesJson")) { uiAlert(`게시물 목록에 AnswerFilesJson 열(여러 줄 텍스트)이 없어 답변 첨부를 저장할 수 없습니다 — IT 에 열 추가를 요청해 주세요.\n첨부를 빼면 답변 글은 저장할 수 있습니다.`); setBusy(false); return; }
       // 동시 답변 확인 — 이 화면을 연 뒤 다른 담당자가 답변을 달았거나 고쳤으면 덮어쓰기 전에 묻는다(취소하면 쓰던 답변은 그대로)
       const cur = await tGetItem(T365_LISTS.posts, post.id).catch(() => undefined);
       if (cur === null) { setBusy(false); uiAlert("이 질문은 그 사이에 삭제되었습니다."); await ctx.reload(); return; }
@@ -2712,11 +2738,20 @@ function QnaAnswer({ ctx, post }) {
       // 답변 시각은 질문자가 마지막으로 본 시각보다 뒤로 — PC 시계가 늦어도 질문자에게 「새 답변」 이 뜨게
       const lastSeen = askerRow ? Date.parse(askerRow.LastViewedAt || 0) || 0 : 0;
       const at = new Date(Math.max(Date.now(), lastSeen && lastSeen < Date.now() + 864e5 ? lastSeen + 1000 : 0)).toISOString();   // 하루 넘게 앞선 값은 무시
-      await tUpdate(T365_LISTS.posts, post.id, { Answer: v, AnsweredBy: ctx.me.name, AnsweredAt: at }, { prevCat: post.Category });   // 쓰기 확인은 그 글의 게시판(Q&A) 편집 권한
+      const uploaded = [];
+      for (let i = 0; i < adds.length; i++) {
+        setUpMsg(`첨부 올리는 중 ${i + 1} / ${adds.length}`);
+        uploaded.push(await tUploadFile(adds[i], post.id, post.Category, null, "answer"));
+      }
+      setUpMsg("");
+      const allFiles = [...keep, ...uploaded];
+      await tUpdate(T365_LISTS.posts, post.id, { Answer: v, AnsweredBy: ctx.me.name, AnsweredAt: at, ...(filesTouched ? { AnswerFilesJson: allFiles.length ? JSON.stringify(allFiles) : "" } : {}) }, { prevCat: post.Category });   // 쓰기 확인은 그 글의 게시판(Q&A) 편집 권한
+      const removed = ansFiles.filter((f) => !keep.some((k) => k.itemId === f.itemId));
+      if (removed.length) tDeleteRemovedFiles(post.id, removed);
       t365Log("게시물", has ? "답변 수정" : "답변", post.Title, { info: { 게시물ID: post.id } });
       await ctx.reload();
       setEditing(false); toast(has ? "답변을 수정했습니다" : asker && asker !== normEmail(ctx.me.email) ? "답변을 등록했습니다 — 「질문자에게 알리기」 로 메일을 보낼 수 있습니다" : "답변을 등록했습니다");
-    } catch (e) { uiAlert(e.message); }
+    } catch (e) { setUpMsg(""); uiAlert(e.message); }
     setBusy(false);
   }
   return (
@@ -2746,15 +2781,37 @@ function QnaAnswer({ ctx, post }) {
                   <button key={k} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => fmt(k)} title={t} aria-label={t} data-ans-cmd={k} className="w-8 h-7 rounded-md flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-900"><I size={15} /></button>
                 ))}
               </div>
-              <RichEditor ref={taRef} value={text} onChange={setText} placeholder="답변을 입력하세요" className="t365-answer-ed max-h-[360px]" testid="qna-answer-input" />
+              <RichEditor ref={taRef} value={text} onChange={setText} onFiles={addAnsFiles} placeholder="답변을 입력하세요" className="t365-answer-ed max-h-[360px]" testid="qna-answer-input" />
+              {/* 첨부 — 편집 칸 아래 한 줄(끌어 놓기도 됨) */}
+              <div className="border-t border-slate-100 px-2 py-1.5" data-testid="qna-answer-files">
+                {(keep.length > 0 || adds.length > 0) && <ul className="mb-1">
+                  {[...keep.map((f) => ({ f, old: true })), ...adds.map((f) => ({ f, old: false }))].map(({ f, old }, i) => { const k = fileKind(f.name); return (
+                    <li key={(old ? f.itemId : "n" + i) } className="flex items-center gap-2 px-1.5 h-8 rounded-md hover:bg-slate-50 text-[12.5px] min-w-0" data-ans-file={old ? f.itemId : "new"}>
+                      <k.Icon size={14} className="shrink-0" style={{ color: k.c }} />
+                      <span className="min-w-0 truncate text-slate-700">{f.name}</span>
+                      <span className="shrink-0 text-[11px] text-slate-400 tabular-nums">{fmtSize(f.size)}{old ? "" : " · 새 파일"}</span>
+                      <button type="button" disabled={busy} onClick={() => old ? setKeep((p) => p.filter((x) => x.itemId !== f.itemId)) : setAdds((p) => p.filter((x) => x !== f))} className="ml-auto shrink-0 w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50" aria-label={`${f.name} 빼기`} data-ans-file-remove><X size={13} /></button>
+                    </li>
+                  ); })}
+                </ul>}
+                <input ref={fileIn} type="file" multiple className="hidden" onChange={(e) => { addAnsFiles(e.target.files); e.target.value = ""; }} data-testid="qna-answer-file-input" />
+                <button type="button" disabled={busy} onClick={() => fileIn.current && fileIn.current.click()} className="h-7 px-2 rounded-md inline-flex items-center gap-1.5 text-[12px] text-slate-500 hover:text-slate-900 hover:bg-slate-100" data-testid="qna-answer-attach"><Paperclip size={13} />파일 첨부{(keep.length + adds.length) > 0 && <span className="tabular-nums text-slate-400">{keep.length + adds.length} / {T365_FILES_MAX}</span>}</button>
+              </div>
             </div>
             <div className="mt-2 flex items-center justify-end gap-2">
-              <button onClick={() => { setEditing(false); setText(post.Answer || ""); }} disabled={busy} className={btnCls}>취소</button>
+              {upMsg && <span className="mr-auto text-[12px] text-slate-500 tabular-nums" data-testid="qna-answer-upmsg">{upMsg}</span>}
+              <button onClick={() => { setEditing(false); setText(post.Answer || ""); setKeep(parseFiles(post.AnswerFilesJson)); setAdds([]); }} disabled={busy} className={btnCls}>취소</button>
               <button onClick={save} disabled={busy} className="h-9 px-4 rounded-lg text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: "#1D4ED8" }} data-testid="qna-answer-save">{busy ? "저장 중..." : has ? "수정 저장" : "답변 등록"}</button>
             </div>
           </div>
         ) : has ? (
-          <div className="mt-2 pl-4 border-l-2 border-[#BFD3F6] text-[14px] max-w-[760px]" data-testid="qna-answer-body"><RichText text={post.Answer} /></div>
+          <div className="mt-2 pl-4 border-l-2 border-[#BFD3F6] max-w-[760px]">
+            <div className="text-[14px]" data-testid="qna-answer-body"><RichText text={post.Answer} /></div>
+            {ansFiles.length > 0 && <div className="mt-2.5">
+              <div className="flex items-center gap-1.5 text-[11.5px] text-slate-400"><Paperclip size={12} />답변 첨부 <span className="tabular-nums">{ansFiles.length}</span></div>
+              <FileRows files={ansFiles} testid="qna-answer-attachments" />
+            </div>}
+          </div>
         ) : (
           <p className="mt-1 text-[12.5px] text-slate-400 leading-relaxed">{ctx.isAgent ? "담당자가 확인한 뒤 이곳에 답변을 드립니다. 급한 문의는 오른쪽 아래 「?」 에서 담당자에게 메일을 보내 주세요." : canAnswer ? "아직 답변이 없는 질문입니다 — 「답변 쓰기」 로 답변해 주세요." : "아직 답변이 없는 질문입니다."}</p>
         )}
@@ -4165,7 +4222,7 @@ function BoardIconStrip({ ctx, onGo }) {
   return (
     <div className="relative -mx-1" data-scroll-l={edge.l ? "1" : "0"} data-scroll-r={edge.r ? "1" : "0"}>
       <div ref={ref} className="overflow-x-auto overflow-y-hidden snap-x snap-mandatory md:snap-none px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" style={{ WebkitMaskImage: mask, maskImage: mask }}>
-        <div className="flex items-start gap-1.5 md:gap-1 w-max" data-testid="board-icons">
+        <div className="grid grid-flow-col auto-cols-[76px] md:inline-grid md:auto-cols-fr gap-1 md:gap-1.5 w-max items-start" data-testid="board-icons">
       {cats.map((c) => {
         const fresh = posts.filter((p) => p.Category === c.key && postTs(p) >= since);
         const unread = fresh.filter((p) => !read(p)).length;
@@ -4173,12 +4230,12 @@ function BoardIconStrip({ ctx, onGo }) {
         const I = c.icon || FileText;
         return (
           <button key={c.key} onClick={() => onGo(c.key)} data-bicon={c.key} title={`${c.label}${n ? ` — 최근 7일 안 읽은 새 글 ${unread}건` : fresh.length ? ` — 최근 7일 새 글 ${fresh.length}건 · 모두 읽음` : ""}`}
-            className="group snap-start shrink-0 w-[70px] md:w-auto md:min-w-[60px] px-1 md:px-1.5 flex flex-col items-center gap-1.5 pt-2 pb-1.5 rounded-xl hover:bg-white/10 transition-colors">
-            <span className="relative w-10 h-10 rounded-xl flex items-center justify-center bg-white shadow-md shadow-black/20 transition-transform group-hover:-translate-y-0.5">
-              <I size={17} style={{ color: c.color }} />
+            className="group snap-start min-w-0 md:min-w-[76px] px-1 md:px-2.5 flex flex-col items-center gap-1.5 pt-2.5 pb-1.5 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-white/50">
+            <span className="relative w-10 h-10 rounded-xl flex items-center justify-center bg-white shadow-md shadow-black/20 transition-all duration-200 ease-out group-hover:scale-[1.14] group-hover:-translate-y-1 group-hover:shadow-xl group-hover:shadow-black/40 group-hover:ring-4 group-hover:ring-white/20 group-active:scale-105">
+              <I size={17} style={{ color: c.color }} className="transition-transform duration-200" />
               {n > 0 && <span data-badge={c.key} data-tone={red ? "red" : "gray"} className="absolute -top-1.5 -right-1.5 min-w-[19px] h-[19px] px-1 rounded-full text-[10.5px] font-bold text-white flex items-center justify-center tabular-nums" style={{ background: red ? "#E11D48" : "#94A3B8", boxShadow: "0 0 0 2px rgba(16,27,52,.9)" }}>{n > 99 ? "99+" : n}</span>}
             </span>
-            <span className="w-full text-center text-[11px] md:text-[11.5px] text-white/85 group-hover:text-white leading-[1.25] break-keep line-clamp-2 md:whitespace-nowrap" data-blabel={c.key}>{c.label}</span>
+            <span className="w-full text-center text-[11px] md:text-[11.5px] text-white/80 group-hover:text-white group-hover:font-semibold leading-[1.25] break-keep line-clamp-2 md:whitespace-nowrap transition-colors" data-blabel={c.key}>{c.label}</span>
           </button>
         );
       })}
@@ -4243,8 +4300,8 @@ function BannerCarousel({ ctx, banners, onManage, strip }) {
         );
       })}
       {n > 1 && <>
-        <button onClick={() => go(cur - 1)} aria-label="이전 배너" className="absolute left-2 top-1/2 -translate-y-1/2 z-[2] w-9 h-9 rounded-full bg-black/25 hover:bg-black/45 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"><ChevronLeft size={18} /></button>
-        <button onClick={() => go(cur + 1)} aria-label="다음 배너" className="absolute right-2 top-1/2 -translate-y-1/2 z-[2] w-9 h-9 rounded-full bg-black/25 hover:bg-black/45 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"><ChevronRight size={18} /></button>
+        <button onClick={() => go(cur - 1)} aria-label="이전 배너" className="absolute left-2 top-1/2 -translate-y-1/2 z-[3] w-9 h-9 rounded-full bg-black/25 hover:bg-black/45 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"><ChevronLeft size={18} /></button>
+        <button onClick={() => go(cur + 1)} aria-label="다음 배너" className="absolute right-2 top-1/2 -translate-y-1/2 z-[3] w-9 h-9 rounded-full bg-black/25 hover:bg-black/45 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"><ChevronRight size={18} /></button>
         <div className={`absolute ${strip ? "top-4 left-6 md:left-10" : "bottom-3 right-4"} z-[2] flex items-center gap-1.5`} data-testid="banner-dots">
           {list.map((b, k) => (
             <button key={b.id} onClick={() => go(k)} aria-label={`${k + 1}번째 배너`} aria-current={k === cur ? "true" : undefined} className={`h-1.5 rounded-full overflow-hidden transition-all ${k === cur ? "w-7 bg-white/35" : "w-1.5 bg-white/50 hover:bg-white/80"}`}>
@@ -5377,10 +5434,13 @@ function App({ boot }) {
   }
   useEffect(() => { t365PurgeOthers(me0.email); reload(); }, []);
 
+  // 앱 안에서 쌓인 이동 수 — 위쪽 「뒤로」 단추는 이 값이 있으면 브라우저 뒤로, 없으면 Overview 로
+  const [navIdx, setNavIdx] = useState(() => { try { return (history.state && history.state.t365) || 0; } catch (e) { return 0; } });
+  const navRef = useRef(navIdx); navRef.current = navIdx;
   function setTab(t, post = null, push = true) {
     setTabRaw(t); setOpenPostRaw(post);
     const h = hashOf(t, post);
-    try { if (window.location.hash !== h) (push ? history.pushState : history.replaceState).call(history, null, "", h); } catch (e) {}
+    try { if (window.location.hash !== h) { const i = push ? navRef.current + 1 : navRef.current; (push ? history.pushState : history.replaceState).call(history, { t365: i }, "", h); navRef.current = i; setNavIdx(i); } } catch (e) {}
     const m = document.querySelector("main"); if (m) m.scrollTop = 0;
   }
   const setOpenId = (id) => setTab(tab, id ? String(id) : null);
@@ -5396,7 +5456,7 @@ function App({ boot }) {
   }, []);
   const openPost = (p) => setTab(catMap[p.Category] ? "cat:" + p.Category : "all", String(p.id));
   const openSearch = (q, filter) => { if (!canView("all")) return; setBoardSeed({ tab: "all", q: q || "", filter: filter || "all", n: Date.now() }); setTab("all"); };
-  useEffect(() => { const on = () => { const x = parseHash(); setTabRaw(x.tab); setOpenPostRaw(x.post); }; window.addEventListener("popstate", on); return () => window.removeEventListener("popstate", on); }, []);
+  useEffect(() => { const on = (e) => { const x = parseHash(); setTabRaw(x.tab); setOpenPostRaw(x.post); const i = (e && e.state && e.state.t365) || 0; navRef.current = i; setNavIdx(i); }; window.addEventListener("popstate", on); return () => window.removeEventListener("popstate", on); }, []);
   const upsertRead = (row) => setReads((prev) => { const i = prev.findIndex((x) => x.Title === row.Title); if (i < 0) return [...prev, row]; const n = prev.slice(); n[i] = { ...n[i], ...row }; return n; });
 
   const ctx = { goPost: (cat, id) => setTab(catMap[cat] ? "cat:" + cat : "all", String(id)), openContact: () => setContactOpen(true),
@@ -5567,10 +5627,23 @@ function App({ boot }) {
                 {sideCollapsed ? <ArrowRightFromLine size={17} /> : <ArrowLeftToLine size={17} />}
               </button>
             )}
-            <span className="shrink-0 w-px h-4 bg-slate-200 mr-1 hidden md:block"></span>
-            <span className="shrink-0 hidden md:inline">Star Truck Korea</span>
-            <span className="hidden md:inline">/</span>
-            <span className="text-slate-700 font-medium truncate">{cur.label}</span>
+            <span className="shrink-0 w-px h-4 bg-slate-200 hidden md:block"></span>
+            {/* 뒤로 — 앱 안에서 옮겨 다닌 기록이 있으면 그 전 화면, 없으면 Overview */}
+            {(() => { const can = navIdx > 0 || tab !== "overview" || !!openPostId; return (
+              <button onClick={() => { if (navIdx > 0) history.back(); else setTab("overview"); }} disabled={!can} title={navIdx > 0 ? "이전 화면으로" : "Overview 로"} aria-label="뒤로"
+                className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 disabled:text-slate-300 disabled:hover:bg-transparent transition-colors" data-testid="nav-back"><ArrowLeft size={17} /></button>); })()}
+            {/* 경로 — 누르면 그 화면으로 */}
+            <div role="navigation" className="flex items-center gap-1 min-w-0 text-[13px]" aria-label="현재 위치" data-testid="crumbs">
+              <button onClick={() => setTab("overview")} className="shrink-0 inline-flex items-center gap-1.5 h-7 px-1.5 rounded-md text-slate-400 hover:text-slate-800 hover:bg-slate-100 transition-colors" title="Overview 로" data-crumb="home"><Home size={14} /><span className="hidden md:inline">Star Truck Korea</span></button>
+              {(() => {
+                const sep = <ChevronRight size={13} className="shrink-0 text-slate-300" />;
+                return (<>
+                  {sep}
+                  {openPostId ? <button onClick={() => setTab(tab)} className="shrink-0 h-7 px-1.5 rounded-md text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors" title={`${cur.label} 목록으로`} data-crumb="tab">{cur.label}</button>
+                    : <span className="h-7 px-1.5 inline-flex items-center text-slate-800 font-semibold truncate" aria-current="page" data-crumb="tab">{cur.label}</span>}
+                </>);
+              })()}
+            </div>
           </div>
           <div className="flex items-center gap-2 md:gap-4 shrink-0">
             <div className="leading-tight text-sm text-slate-500 hidden md:block text-right" title={[me.name, me.email].filter(Boolean).join("\n")}>
