@@ -71,6 +71,9 @@
   .t365-portlet-head { display: flex; align-items: center; gap: .5rem; padding: 0 1rem; height: 3rem; background: #fff; border-bottom: 1px solid #E2E8F0; }
   /* 게시판 홈 표 — 칸 사이 옅은 세로선(줄 전체 높이) */
   .t365-cols > * + * { border-left: 1px solid #E9EEF3; padding-left: 12px; }
+  .t365-boardchip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid transparent; font-size: 11.5px; font-weight: 600; line-height: 1; letter-spacing: -0.01em; }
+  .t365-postno { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 6px; background: #F1F5F9; color: #475569; font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: -0.02em; }
+  .t365-postno::before { content: "#"; color: #94A3B8; margin-right: 1px; }
   @media (max-width: 639px) { .t365-cols > * + * { border-left: 0; padding-left: 0; } }
   .t365-meta > span + span::before { content: ""; display: inline-block; width: 1px; height: 11px; background: #E2E8F0; margin: 0 12px; }
   .t365-pop { animation: t365-pop .22s cubic-bezier(.2,.9,.3,1.15); }
@@ -612,6 +615,21 @@ async function tUploadBanner(file) {
   if (!res.ok) throw new Error(`배너 그림 업로드 실패 (${res.status})`);
   const item = await res.json();
   return { name: String(file.name).slice(0, 200), size: file.size, type: file.type, driveId, itemId: item.id };
+}
+// 배너 그림 대신 받기(10-14) — 내려받기 주소를 못 받거나 그 주소로 그림이 안 열리면, Graph /content 로 직접 받아 blob 주소로 보여 준다(GA 샘플 그림과 같은 방식).
+const _tImgBlobs = new Map();
+async function tImageBlobUrl(f) {
+  if (!T365_ID_RE.test(f.driveId) || !T365_ID_RE.test(f.itemId)) throw new Error("파일 정보가 올바르지 않습니다.");
+  const k = `${f.driveId}/${f.itemId}`;
+  if (!_tImgBlobs.has(k)) {
+    const p = (async () => {
+      const res = await gfetch(`${GRAPH}/drives/${f.driveId}/items/${f.itemId}/content`, { headers: { Authorization: "Bearer " + await getGraphToken() } });
+      if (!res.ok) throw new Error(`그림 받기 실패 (${res.status})`);
+      return URL.createObjectURL(await res.blob());
+    })();
+    _tImgBlobs.set(k, p); p.catch(() => _tImgBlobs.delete(k));   // 실패는 기억하지 않는다(다음에 다시)
+  }
+  return _tImgBlobs.get(k);
 }
 const _tImgUrls = new Map();
 async function tImageUrl(f) {
@@ -1451,13 +1469,18 @@ function ToastHost() {
 // 게시판 홈 표 — 게시판 칸(아이콘 + 이름) · 머리 줄. 공지 · 필수와 최근 게시물이 같은 칸 너비를 쓴다
 function BoardCell({ cat, bare }) {
   const I = (cat && cat.icon) || FileText;
+  // 10-14: 게시판은 글 내용과 섞여 보이지 않게 테두리 있는 작은 칩으로(게시판 색)
   return (
-    <span className={`${bare ? "max-w-full inline-flex" : "w-[132px] shrink-0 hidden sm:inline-flex"} items-center gap-1.5 min-w-0`} style={{ color: cat && cat.color }}>
-      <span className="w-5 h-5 rounded-md flex items-center justify-center shrink-0" style={{ background: cat && cat.soft }}><I size={11} style={{ color: cat && cat.color }} /></span>
-      <span className="text-[12px] font-medium truncate">{cat ? cat.label : "-"}</span>
+    <span className={`${bare ? "max-w-full inline-flex" : "w-[132px] shrink-0 hidden sm:inline-flex"} items-center min-w-0`}>
+      <span className="t365-boardchip" style={{ color: cat && cat.color, background: cat && cat.soft, borderColor: cat ? cat.color + "33" : undefined }} data-boardchip>
+        <I size={11} className="shrink-0" /><span className="truncate">{cat ? cat.label : "-"}</span>
+      </span>
     </span>
   );
 }
+// 글번호(10-14) — 게시물 고유 번호(SharePoint 항목 ID, 게시물 주소 #/cat/키/번호 와 같음). 지우거나 옮겨도 바뀌지 않아 이 번호로 찾을 수 있다
+const PostNoCell = ({ p }) => <span className="w-[64px] shrink-0 hidden sm:flex items-center" data-postno={p.id}><span className="t365-postno">{p.id}</span></span>;
+const postNoTerm = (t) => { const m = /^(?:#|no\.?|글번호)?(\d{1,9})$/i.exec(String(t || "").trim()); return m ? String(Number(m[1])) : ""; };
 const HomeColHead = ({ children }) => <div className="t365-cols px-4 h-9 flex items-stretch gap-3 bg-[#F1F4F8] border-b border-slate-200 text-[12px] font-semibold text-slate-600 select-none">{children}</div>;
 // 새 글 점 — 7일 안에 올라왔고 내가 아직 열지 않은 글. 읽으면 사라진다(예전 「N」 대신)
 const NewDot = () => <span className="t365-newdot" role="img" aria-label="새 글 — 아직 읽지 않음" title="새 글 — 아직 읽지 않았습니다" data-new="1"></span>;
@@ -1539,8 +1562,13 @@ function SearchPopup({ ctx, initialQ, hidden, suspended, onClose, onOpen, onAsk,
   const docs = useMemo(() => posts.filter((p) => catMap[p.Category]).map((p) => ({ p, t: String(p.Title || ""), b: plainPreview(p.Body, 4000), a: p.Answer ? plainPreview(p.Answer, 4000) : "", f: parseFiles(p.AttachmentsJson).map((x) => x.name).join(" · "), w: String(p.AuthorName || "") })), [posts, catMap]);
   const hits = useMemo(() => {
     if (!terms.length) return [];
-    const out = [];
+    // 글번호로 찾기(10-14) — 「#12」 · 「12」 · 「No.12」 처럼 번호 하나만 넣으면 그 번호 글을 맨 위에(본문에 그 숫자가 든 글은 그 아래)
+    const no = terms.length === 1 ? postNoTerm(terms[0]) : "";
+    const byNo = no ? docs.find((d) => String(d.p.id) === no) : null;
+    if (byNo && terms[0].replace(/\d/g, "")) return [{ p: byNo.p, score: 1e9, snip: byNo.b.slice(0, 110), label: "글번호" }];   // 「#12」 처럼 표시가 붙었으면 그 글만
+    const out = byNo ? [{ p: byNo.p, score: 1e9, snip: byNo.b.slice(0, 110), label: "글번호" }] : [];
     docs.forEach((d) => {
+      if (byNo && d === byNo) return;
       const L = { t: d.t.toLowerCase(), b: d.b.toLowerCase(), a: d.a.toLowerCase(), f: d.f.toLowerCase(), w: d.w.toLowerCase() };
       let score = 0;
       for (const term of terms) {   // 모든 낱말이 어딘가에 있어야(그리고) — 제목에 있으면 더 위로
@@ -1688,13 +1716,13 @@ function QuickLinksRail({ links, onManage }) {
         <div className="p-2 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-1 gap-1">
           {links.map((l) => (
             <a key={l.id} href={l.href} target="_blank" rel="noopener noreferrer" data-link={l.id.slice(5)} title={l.desc ? `${l.desc}\n${l.href}` : l.href} aria-label={`${l.label} — 새 창으로 열기`}
-              className="group flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-slate-50 min-w-0">
-              <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ring-1 ring-slate-200 bg-white shadow-sm"><l.icon size={15} style={{ color: l.color }} /></span>
+              className="group relative flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-slate-50 min-w-0">
+              <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ring-1 ring-slate-200 bg-white shadow-sm"><l.icon size={14} style={{ color: l.color }} /></span>
               <span className="min-w-0 flex-1">
                 <span className="block text-[13px] font-semibold text-slate-800 truncate group-hover:text-[#2F7B7A]" data-link-title>{l.label}</span>
                 {l.desc && <span className="block text-[11px] text-slate-400 truncate">{l.desc}</span>}
               </span>
-              <ExternalLink size={12} className="shrink-0 text-slate-300 group-hover:text-slate-500" aria-hidden="true" />
+              <ExternalLink size={11} className="absolute right-1.5 top-1.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true" />
             </a>
           ))}
         </div>
@@ -1759,7 +1787,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
   const showLinks = links.length > 0 || !!onManageLinks;
   return (
     <div className={showLinks ? "w-full flex flex-col lg:flex-row lg:items-start gap-4" : "w-full"}>
-      {showLinks && <aside className="lg:w-[220px] shrink-0 lg:sticky lg:top-0"><QuickLinksRail links={links} onManage={onManageLinks} /></aside>}
+      {showLinks && <aside className="lg:w-[184px] shrink-0 lg:sticky lg:top-0"><QuickLinksRail links={links} onManage={onManageLinks} /></aside>}
       <div className="min-w-0 flex-1">
       <BannerCarousel ctx={ctx} banners={banners || []} onManage={onManageBanners} strip={
         <div className="flex flex-col min-[1400px]:flex-row min-[1400px]:items-end gap-3 min-[1400px]:gap-5">
@@ -1794,7 +1822,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
               {noticeAny && canAll && <button onClick={() => onSearch("", "notice")} title="지난 공지 · 필수까지 모두 보기" className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 whitespace-nowrap shrink-0 inline-flex items-center" data-testid="notice-more">지난 글<ChevronRight size={13} /></button>}
             </div>
             {notice.length > 0 && <HomeColHead>
-              <span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
+              <span className="w-[64px] shrink-0 hidden sm:flex items-center" title="게시물 고유 번호 — 검색 칸에 번호(예: #12)를 넣어 찾을 수 있습니다">글번호</span><span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
               <span className={`w-[108px] shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center`}>작성자</span>
               <span className="w-[104px] shrink-0 hidden md:flex items-center">작성일</span>{ctx.isAgent && <span className="w-[46px] sm:w-[100px] shrink-0 flex items-center"><span className="hidden sm:inline">조회확인</span></span>}
             </HomeColHead>}
@@ -1802,6 +1830,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
               const c = catMap[p.Category]; const r = myRow(p);
               return (
                 <button key={p.id} onClick={() => openPost(p)} data-notice={p.id} title={p.Title} className="t365-cols w-full text-left px-4 h-11 flex items-stretch gap-3 border-t border-[#E9EEF3] first:border-t-0 even:bg-slate-50/70 hover:!bg-[#EEF6F5] min-w-0">
+                  <PostNoCell p={p} />
                   <BoardCell cat={c} />
                   <span className="min-w-0 flex-1 flex items-center gap-1.5">
                     {fresh(p) && <NewDot />}
@@ -1833,7 +1862,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
               {canAll && <button onClick={() => setTab("all")} className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 inline-flex items-center shrink-0" data-testid="recent-more">전체 게시물<ChevronRight size={13} /></button>}
             </div>
             {recent.length > 0 && <HomeColHead>
-              <span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
+              <span className="w-[64px] shrink-0 hidden sm:flex items-center" title="게시물 고유 번호 — 검색 칸에 번호(예: #12)를 넣어 찾을 수 있습니다">글번호</span><span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
               <span className={`w-[108px] shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center`}>작성자</span><span className="w-[104px] shrink-0 flex items-center">작성일</span>
               {ctx.isAgent && <span className="w-[100px] shrink-0 hidden sm:flex items-center">열람</span>}
             </HomeColHead>}
@@ -1841,6 +1870,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
               const c = catMap[p.Category]; const rd = seen(p);
               return (
                 <button key={p.id} onClick={() => openPost(p)} data-wpost={p.id} title={p.Title} className={`t365-cols w-full text-left px-4 h-11 ${i >= 6 ? "hidden sm:flex" : "flex"} items-stretch gap-3 border-t border-[#E9EEF3] first:border-t-0 even:bg-slate-50/70 hover:!bg-[#EEF6F5] min-w-0`}>
+                  <PostNoCell p={p} />
                   <BoardCell cat={c} />
                   <span className="min-w-0 flex-1 flex items-center gap-1.5">
                     {fresh(p) && <NewDot />}
@@ -1999,7 +2029,8 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
     const t = String(p.Title || "").toLowerCase(), b = (plainPreview(p.Body, 4000) + " " + parseFiles(p.AttachmentsJson).map((f) => f.name).join(" ") + (p.Answer ? " " + plainPreview(p.Answer, 4000) : "")).toLowerCase(), a = String(p.AuthorName || "").toLowerCase();
     return field === "t" ? t : field === "b" ? b : field === "a" ? a : t + "\n" + b;
   };
-  const hitWith = (any) => (p) => { if (!words.length) return true; const h = hayOf(p); return any ? words.some((w) => h.includes(w)) : words.every((w) => h.includes(w)); };
+  const qNo = words.length === 1 ? postNoTerm(words[0]) : "";   // 글번호(10-14) — 번호 하나만 넣으면 그 번호 글도 함께
+  const hitWith = (any) => (p) => { if (!words.length) return true; if (qNo && String(p.id) === qNo) return true; const h = hayOf(p); return any ? words.some((w) => h.includes(w)) : words.every((w) => h.includes(w)); };
   const rateOf = (p) => (p.RequireConfirm ? confirmStats(p, readIdx, ctx.agents) : null);
   const isTodo = (p) => p.RequireConfirm && !(myRow(p) && myRow(p).ConfirmedAt);
   const isMine = (p) => normEmail(p.AuthorEmail) === normEmail(me.email);
@@ -2358,6 +2389,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
                 <div className="text-[11.5px] text-slate-500 tabular-nums mt-0.5">{fmtDate(post.PublishedAt || post._created)}{post.UpdatedAt && <span className="text-slate-400"> · 수정 {fmtDate(post.UpdatedAt)}</span>}</div>
               </div>
               <div className="sm:ml-auto flex items-center gap-1.5 flex-wrap">
+                <span className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-white border border-slate-200 text-[12px] text-slate-500" title="게시물 고유 번호 — 검색 칸에 번호(예: #12)를 넣어 찾을 수 있습니다" data-testid="post-no">글번호<span className="t365-postno !h-[18px] !px-1">{post.id}</span></span>
                 <span className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-white border border-slate-200 text-[12px] text-slate-600 tabular-nums" title="열어 본 횟수의 합 — 같은 사람이 다시 열어도 1씩 늘어납니다"><Eye size={13} className="text-slate-400" />조회 <b className="text-slate-800" data-testid="meta-views">{vs.views}</b></span>
                 {files.length > 0 && <button onClick={() => { const el = scrollRef.current && scrollRef.current.querySelector("[data-testid=attachments]"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-white border border-slate-200 text-[12px] text-slate-600 hover:border-[#9CCBC8] hover:text-[#2F7B7A]" data-testid="meta-files"><Paperclip size={13} className="text-slate-400" />첨부 <b className="text-slate-800">{files.length}</b></button>}
                 {ctx.isAgent && (post.RequireConfirm || confirmed) && <span className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold ${confirmed ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-orange-50 text-orange-700 border border-orange-200"}`} data-testid="meta-mine" title={confirmed ? `처음 확인 ${fmtDate(mine.ConfirmedAt)} — 조회확인은 처음 연 시각만 남습니다` : undefined}>{confirmed ? <><CheckCircle2 size={13} /><span className="tabular-nums">{shortDate(mine.ConfirmedAt)}</span></> : <><BellRing size={12} />확인 필요</>}</span>}
@@ -3849,16 +3881,27 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
 /* Overview 배너 — 관리자가 올린 그림을 돌려 보여 준다(6초마다 · 마우스를 올리면 멈춤).        */
 /* 배너가 없거나 목록이 없으면 그림 없는 기본 배너(Training365 · Star Truck Korea).            */
 /* ------------------------------------------------------------------ */
-function BannerImg({ file, className, alt }) {
+// 배너 그림(10-14) — 내려받기 주소로 먼저, 주소를 못 받거나 그림이 깨지면 Graph 에서 직접 받아(blob) 다시 — 그래도 안 되면 회색 칸 + 콘솔 안내
+function BannerImg({ file, className, alt, showErr }) {
   const [src, setSrc] = useState("");
   const [err, setErr] = useState(false);
+  const [why, setWhy] = useState("");
+  const blobTried = useRef(false);
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
+  function viaBlob(why) {
+    if (blobTried.current) { console.warn("Training365 배너 그림을 불러오지 못했습니다:", file && file.name, why); setWhy(why || ""); setErr(true); return; }
+    blobTried.current = true;
+    tImageBlobUrl(file).then((u) => { if (alive.current) setSrc(u); }, (e) => { const w = (why ? why + " / " : "") + (e && e.message); console.warn("Training365 배너 그림을 불러오지 못했습니다:", file && file.name, w); if (alive.current) { setWhy(w); setErr(true); } });
+  }
   useEffect(() => {
-    let alive = true; setErr(false);
-    if (file) tImageUrl(file).then((u) => { if (alive) setSrc(u); }, () => { if (alive) setErr(true); });
-    return () => { alive = false; };
+    let on = true; setErr(false); setWhy(""); setSrc(""); blobTried.current = false;
+    if (file) tImageUrl(file).then((u) => { if (on) setSrc(u); }, (e) => { if (on) viaBlob(e && e.message); });
+    return () => { on = false; };
   }, [file && file.itemId]);
-  if (!file || err) return <div className={`${className || ""} bg-slate-200`} aria-hidden="true"></div>;
-  return src ? <img src={src} alt={alt || ""} className={className} draggable={false} /> : <div className={`${className || ""} bg-slate-200 animate-pulse`} aria-hidden="true"></div>;
+  if (!file || err) return showErr && file ? <div className={`${className || ""} bg-slate-100 flex items-center justify-center text-center text-[10.5px] leading-tight text-red-500 px-1`} title={why ? `그림을 불러오지 못했습니다 — ${why}` : "그림을 불러오지 못했습니다"} data-banner-img="fail">그림을 불러오지<br />못했습니다</div>
+    : <div className={`${className || ""} bg-slate-200`} aria-hidden="true" data-banner-img="fail"></div>;
+  return src ? <img src={src} alt={alt || ""} className={className} draggable={false} onError={() => viaBlob("그림 주소 열기 실패")} data-banner-img="ok" /> : <div className={`${className || ""} bg-slate-200 animate-pulse`} aria-hidden="true" data-banner-img="wait"></div>;
 }
 // 배너 아래쪽 게시판 아이콘 줄 — 최근 7일 안에 올라온 글 중 안 읽은 글 수(빨간 숫자). 읽으면 줄고 다 읽으면 사라진다
 // (예전에는 다 읽으면 회색으로 「새 글 수」 를 보여 줘서, 읽었더니 숫자가 커지는 것처럼 보였다 — 사용성 점검 10-12)
@@ -3868,7 +3911,7 @@ function BoardIconStrip({ ctx, onGo }) {
   const since = Date.now() - T365_FRESH_MS;
   const read = (p) => seenBy(p, (readIdx.get(String(p.id)) || new Map()).get(normEmail(me.email)), me);
   return (
-    <div className="flex items-end gap-1 md:gap-1.5 overflow-x-auto pb-0.5 -mx-1 px-1" data-testid="board-icons">
+    <div className="overflow-x-auto pb-0.5 -mx-1 px-1"><div className="inline-grid grid-flow-col auto-cols-fr items-end gap-0.5 md:gap-1" data-testid="board-icons">
       {cats.map((c) => {
         const fresh = posts.filter((p) => p.Category === c.key && postTs(p) >= since);
         const unread = fresh.filter((p) => !read(p)).length;
@@ -3876,7 +3919,7 @@ function BoardIconStrip({ ctx, onGo }) {
         const I = c.icon || FileText;
         return (
           <button key={c.key} onClick={() => onGo(c.key)} data-bicon={c.key} title={`${c.label}${n ? ` — 최근 7일 안 읽은 새 글 ${unread}건` : fresh.length ? ` — 최근 7일 새 글 ${fresh.length}건 · 모두 읽음` : ""}`}
-            className="group shrink-0 min-w-[60px] px-2 md:px-2.5 flex flex-col items-center gap-1 pt-2 pb-1 rounded-xl hover:bg-white/10 transition-colors">
+            className="group min-w-[60px] px-2 md:px-2.5 flex flex-col items-center gap-1 pt-2 pb-1 rounded-xl hover:bg-white/10 transition-colors">
             <span className="relative w-9 h-9 md:w-10 md:h-10 rounded-xl flex items-center justify-center bg-white shadow-md shadow-black/20 transition-transform group-hover:-translate-y-0.5">
               <I size={17} style={{ color: c.color }} />
               {n > 0 && <span data-badge={c.key} data-tone={red ? "red" : "gray"} className="absolute -top-1.5 -right-1.5 min-w-[19px] h-[19px] px-1 rounded-full text-[10.5px] font-bold text-white flex items-center justify-center tabular-nums" style={{ background: red ? "#E11D48" : "#94A3B8", boxShadow: "0 0 0 2px rgba(16,27,52,.9)" }}>{n > 99 ? "99+" : n}</span>}
@@ -3885,7 +3928,7 @@ function BoardIconStrip({ ctx, onGo }) {
           </button>
         );
       })}
-    </div>
+    </div></div>
   );
 }
 function DefaultHero({ ctx, onManage, strip }) {
@@ -4263,7 +4306,7 @@ function BannerAdmin({ ctx, rows, listStatus, reload, canEd }) {
         <div className="divide-y divide-slate-100">
           {list.map((b) => (
             <div key={b.id} className={`flex items-center gap-3 px-4 py-3 flex-wrap sm:flex-nowrap ${b.active ? "" : "opacity-55"}`} data-banner-row={b.id}>
-              <div className="w-[132px] h-[56px] rounded-lg overflow-hidden shrink-0 relative bg-slate-100"><BannerImg file={b.image} className="w-full h-full object-cover" /></div>
+              <div className="w-[132px] h-[56px] rounded-lg overflow-hidden shrink-0 relative bg-slate-100"><BannerImg file={b.image} className="w-full h-full object-cover" showErr /></div>
               <div className="min-w-0 flex-1">
                 <div className="text-[13.5px] font-semibold text-slate-800 truncate">{b.title || <span className="text-slate-400 font-normal">(제목 없음 — 그림만)</span>}</div>
                 <div className="text-[12px] text-slate-500 truncate">{b.subtitle || "-"}</div>
@@ -5283,7 +5326,7 @@ function App({ boot }) {
           </div>
         </div>
         <main className="t365-main-scroll flex-1 p-4 pb-24 md:p-6 md:pb-24 overflow-y-auto">
-          <div className="max-w-[1600px] mx-auto">
+          <div className={`${tab === "overview" ? "max-w-[1840px]" : "max-w-[1600px]"} mx-auto`}>
             {tab !== "overview" && !(openPostId && (tab.startsWith("cat:") || tab === "all")) && (
               <PageHeader icon={meta[0]} title={cur.label} subtitle={meta[1]} tint={meta[2]} right={curCat && curCat.contacts && curCat.contacts.length ? (
                 <div className="hidden sm:flex items-center gap-1.5 text-[12px] text-slate-500" data-testid="board-contacts">
