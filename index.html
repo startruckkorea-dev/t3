@@ -1686,7 +1686,8 @@ const SeenMark = ({ r, confirm, tight }) => {
 // 공지 · 필수 표시 — 옅은 바탕 + 가는 테두리의 작은 알약(괄호 글자 대신)
 const NoticePill = () => <span className="t365-pill !rounded-full !px-2 !font-semibold bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200/80" data-pill="pin"><Pin size={10} />공지</span>;
 const ReqPill = () => <span className="t365-pill !rounded-full !px-2 !font-semibold bg-orange-50 text-[#C2410C] ring-1 ring-inset ring-orange-200/80" data-pill="req"><BellRing size={10} />필수</span>;
-const dateCell = (p) => shortDate(p.PublishedAt || p._created);   // 게시판 목록 작성일 — 시각까지(KST)
+// 게시판 목록 작성일 — 연도까지 「2026.10.14 21:54」(KST)
+const dateCell = (p) => { const d = fmtDate(p.PublishedAt || p._created); return d === "-" ? d : d.replace(/-/g, "."); };
 // 입력 칸에서 치는 글자(검색어 등)와 겹치지 않을 때만 「/」 로 검색 칸 열기
 const isTyping = (e) => { const t = e.target; return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable); };
 
@@ -2295,7 +2296,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
         {view === "list" && (
           <div className="hidden md:block">
             <table className="w-full table-fixed" data-testid="board-table">
-              <colgroup><col style={{ width: 64 }} />{!catKey && <col style={{ width: 140 }} />}<col /><col style={{ width: 120 }} /><col style={{ width: 120 }} /><col style={{ width: 70 }} />{showStatusCol && <col style={{ width: 110 }} />}</colgroup>
+              <colgroup><col style={{ width: 64 }} />{!catKey && <col style={{ width: 140 }} />}<col /><col style={{ width: 120 }} /><col style={{ width: 140 }} /><col style={{ width: 70 }} />{showStatusCol && <col style={{ width: 110 }} />}</colgroup>
               <thead className="text-slate-600 text-[12.5px] bg-[#F1F4F8]">
                 <tr>{["번호", ...(catKey ? [] : ["게시판"]), "제목", "작성자", "작성일", "조회", ...(showStatusCol ? [statusHead] : [])].map((h) => <th key={h} className="px-3 h-10 font-semibold whitespace-nowrap border-y border-slate-300/70 text-left">{h}</th>)}</tr>
               </thead>
@@ -2304,7 +2305,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
                   const vs = viewStats(readIdx, p.id);
                   return (
                     <tr key={(pin ? "pin" : "") + p.id} onClick={() => setOpenId(p.id)} data-post={p.id} data-pin={pin ? "1" : undefined} title={p.Title} className={`border-t border-slate-200/80 first:border-t-0 cursor-pointer ${pin ? "bg-[#FFFCF5] hover:bg-[#FFF8EA] shadow-[inset_3px_0_0_#F59E0B]" : "hover:bg-[#F3F8F8]"}`}>
-                      <td className="px-3 h-10 text-left text-[12.5px] text-slate-400 tabular-nums">{numOf.get(p.id)}</td>
+                      <td className="px-3 h-10 text-left text-[12.5px] text-slate-400 tabular-nums">{pin ? <span className="inline-flex items-center gap-0.5 text-[11.5px] font-semibold text-amber-600" title={`맨 위 고정 공지 — 글 번호 ${numOf.get(p.id)}`} data-pin-no><Pin size={11} />공지</span> : numOf.get(p.id)}</td>
                       {!catKey && <td className="px-3 h-10 truncate"><span className="flex"><BoardCell cat={catMap[p.Category]} bare /></span></td>}
                       <td className="px-3 h-10 min-w-0"><TitleLine p={p} pin={pin} inTable /></td>
                       <td className="px-3 h-10 text-[12.5px] text-slate-600 truncate text-left"><HlTerms text={p.AuthorName || "-"} terms={field === "a" ? words : null} /></td>
