@@ -372,6 +372,8 @@ async function getGraphToken() {
 const _sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 async function gfetch(url, init) {
   const method = String((init && init.method) || "GET").toUpperCase();
+  // 읽기는 브라우저 캐시를 쓰지 않는다 — 방금 올린 글이 옛 응답에 가려지지 않게
+  if (method === "GET") init = { cache: "no-store", ...(init || {}) };
   for (let n = 0; ; n++) {
     const res = await fetch(url, init);
     const retryable = res.status === 429 || res.status === 503 || (res.status === 504 && method !== "POST");
@@ -428,6 +430,31 @@ async function tSafeFields(listName, fields) {
   Object.keys(fields).forEach((k) => { if (cols.has(k)) out[k] = fields[k]; else console.warn(`[Training365] ${listName} 에 ${k} 열이 없어 저장하지 않습니다`); });
   return out;
 }
+/* ---- 방금 쓴 게시물 — SharePoint 목록 읽기는 쓰기 직후 몇 초 늦게 반영될 때가 있어(새 글이 안 보여 새로고침해야 하던 문제 10-15)
+ * 이 브라우저에서 만든 · 고친 · 지운 게시물을 3분 동안 기억했다가, 다시 읽은 목록에 아직 없거나 옛 값이면 덧씌운다. 서버가 따라오면 지운다 */
+const _tLocal = { made: new Map(), patch: new Map(), gone: new Map() };
+const T365_LOCAL_MS = 3 * 60e3;
+function tLocalNote(kind, id, data) {
+  id = String(id); const at = Date.now();
+  if (kind === "made") _tLocal.made.set(id, { row: data, at });
+  else if (kind === "patch") { const cur = _tLocal.patch.get(id); _tLocal.patch.set(id, { f: { ...(cur ? cur.f : {}), ...data }, at }); }
+  else if (kind === "gone") { _tLocal.gone.set(id, at); _tLocal.made.delete(id); _tLocal.patch.delete(id); }
+}
+function tApplyLocal(list) {
+  const now = Date.now();
+  for (const m of [_tLocal.made, _tLocal.patch]) for (const [k, v] of m) if (now - v.at > T365_LOCAL_MS) m.delete(k);
+  for (const [k, at] of _tLocal.gone) if (now - at > T365_LOCAL_MS) _tLocal.gone.delete(k);
+  const same = (a, b) => String(a == null ? "" : a) === String(b == null ? "" : b);
+  let out = list.filter((r) => !_tLocal.gone.has(String(r.id)));
+  const ids = new Set(out.map((r) => String(r.id)));
+  for (const [k, v] of _tLocal.made) { if (ids.has(k)) _tLocal.made.delete(k); else out.push({ ...v.row, _modified: "" }); }
+  out = out.map((r) => {
+    const pt = _tLocal.patch.get(String(r.id)); if (!pt) return r;
+    if (Object.keys(pt.f).every((f) => same(r[f], pt.f[f]))) { if (!_tLocal.made.has(String(r.id))) _tLocal.patch.delete(String(r.id)); return r; }
+    return { ...r, ...pt.f, _modified: "" };   // 덧씌운 행은 서버 수정 시각을 모른다 — 「다른 사람이 수정함」 확인을 건너뛰게(비워 둠)
+  });
+  return out;
+}
 // 5,000건 임계 대비 nextLink 를 따라 끝까지(MKQR mkListAll 과 같음)
 async function tListAll(listName, extraQuery = "", opts) {
   const token = await getGraphToken();
@@ -455,7 +482,9 @@ async function tCreate(listName, fields) {
   });
   if (!res.ok) { const d = await res.text().catch(() => ""); const e = new Error(`${listName} 저장 실패 (${res.status}): ${d.slice(0, 200)}`); e.status = res.status; throw e; }
   const j = await res.json();
-  return { id: String(j.id), ...(j.fields || body) };
+  const made = { id: String(j.id), ...(j.fields || body) };
+  if (listName === T365_LISTS.posts) tLocalNote("made", made.id, { ...body, ...made, _created: j.createdDateTime || new Date().toISOString(), _modified: "", _createdBy: normEmail(((j.createdBy || {}).user || {}).email) });
+  return made;
 }
 async function tUpdate(listName, itemId, fields, opts) {
   t365AssertWrite(listName, [fields && fields.Category, opts && opts.prevCat].filter(Boolean));
@@ -466,6 +495,7 @@ async function tUpdate(listName, itemId, fields, opts) {
     method: "PATCH", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body), keepalive: !!(opts && opts.keepalive),
   });
   if (!res.ok) { const d = await res.text().catch(() => ""); const e = new Error(`${listName} 수정 실패 (${res.status}): ${d.slice(0, 200)}`); e.status = res.status; throw e; }
+  if (listName === T365_LISTS.posts) tLocalNote("patch", itemId, body);
   return res.json();
 }
 // 한 행 — 수정 직전 충돌 확인용(lastModifiedDateTime)
@@ -484,6 +514,7 @@ async function tDelete(listName, itemId, opts) {
   const listId = await tListId(listName);
   const res = await gfetch(`${GRAPH}/sites/${_siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}`, { method: "DELETE", headers: { Authorization: "Bearer " + token } });
   if (!res.ok && res.status !== 404) { const e = new Error(`${listName} 삭제 실패 (${res.status})`); e.status = res.status; throw e; }
+  if (listName === T365_LISTS.posts) tLocalNote("gone", itemId);
 }
 // 목록 준비 상태 — 관리자 안내용 { list: { missing, missingCols:[] } }
 async function tCheckLists() {
@@ -5392,9 +5423,11 @@ function App({ boot }) {
   const reloadSeq = useRef(0);
   const loadedRef = useRef(false);     // 게시물을 한 번이라도 읽었는지 — 그 뒤의 일시 오류는 이전 내용 유지
   const accessAtRef = useRef(0);       // 접속 기록 · 목록 점검을 마지막으로 읽은 때
-  async function reload() {
+  const lastLoadRef = useRef(0);
+  async function reload(opts) {
     const seq = ++reloadSeq.current;   // 겹쳐 부른 경우 늦게 도착한 옛 응답이 새 응답을 덮지 않게 — 마지막 호출만 반영
-    setLoading(true);
+    lastLoadRef.current = Date.now();
+    if (!(opts && opts.quiet)) setLoading(true);
     const wrap = (pr) => pr.then((v) => ({ v }), (e) => ({ e }));
     const [p, r, u, c, bn, lk] = await Promise.all([wrap(tListAll(T365_LISTS.posts)), wrap(tLoadReads(me0.email)), wrap(tListAll(T365_LISTS.users)), wrap(tListAll(T365_LISTS.categories)), wrap(tListAll(T365_LISTS.banners)), wrap(tListAll(T365_LISTS.links))]);
     if (seq !== reloadSeq.current) return;
@@ -5403,7 +5436,7 @@ function App({ boot }) {
     const was = loadedRef.current;
     const gone = (x) => !!x.e && isMissingListError(x.e);
     const soft = [];
-    if (p.e) { if (gone(p) || !was) { setPosts([]); setPostsErr(gone(p) ? "missing" : p.e.message); } else soft.push("게시물"); } else { setPosts(p.v); setPostsErr(""); }
+    if (p.e) { if (gone(p) || !was) { setPosts([]); setPostsErr(gone(p) ? "missing" : p.e.message); } else soft.push("게시물"); } else { setPosts(tApplyLocal(p.v)); setPostsErr(""); }
     if (r.e) { console.warn("[Training365] 조회 기록 읽기 실패:", r.e.message); if (gone(r) || !was) setReads([]); else soft.push("조회 기록"); } else setReads(r.v);
     if (c.e) { if (gone(c) || !was) setCatRows([]); else soft.push("카테고리"); } else setCatRows(c.v);
     if (bn.e) { if (gone(bn) || !was) setBannerRows([]); else soft.push("배너"); } else setBannerRows(bn.v);   // 배너 목록은 선택 — 없으면 기본 배너
@@ -5437,6 +5470,15 @@ function App({ boot }) {
     setLoading(false); setHasLoadedOnce(true);
   }
   useEffect(() => { t365PurgeOthers(me0.email); reload(); }, []);
+  // 저절로 새로 읽기 — 화면을 보고 있으면 1분마다, 다른 창 · 탭에 있다 돌아오면(30초 넘게 지났을 때) 바로. 다른 사람이 올린 글 · 답변도 새로고침 없이
+  useEffect(() => {
+    const due = (ms) => document.visibilityState === "visible" && Date.now() - lastLoadRef.current > ms;
+    const tick = () => { if (due(55e3)) reload({ quiet: true }); };
+    const back = () => { if (due(30e3)) reload({ quiet: true }); };
+    const t = setInterval(tick, 60e3);
+    document.addEventListener("visibilitychange", back); window.addEventListener("focus", back);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", back); window.removeEventListener("focus", back); };
+  }, []);
 
   // 앱 안에서 쌓인 이동 수 — 위쪽 「뒤로」 단추는 이 값이 있으면 브라우저 뒤로, 없으면 Overview 로
   const [navIdx, setNavIdx] = useState(() => { try { return (history.state && history.state.t365) || 0; } catch (e) { return 0; } });
