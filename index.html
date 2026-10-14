@@ -1603,7 +1603,7 @@ function BoardCell({ cat, bare }) {
 function HomePostRow({ p, cat, onOpen, seen, fresh, views, confirm, tags, attr, className }) {
   const pin = pinActive(p);
   return (
-    <button onClick={() => onOpen(p)} title={p.Title} {...attr} className={`group block w-full text-left px-5 py-3 border-t border-[#E9EEF3] first:border-t-0 hover:bg-[#F6FAF9] transition-colors min-w-0 ${className || ""}`}>
+    <button onClick={() => onOpen(p)} title={p.Title} {...attr} className={`group block w-full text-left px-5 py-2.5 border-t border-[#E9EEF3] first:border-t-0 hover:bg-[#F6FAF9] transition-colors min-w-0 ${className || ""}`}>
       <span className="flex items-center gap-1.5 min-w-0">
         {tags && pin && <span data-kind="pin"><NoticePill /></span>}
         {tags && p.RequireConfirm && <span data-kind="req"><ReqPill /></span>}
@@ -2210,7 +2210,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
         {/* 보기 탭 · 검색 · 글쓰기 */}
         <div className="px-3 md:px-4 border-b border-slate-200 flex flex-col md:flex-row md:items-center gap-2 md:gap-3 pt-2 md:pt-0">
           {/* 보기 탭 — 회색 바탕 위의 둥근 조각(segmented) · 아이콘 + 개수 */}
-          <div className="order-2 md:order-1 py-2 md:py-2.5 overflow-x-auto">
+          <div className="order-2 md:order-1 self-stretch flex items-end overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <div className="inline-flex items-center gap-5" role="tablist">
               {tabs.map(([k, label]) => {
                 const on = filter === k || (k === "notice" && filter === "pinned") || (k === "notice" && filter === "required" && !ctx.isAgent);
@@ -2220,11 +2220,11 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
                 const urgent = (k === "todo" || (k === "qwait" && ctx.qnaDuty)) && n > 0;   // 할 일이 있는 탭 — 고르지 않아도 개수를 주황으로
                 return (
                   <button key={k} role="tab" aria-selected={on} onClick={() => setFilter(k)} data-filter={k}
-                    className={`relative h-9 text-[13px] whitespace-nowrap inline-flex items-center gap-1.5 transition-colors ${on ? "text-slate-900 font-semibold" : "text-slate-500 hover:text-slate-800"}`}>
+                    className={`relative h-11 md:h-[52px] text-[13px] whitespace-nowrap inline-flex items-center gap-1.5 transition-colors ${on ? "text-slate-900 font-semibold" : "text-slate-500 hover:text-slate-800"}`}>
                     <TI size={14} style={{ color: on ? tint : "#94A3B8" }} />
                     {label}
                     <span className="text-[11.5px] font-semibold tabular-nums" style={{ color: urgent ? "#C2410C" : on ? tint : "#94A3B8" }}>{n}</span>
-                    {on && <span className="absolute left-0 right-0 -bottom-[9px] md:-bottom-[11px] h-[2px] rounded-full" style={{ background: tint }} aria-hidden="true"></span>}
+                    {on && <span className="absolute left-0 right-0 bottom-0 h-[2px] rounded-full" style={{ background: tint }} aria-hidden="true"></span>}
                   </button>
                 );
               })}
@@ -2279,13 +2279,13 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
                   const vs = viewStats(readIdx, p.id);
                   return (
                     <tr key={(pin ? "pin" : "") + p.id} onClick={() => setOpenId(p.id)} data-post={p.id} data-pin={pin ? "1" : undefined} title={p.Title} className={`border-t border-slate-200/80 first:border-t-0 cursor-pointer ${pin ? "bg-[#FFFCF5] hover:bg-[#FFF8EA] shadow-[inset_3px_0_0_#F59E0B]" : "hover:bg-[#F3F8F8]"}`}>
-                      <td className="px-3 h-12 text-left text-[12.5px] text-slate-400 tabular-nums">{numOf.get(p.id)}</td>
-                      {!catKey && <td className="px-3 h-12 truncate"><span className="flex"><BoardCell cat={catMap[p.Category]} bare /></span></td>}
-                      <td className="px-3 h-12 min-w-0"><TitleLine p={p} pin={pin} inTable /></td>
-                      <td className="px-3 h-12 text-[12.5px] text-slate-600 truncate text-left"><HlTerms text={p.AuthorName || "-"} terms={field === "a" ? words : null} /></td>
-                      <td className="px-3 h-12 text-left text-[12.5px] text-slate-500 tabular-nums whitespace-nowrap" title={fmtDate(p.PublishedAt || p._created)}>{dateCell(p)}</td>
-                      <td className="px-3 h-12 text-left text-[12.5px] text-slate-500 tabular-nums">{vs.views}</td>
-                      {showStatusCol && <td className="px-3 h-12 text-left"><StatusCell p={p} /></td>}
+                      <td className="px-3 h-10 text-left text-[12.5px] text-slate-400 tabular-nums">{numOf.get(p.id)}</td>
+                      {!catKey && <td className="px-3 h-10 truncate"><span className="flex"><BoardCell cat={catMap[p.Category]} bare /></span></td>}
+                      <td className="px-3 h-10 min-w-0"><TitleLine p={p} pin={pin} inTable /></td>
+                      <td className="px-3 h-10 text-[12.5px] text-slate-600 truncate text-left"><HlTerms text={p.AuthorName || "-"} terms={field === "a" ? words : null} /></td>
+                      <td className="px-3 h-10 text-left text-[12.5px] text-slate-500 tabular-nums whitespace-nowrap" title={fmtDate(p.PublishedAt || p._created)}>{dateCell(p)}</td>
+                      <td className="px-3 h-10 text-left text-[12.5px] text-slate-500 tabular-nums">{vs.views}</td>
+                      {showStatusCol && <td className="px-3 h-10 text-left"><StatusCell p={p} /></td>}
                     </tr>
                   );
                 }) : (
@@ -2301,7 +2301,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
             const vs = viewStats(readIdx, p.id); const nf = parseFiles(p.AttachmentsJson).length;
             const pv = view === "summary" ? plainPreview(p.Body, 220) : "";
             return (
-              <button key={(pin ? "pin" : "") + p.id} onClick={() => setOpenId(p.id)} data-post={p.id} className={`w-full text-left px-4 ${view === "summary" ? "md:px-5 py-3.5" : "py-3"} border-t border-slate-100 first:border-t-0 block ${pin ? "bg-[#FFFCF5] hover:bg-[#FFF8EA] shadow-[inset_3px_0_0_#F59E0B]" : "hover:bg-slate-50"}`}>
+              <button key={(pin ? "pin" : "") + p.id} onClick={() => setOpenId(p.id)} data-post={p.id} className={`w-full text-left px-4 ${view === "summary" ? "md:px-5 py-3" : "py-2.5"} border-t border-slate-100 first:border-t-0 block ${pin ? "bg-[#FFFCF5] hover:bg-[#FFF8EA] shadow-[inset_3px_0_0_#F59E0B]" : "hover:bg-slate-50"}`}>
                 <TitleLine p={p} pin={pin} big={view === "summary"} />
                 {pv && <p className="text-[13px] text-slate-500 leading-relaxed mt-1 t365-clamp2 hidden md:block"><HlTerms text={pv} terms={field === "b" || field === "tb" ? words : null} /></p>}
                 <div className="flex items-center gap-1.5 mt-1.5 text-[11.5px] text-slate-400 min-w-0">
