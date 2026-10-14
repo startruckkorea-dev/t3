@@ -1115,10 +1115,14 @@ const RichEditor = React.forwardRef(function RichEditor({ value, onChange, place
     if (!el.current || value === lastMd.current) return;
     el.current.innerHTML = mdToEditorHtml(value);
     lastMd.current = value;
+    setBare(isBare(el.current));
   }, [value]);
   useEffect(() => { try { document.execCommand("defaultParagraphSeparator", false, "p"); } catch (e) {} }, []);
-  const emit = () => { const md = editorToMd(el.current); lastMd.current = md; onChange(md); };
-  const empty = !String(value || "").trim();
+  // 안내 글자는 칸이 정말 비었을 때만 — 빈 목록 · 안내 상자 · 소제목을 막 만든 칸은 저장값이 비어도 숨긴다(목록 표시와 겹쳐 보임)
+  const isBare = (n) => !!n && !n.textContent.trim() && !n.querySelector("li, blockquote, h1, h2, h3, h4, img");
+  const [bare, setBare] = useState(true);
+  const emit = () => { const md = editorToMd(el.current); lastMd.current = md; setBare(isBare(el.current)); onChange(md); };
+  const empty = !String(value || "").trim() && bare;
   return (
     <div className="relative flex-1 min-w-0 flex">
       {empty && placeholder && <div className="absolute inset-0 px-4 py-3 text-[14.5px] leading-[1.8] text-slate-400 whitespace-pre-wrap pointer-events-none overflow-hidden" aria-hidden="true">{placeholder}</div>}
