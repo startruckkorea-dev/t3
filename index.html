@@ -2611,7 +2611,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
           {post.Category === "qna" && <QnaAnswer ctx={ctx} post={post} />}
 
           {/* 조회확인 현황(본사 · 관리) — 한 줄, 누르면 명단 */}
-          {showRate && <section className="px-5 md:px-10 pt-1 pb-5"><ConfirmPanel ctx={ctx} post={post} /></section>}
+          {showRate && <section className="px-5 md:px-10 pb-5"><ConfirmPanel ctx={ctx} post={post} /></section>}
 
           {/* 이전글 · 다음글 */}
           {(newer || older) && <nav className="border-t border-slate-200 text-[13px]" data-testid="prev-next">
@@ -2705,23 +2705,25 @@ function QnaAnswer({ ctx, post }) {
     setBusy(false);
   }
   return (
-    <section className="px-5 md:px-10 pt-1 pb-4" data-testid="qna-answer">
-      <div className={`rounded-xl overflow-hidden border ${has ? "border-[#BFD3F6] bg-white" : "border-dashed border-slate-300 bg-slate-50/60"}`}>
-        <div className="px-4 h-11 flex items-center gap-2 border-b" style={{ background: has ? "#EEF3FD" : "transparent", borderColor: has ? "#D6E2FA" : "#E2E8F0" }}>
-          <span className="w-6 h-6 rounded-md flex items-center justify-center text-[12px] font-extrabold text-white shrink-0" style={{ background: has ? "#1D4ED8" : "#94A3B8" }}>A</span>
-          <span className="text-[13px] font-semibold text-slate-800">답변</span>
-          {has && <span className="text-[11.5px] text-slate-500 truncate">{post.AnsweredBy || "담당자"}{post.AnsweredAt ? ` · ${fmtDate(post.AnsweredAt)}` : ""}</span>}
+    <section className="px-5 md:px-10 pb-5" data-testid="qna-answer">
+      {/* 답변 — 첨부와 같은 꼴: 옅은 선 + 머리 줄(아이콘 · 이름 · 담당자 · 시각), 알약 · 상자 없이 */}
+      <div className="border-t border-slate-100 pt-3">
+        <div className="flex items-center gap-1.5 flex-wrap min-h-[28px] text-[12px] text-slate-400">
+          <MessageSquareReply size={13} style={{ color: has ? "#1D4ED8" : undefined }} />
+          <span className={`font-medium ${has ? "text-[#1D4ED8]" : "text-slate-500"}`}>답변</span>
+          {has ? <span className="truncate tabular-nums">{post.AnsweredBy || "담당자"}{post.AnsweredAt ? ` · ${fmtDate(post.AnsweredAt)}` : ""}</span>
+            : <span className="inline-flex items-center gap-1"><Clock size={12} />답변 대기</span>}
+          {showSeen && <span className="text-slate-300">·</span>}
           {showSeen && (askerSeen
-            ? <span className="t365-pill bg-emerald-50 text-emerald-700 shrink-0" title={`질문자가 ${fmtDate(askerRow.LastViewedAt)} 에 답변을 봤습니다`} data-testid="qna-seen" data-seen="1"><CheckCircle2 size={10} />질문자 확인</span>
-            : <span className="t365-pill bg-slate-100 text-slate-500 shrink-0" title={notifyHref ? "질문자가 아직 답변을 보지 않았습니다 — 「질문자에게 알리기」 로 메일을 보낼 수 있습니다" : "질문자가 아직 답변을 보지 않았습니다"} data-testid="qna-seen" data-seen="0">질문자 아직 안 봄</span>)}
-          {!has && <span className="text-[11.5px] text-slate-400">답변 대기</span>}
-          {canAnswer && !editing && <span className="ml-auto flex items-center gap-1.5">
-            {notifyHref && <a href={notifyHref} onClick={() => t365Log("게시물", "답변 알림 메일", post.Title, { info: { 질문자: asker } })} className="h-7 px-2.5 rounded-md text-[12px] font-medium inline-flex items-center gap-1 border border-[#BFD3F6] text-[#1D4ED8] bg-white hover:bg-[#EEF3FD]" data-testid="qna-notify" title={`${asker} 에게 답변 알림 메일 쓰기`}><Mail size={12} />질문자에게 알리기</a>}
-            <button onClick={() => setEditing(true)} className="h-7 px-2.5 rounded-md text-[12px] font-medium inline-flex items-center gap-1 text-white" style={{ background: "#1D4ED8" }} data-testid="qna-answer-btn"><MessageSquareReply size={13} />{has ? "답변 수정" : "답변 쓰기"}</button>
+            ? <span className="inline-flex items-center gap-1 text-emerald-600" title={`질문자가 ${fmtDate(askerRow.LastViewedAt)} 에 답변을 봤습니다`} data-testid="qna-seen" data-seen="1"><CheckCircle2 size={12} />질문자 확인</span>
+            : <span className="text-slate-400" title={notifyHref ? "질문자가 아직 답변을 보지 않았습니다 — 「질문자에게 알리기」 로 메일을 보낼 수 있습니다" : "질문자가 아직 답변을 보지 않았습니다"} data-testid="qna-seen" data-seen="0">질문자 아직 안 봄</span>)}
+          {canAnswer && !editing && <span className="ml-auto flex items-center gap-3">
+            {notifyHref && <a href={notifyHref} onClick={() => t365Log("게시물", "답변 알림 메일", post.Title, { info: { 질문자: asker } })} className="inline-flex items-center gap-1 text-slate-500 hover:text-[#1D4ED8]" data-testid="qna-notify" title={`${asker} 에게 답변 알림 메일 쓰기`}><Mail size={13} />질문자에게 알리기</a>}
+            <button onClick={() => setEditing(true)} className="inline-flex items-center gap-1 font-semibold text-[#1D4ED8] hover:underline underline-offset-2" data-testid="qna-answer-btn"><SquarePen size={13} />{has ? "답변 수정" : "답변 쓰기"}</button>
           </span>}
         </div>
         {editing ? (
-          <div className="p-3">
+          <div className="mt-2">
             <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} autoFocus placeholder="답변을 입력하세요 — 줄바꿈 · 목록(-) · **굵게** 를 쓸 수 있습니다" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-[13.5px] leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/30 resize-y" data-testid="qna-answer-input" />
             <div className="mt-2 flex items-center justify-end gap-2">
               <button onClick={() => { setEditing(false); setText(post.Answer || ""); }} disabled={busy} className={btnCls}>취소</button>
@@ -2729,9 +2731,9 @@ function QnaAnswer({ ctx, post }) {
             </div>
           </div>
         ) : has ? (
-          <div className="px-4 py-3.5 text-[14px]" data-testid="qna-answer-body"><RichText text={post.Answer} /></div>
+          <div className="mt-2 pl-4 border-l-2 border-[#BFD3F6] text-[14px] max-w-[760px]" data-testid="qna-answer-body"><RichText text={post.Answer} /></div>
         ) : (
-          <div className="px-4 py-4 text-[12.5px] text-slate-500">{ctx.isAgent ? "담당자가 확인한 뒤 이곳에 답변을 드립니다. 급한 문의는 오른쪽 아래 「?」 에서 담당자에게 메일을 보내 주세요." : canAnswer ? "아직 답변이 없는 질문입니다 — 「답변 쓰기」 로 답변해 주세요." : "아직 답변이 없는 질문입니다."}</div>
+          <p className="mt-1 text-[12.5px] text-slate-400 leading-relaxed">{ctx.isAgent ? "담당자가 확인한 뒤 이곳에 답변을 드립니다. 급한 문의는 오른쪽 아래 「?」 에서 담당자에게 메일을 보내 주세요." : canAnswer ? "아직 답변이 없는 질문입니다 — 「답변 쓰기」 로 답변해 주세요." : "아직 답변이 없는 질문입니다."}</p>
         )}
       </div>
     </section>
@@ -2804,21 +2806,19 @@ function ConfirmPanel({ ctx, post }) {
       </table>
     </div>
   );
-  const chip = <span className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-full border border-slate-200 bg-white text-[11.5px] text-slate-500">{openP ? "접기" : "명단"}<ChevronDown size={13} className={`transition-transform ${openP ? "rotate-180" : ""}`} /></span>;
+  const chip = <span className="ml-auto shrink-0 inline-flex items-center gap-0.5 text-slate-400 group-hover:text-slate-700">{openP ? "접기" : "명단"}<ChevronDown size={13} className={`transition-transform ${openP ? "rotate-180" : ""}`} /></span>;
+  const head = "group w-full flex items-center gap-1.5 min-h-[28px] text-left text-[12px] text-slate-400 min-w-0";
 
   // 필수가 아닌 글 — 열람 현황만(확인율 없음)
   if (!req) return (
-    <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" data-testid="confirm-panel" data-mode="views">
-      <button onClick={() => setOpenP((v) => !v)} aria-expanded={openP} className="w-full px-4 py-3 flex items-center gap-4 text-left hover:bg-slate-50/70 transition-colors" data-testid="confirm-toggle">
-        <span className="w-11 h-11 rounded-full bg-slate-100 flex items-center justify-center shrink-0" aria-hidden="true"><Eye size={18} className="text-slate-400" /></span>
-        <span className="min-w-0 flex-1" data-testid="confirm-rate">
-          <span className="block text-[13.5px] font-semibold text-slate-800">열람 현황</span>
-          <span className="block text-[12px] text-slate-500 mt-0.5">열어 본 사람 <b className="tabular-nums text-slate-700">{viewers.length}</b>명{s.total > 0 && !isQ && <> · Agent <b className="tabular-nums text-slate-700" data-testid="reach">{agentSeen}</b><span className="tabular-nums"> / {s.total}명</span></>} · 조회 <span className="tabular-nums">{views}</span>회{!isQ && <span className="text-slate-400 hidden sm:inline"> · 조회확인 대상이 아닌 글</span>}</span>
-        </span>
+    <section className="border-t border-slate-100 pt-3" data-testid="confirm-panel" data-mode="views">
+      <button onClick={() => setOpenP((v) => !v)} aria-expanded={openP} className={head} data-testid="confirm-toggle">
+        <Eye size={13} /><span className="font-medium text-slate-500 shrink-0">열람 현황</span>
+        <span className="min-w-0 truncate ml-1.5 tabular-nums" data-testid="confirm-rate">열어 본 사람 <b className="font-medium text-slate-600">{viewers.length}</b>명{s.total > 0 && !isQ && <> · Agent <b className="font-medium text-slate-600" data-testid="reach">{agentSeen}</b> / {s.total}명</>} · 조회 {views}회{!isQ && <span className="hidden sm:inline"> · 조회확인 대상이 아닌 글</span>}</span>
         {chip}
       </button>
-      {openP && (<>
-        <div className="px-4 py-2 flex items-center gap-2 flex-wrap border-t border-slate-100">
+      {openP && (<div className="mt-2 rounded-lg border border-slate-200 overflow-hidden">
+        <div className="px-4 py-2 flex items-center gap-2 flex-wrap">
           <span className="text-[12px] text-slate-500">역할과 관계없이 열어 본 모든 사람 · 최근 열람 순</span>
           <span className="ml-auto flex items-center gap-1.5">
             {unseenAgents.length > 0 && (nudgeHref
@@ -2828,34 +2828,24 @@ function ConfirmPanel({ ctx, post }) {
           </span>
         </div>
         {viewersTable}
-      </>)}
+      </div>)}
     </section>
   );
 
   return (
-    <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden" data-testid="confirm-panel" data-mode="confirm">
-      <button onClick={() => setOpenP((v) => !v)} aria-expanded={openP} className="w-full px-4 py-3 flex items-center gap-4 text-left hover:bg-slate-50/70 transition-colors" data-testid="confirm-toggle" title="조회확인은 Agent 역할만 대상입니다 — 본사 · 관리자는 열람한 사람에만 보입니다">
-        {/* 왼쪽 — 확인율 고리 */}
-        <span className="relative w-11 h-11 shrink-0" aria-hidden="true">
-          <svg viewBox="0 0 36 36" className="w-11 h-11 -rotate-90"><circle cx="18" cy="18" r="15.5" fill="none" stroke="#E2E8F0" strokeWidth="3.5" />
-            {s.total > 0 && <circle cx="18" cy="18" r="15.5" fill="none" stroke={pctColor(s.pct)} strokeWidth="3.5" strokeLinecap="round" strokeDasharray={`${(s.pct / 100) * 97.4} 97.4`} />}</svg>
-          <span className="absolute inset-0 flex items-center justify-center">{s.total ? <span className="text-[10.5px] font-bold tabular-nums" style={{ color: pctColor(s.pct) }}>{s.pct}%</span> : <CheckCircle2 size={15} className="text-slate-300" />}</span>
-        </span>
-        <span className="min-w-0 flex-1" data-testid="confirm-rate">
-          <span className="block text-[13.5px] font-semibold text-slate-800">조회확인 현황</span>
-          <span className="block text-[12px] text-slate-500 mt-0.5">{s.total
-            ? <>Agent <b className="tabular-nums" style={{ color: pctColor(s.pct) }}>{s.done}</b><span className="tabular-nums"> / {s.total}명 확인</span>{s.total - s.done > 0 && <span className="text-orange-700"> · 미확인 {s.total - s.done}명</span>}</>
-            : "이 글은 조회확인 대상 Agent 가 없습니다"}</span>
-        </span>
-        {/* 오른쪽 — 열람 */}
-        <span className="shrink-0 hidden sm:flex flex-col items-end leading-tight pl-4 border-l border-slate-200">
-          <span className="text-[15px] font-bold text-slate-800 tabular-nums inline-flex items-center gap-1"><Eye size={13} className="text-slate-400" />{viewers.length}<span className="text-[11px] font-normal text-slate-400">명</span></span>
-          <span className="text-[10.5px] text-slate-400">열람 · 조회 {views}회</span>
-        </span>
+    <section className="border-t border-slate-100 pt-3" data-testid="confirm-panel" data-mode="confirm">
+      <button onClick={() => setOpenP((v) => !v)} aria-expanded={openP} className={head} data-testid="confirm-toggle" title="조회확인은 Agent 역할만 대상입니다 — 본사 · 관리자는 열람한 사람에만 보입니다">
+        <CheckCircle2 size={13} /><span className="font-medium text-slate-500 shrink-0">조회확인 현황</span>
+        <span className="min-w-0 ml-1.5 flex items-center gap-2 tabular-nums" data-testid="confirm-rate">{s.total
+          ? <><span className="hidden sm:inline-block w-20 h-1.5 rounded-full bg-slate-100 overflow-hidden" aria-hidden="true"><span className="block h-full rounded-full" style={{ width: `${s.pct}%`, background: pctColor(s.pct) }}></span></span>
+              <span className="truncate">Agent <b className="font-semibold" style={{ color: pctColor(s.pct) }}>{s.done}</b> / {s.total}명 확인 <span style={{ color: pctColor(s.pct) }}>{s.pct}%</span>{s.total - s.done > 0 && <span className="text-orange-600"> · 미확인 {s.total - s.done}명</span>}</span></>
+          : <span className="truncate">이 글은 조회확인 대상 Agent 가 없습니다</span>}</span>
+        <span className="hidden sm:inline shrink-0 text-slate-300">·</span>
+        <span className="hidden sm:inline-flex shrink-0 items-center gap-1 tabular-nums"><Eye size={12} />열람 {viewers.length}명 · 조회 {views}회</span>
         {chip}
       </button>
       {openP && (
-        <div className="border-t border-slate-100">
+        <div className="mt-2 rounded-lg border border-slate-200 overflow-hidden">
           {s.total > 0 ? (
             <>
               <div className="px-4 py-2.5 flex items-center gap-2 flex-wrap">
