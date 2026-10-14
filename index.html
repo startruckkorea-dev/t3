@@ -63,6 +63,11 @@
   .t365-body a { color: #1D6F8F; text-decoration: underline; text-decoration-color: rgba(29,111,143,.35); text-underline-offset: 3px; }
   .t365-body a:hover { text-decoration-color: currentColor; }
   .t365-body strong { font-weight: 700; color: #0F172A; }
+  .t365-editor { font-size: 14.5px; line-height: 1.8; min-height: 300px; }
+  .t365-editor p, .t365-editor blockquote p { margin: 0; }
+  .t365-editor h3 { margin: .6em 0 .3em; }
+  .t365-editor ul, .t365-editor ol, .t365-editor blockquote { margin: .3em 0 .5em; }
+  .t365-editor b { font-weight: 700; color: #0F172A; }
   .t365-dlg-in { animation: t365-dlg .16s ease-out; }
   @keyframes t365-dlg { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
   /* 게시물 팝업 — 바탕이 흐려지고 창이 살짝 커지며 떠오른다 */
@@ -991,6 +996,118 @@ function RichText({ text }) {
     </div>
   );
 }
+/* ---- 보이는 대로 쓰는 본문 편집기(10-14) ----
+ * 도구 단추를 누르면 「**」 · 「##」 같은 기호가 아니라 굵게 · 소제목 · 목록이 바로 보인다.
+ * 저장은 지금처럼 간단한 표기(마크다운) 그대로 — 편집기 내용을 표기로 바꿔 body 에 넣고, 글 보기는 기존 RichText(HTML 해석 없음)로 그린다.
+ * 편집기에 넣는 HTML 은 표기에서 직접 만든 것(글자는 모두 이스케이프)뿐이고, 붙여 넣기는 글자만 받는다. */
+const _escH = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+function mdInlineToHtml(t) {
+  let out = "", last = 0, m;
+  const re = /(\*\*([^*\n]{1,500})\*\*)|(\[([^\]\n]{1,200})\]\(([^()\s]{1,2000})\))/g;
+  while ((m = re.exec(t))) {
+    out += _escH(t.slice(last, m.index));
+    if (m[1]) out += `<b>${_escH(m[2])}</b>`;
+    else { const u = safeHttpsUrl(m[5]); out += u ? `<a href="${_escH(u)}">${_escH(m[4])}</a>` : _escH(m[0]); }
+    last = re.lastIndex;
+  }
+  return out + _escH(t.slice(last));
+}
+function mdToEditorHtml(md) {
+  const lines = String(md || "").replace(/\r\n?/g, "\n").split("\n");
+  let html = "", list = null, q = null;
+  const close = () => { if (list) { html += `</${list}>`; list = null; } if (q) { html += `<blockquote>${q.map((x) => `<p>${mdInlineToHtml(x) || "<br>"}</p>`).join("")}</blockquote>`; q = null; } };
+  for (const line of lines) {
+    let m;
+    if ((m = /^\s*[-*•]\s+(.*)$/.exec(line)) || (m = /^\s*\d{1,3}[.)]\s+(.*)$/.exec(line))) {
+      const kind = /^\s*\d/.test(line) ? "ol" : "ul";
+      if (q || list !== kind) { close(); html += `<${kind}>`; list = kind; }
+      html += `<li>${mdInlineToHtml(m[1]) || "<br>"}</li>`; continue;
+    }
+    if ((m = /^>\s?(.*)$/.exec(line))) { if (list) close(); (q = q || []).push(m[1]); continue; }
+    close();
+    if ((m = /^#{1,3}\s+(.+)$/.exec(line))) html += `<h3>${mdInlineToHtml(m[1])}</h3>`;
+    else html += `<p>${mdInlineToHtml(line) || "<br>"}</p>`;
+  }
+  close();
+  return html || "<p><br></p>";
+}
+// 편집기 DOM → 표기. 굵게 · 링크 · 줄바꿈만 글자 안에서 살리고 그 밖의 꾸밈은 글자만 남긴다
+function editorInlineToMd(node) {
+  let out = "";
+  node.childNodes.forEach((n) => {
+    if (n.nodeType === 3) { out += n.nodeValue.replace(/ /g, " ").replace(/\n/g, " "); return; }
+    if (n.nodeType !== 1) return;
+    const tag = n.tagName;
+    if (tag === "BR") { out += "\n"; return; }
+    const inner = editorInlineToMd(n);
+    const bold = tag === "B" || tag === "STRONG" || /^(bold|[6-9]00)$/.test(n.style && n.style.fontWeight || "");
+    if (tag === "A") { const u = safeHttpsUrl(n.getAttribute("href")); out += u && inner.trim() ? `[${inner.replace(/[\[\]\n]/g, " ").trim()}](${u})` : inner; return; }
+    if (bold && inner.trim()) { const lead = inner.match(/^\s*/)[0], tail = inner.match(/\s*$/)[0]; out += `${lead}**${inner.trim().replace(/\*\*/g, "")}**${tail}`; return; }
+    if (/^(P|DIV|LI|H[1-6]|BLOCKQUOTE)$/.test(tag)) { out += (out && !out.endsWith("\n") ? "\n" : "") + inner + "\n"; return; }
+    out += inner;
+  });
+  return out;
+}
+function editorToMd(root) {
+  const lines = [];
+  const BLOCK = /^(P|DIV|H[1-6]|UL|OL|BLOCKQUOTE|LI)$/;
+  const pushText = (t, prefix = "") => { t.replace(/\n+$/, "").split("\n").forEach((l) => lines.push(prefix + l.replace(/\s+$/, ""))); };
+  const inlineOf = (nodes) => { const tmp = document.createElement("span"); nodes.forEach((n) => tmp.appendChild(n.cloneNode(true))); return editorInlineToMd(tmp); };
+  const hasBlock = (n) => [...n.childNodes].some((c) => c.nodeType === 1 && BLOCK.test(c.tagName));
+  function walk(parent, quote) {
+    let run = [];
+    const flush = () => { if (!run.length) return; const t = inlineOf(run); run = []; if (t.trim() || quote) pushText(t, quote ? "> " : ""); };
+    parent.childNodes.forEach((n) => {
+      if (n.nodeType === 3) { if (n.nodeValue.trim() || run.length) run.push(n); return; }
+      if (n.nodeType !== 1) return;
+      const tag = n.tagName;
+      if (!BLOCK.test(tag) && tag !== "BR") { run.push(n); return; }
+      if (tag === "BR") { if (run.length) flush(); else lines.push(quote ? ">" : ""); return; }
+      flush();
+      if (/^H[1-6]$/.test(tag)) { const t = editorInlineToMd(n).replace(/\n+/g, " ").trim(); lines.push(t ? `## ${t}` : ""); }
+      else if (tag === "UL" || tag === "OL") { let k = 0; [...n.children].filter((c) => c.tagName === "LI").forEach((li) => { const t = editorInlineToMd(li).replace(/\n+/g, " ").trim(); if (t) lines.push(tag === "OL" ? `${++k}. ${t}` : `- ${t}`); }); }
+      else if (tag === "BLOCKQUOTE") walk(n, true);
+      else if (hasBlock(n)) walk(n, quote);   // 크롬은 목록 · 안내 상자를 문단(P) 안에 넣기도 한다
+      else { const t = editorInlineToMd(n); if (!t.replace(/\n/g, "").trim()) lines.push(quote ? ">" : ""); else pushText(t, quote ? "> " : ""); }
+    });
+    flush();
+  }
+  walk(root, false);
+  while (lines.length && !lines[lines.length - 1].replace(/^>/, "").trim()) lines.pop();
+  return lines.map((l) => (l === ">" ? "" : l)).join("\n");
+}
+// 보이는 대로 편집기 — value(표기) ↔ 화면. 바깥에서 value 가 바뀌었을 때(임시 저장 되살리기 등)만 화면을 다시 그린다(입력 중 커서 유지)
+const RichEditor = React.forwardRef(function RichEditor({ value, onChange, placeholder, onFiles, className, testid }, ref) {
+  const el = useRef(null);
+  const lastMd = useRef(null);
+  React.useImperativeHandle(ref, () => el.current);
+  useEffect(() => {
+    if (!el.current || value === lastMd.current) return;
+    el.current.innerHTML = mdToEditorHtml(value);
+    lastMd.current = value;
+  }, [value]);
+  useEffect(() => { try { document.execCommand("defaultParagraphSeparator", false, "p"); } catch (e) {} }, []);
+  const emit = () => { const md = editorToMd(el.current); lastMd.current = md; onChange(md); };
+  const empty = !String(value || "").trim();
+  return (
+    <div className="relative flex-1 min-w-0 flex">
+      {empty && placeholder && <div className="absolute inset-0 px-4 py-3 text-[14.5px] leading-[1.8] text-slate-400 whitespace-pre-wrap pointer-events-none overflow-hidden" aria-hidden="true">{placeholder}</div>}
+      <div ref={el} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" aria-label="본문" spellCheck={false}
+        className={`t365-body t365-editor flex-1 min-w-0 w-full px-4 py-3 focus:outline-none overflow-y-auto ${className || ""}`} data-testid={testid}
+        onInput={emit} onBlur={emit}
+        onKeyDown={(e) => {   // 안내 상자 안 빈 줄에서 Enter → 상자에서 나와 보통 글(크롬은 상자 안에 빈 줄만 계속 만든다)
+          if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+          const sel = window.getSelection(); let n = sel && sel.anchorNode, line = null, q = null;
+          while (n && n !== el.current) { if (n.nodeType === 1) { if (!line && /^(P|DIV)$/.test(n.tagName)) line = n; if (n.tagName === "BLOCKQUOTE") { q = n; break; } } n = n.parentNode; }
+          if (q && (line || q).textContent.trim() === "") { e.preventDefault(); document.execCommand("formatBlock", false, "p"); emit(); }
+        }}
+        onPaste={(e) => { e.preventDefault(); const t = (e.clipboardData && e.clipboardData.getData("text/plain")) || ""; document.execCommand("insertText", false, t.replace(/\r\n?/g, "\n")); }}
+        onDrop={(e) => { const fs = e.dataTransfer && e.dataTransfer.files; if (fs && fs.length) { e.preventDefault(); if (onFiles) onFiles(fs); } else if (e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes("text/html")) { e.preventDefault(); document.execCommand("insertText", false, e.dataTransfer.getData("text/plain") || ""); } }}
+      ></div>
+    </div>
+  );
+});
+
 // 목록 미리보기용 — 표기만 걷어낸 한 줄
 function plainPreview(src, n = 140) {
   return String(src || "").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1").replace(/^\s*(#{1,3}|[-*•]|\d{1,3}[.)]|>)\s*/gm, "").replace(/\s+/g, " ").trim().slice(0, n);
@@ -2794,25 +2911,48 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
   const isQna = cat === "qna";
   const canFlag = !ctx.isAgent && !isQna;   // 공지(상단 고정) · 조회확인 필수 — Q&A 질문과 Agent 글에는 걸 수 없다
 
-  function wrap(before, after, placeholder) {
-    const el = ta.current; if (!el) return;
-    const s = el.selectionStart, e = el.selectionEnd; const sel = body.slice(s, e) || placeholder;
-    setBody(body.slice(0, s) + before + sel + after + body.slice(e));
-    setTimeout(() => { el.focus(); el.setSelectionRange(s + before.length, s + before.length + sel.length); }, 0);
+  // 도구 단추(10-14) — 보이는 대로 편집기에 바로 적용(기호를 넣지 않는다). 편집기 밖(미리 보기)에서는 쓰기 화면으로 돌아와서
+  const savedRange = useRef(null);
+  const saveSel = () => { const sel = window.getSelection(); if (ta.current && sel && sel.rangeCount && ta.current.contains(sel.anchorNode)) savedRange.current = sel.getRangeAt(0).cloneRange(); };
+  function edFocus() {
+    const el = ta.current; if (!el) return false;
+    const sel = window.getSelection();
+    if (document.activeElement === el && sel.rangeCount && el.contains(sel.anchorNode)) return true;   // 이미 편집 중 — 지금 커서 그대로
+    el.focus();
+    if (savedRange.current && el.contains(savedRange.current.startContainer)) { sel.removeAllRanges(); sel.addRange(savedRange.current); }
+    else if (!sel.rangeCount || !el.contains(sel.anchorNode)) { const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); sel.removeAllRanges(); sel.addRange(r); }
+    return true;
   }
-  function linePrefix(prefix) {
-    const el = ta.current; if (!el) return;
-    const s = el.selectionStart, e = el.selectionEnd;
-    const ls = body.lastIndexOf("\n", s - 1) + 1;
-    const seg = body.slice(ls, e).split("\n").map((l, i) => (prefix === "1. " ? `${i + 1}. ` : prefix) + l.replace(/^(#{1,3}|[-*•]|\d{1,3}[.)]|>)\s+/, "")).join("\n");
-    setBody(body.slice(0, ls) + seg + body.slice(e));
-    setTimeout(() => el.focus(), 0);
+  const curBlock = () => { const sel = window.getSelection(); let n = sel && sel.anchorNode; while (n && n !== ta.current) { if (n.nodeType === 1 && /^(H[1-6]|BLOCKQUOTE)$/.test(n.tagName)) return n.tagName; n = n.parentNode; } return ""; };
+  function cmd(name, arg) {
+    if (mode === "preview") { setMode("write"); setTimeout(() => cmd(name, arg), 30); return; }
+    if (!edFocus()) return;
+    if (name === "h") document.execCommand("formatBlock", false, /^H/.test(curBlock()) ? "p" : "h3");
+    else if (name === "quote") document.execCommand("formatBlock", false, curBlock() === "BLOCKQUOTE" ? "p" : "blockquote");
+    else document.execCommand(name, false, arg);
+    saveSel();
+    ta.current.dispatchEvent(new Event("input", { bubbles: true }));
   }
+  // 링크 — 고른 글자를 먼저 임시 링크로 감싸 두고(창이 떠 있는 동안 커서를 잃어도 자리가 남는다) 주소를 받은 뒤 바꾼다. 취소하면 풀어 둔다
+  const PENDING_LINK = "https://t365-link.invalid/pending";
   async function addLink() {
+    const el0 = ta.current, sel0 = window.getSelection();
+    let pending = false;
+    if (mode !== "preview" && el0 && sel0 && sel0.rangeCount && !sel0.isCollapsed && el0.contains(sel0.anchorNode)) {
+      document.execCommand("createLink", false, PENDING_LINK); pending = true;
+    } else saveSel();
     const u = await uiPrompt("연결할 주소를 입력하세요 (https:// 로 시작)", "https://", { title: "링크 넣기", okText: "넣기" });
-    if (u == null) return;
-    if (!safeHttpsUrl(u)) { uiAlert("https:// 로 시작하는 주소만 넣을 수 있습니다."); return; }
-    wrap("[", `](${safeHttpsUrl(u)})`, "링크 글자");
+    const safe = u == null ? null : safeHttpsUrl(u);
+    if (u != null && !safe) uiAlert("https:// 로 시작하는 주소만 넣을 수 있습니다.");
+    if (mode === "preview" && safe) setMode("write");
+    setTimeout(() => {
+      const el = ta.current; if (!el) return;
+      const marks = [...el.querySelectorAll("a")].filter((a) => a.getAttribute("href") === PENDING_LINK);
+      if (marks.length) marks.forEach((a) => { if (safe) a.setAttribute("href", safe); else a.replaceWith(...a.childNodes); });
+      else if (safe && !pending) { if (!edFocus()) return; document.execCommand("insertHTML", false, `<a href="${_escH(safe)}">${_escH("링크 글자")}</a>&nbsp;`); }
+      saveSel();
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }, 30);
   }
   function addFiles(list) {
     list = Array.from(list || []);
@@ -2999,25 +3139,25 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
           </div>
           <div className="flex-1 min-h-[340px] flex flex-col border border-slate-300 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-[#2F7B7A]/30 focus-within:border-[#2F7B7A]/50">
             <div className="flex items-center gap-0.5 px-1.5 py-1 border-b border-slate-200 bg-slate-50 flex-wrap">
-              <button type="button" className={tb} title="굵게 (**글자**)" onClick={() => wrap("**", "**", "굵은 글자")}><Bold size={15} /></button>
-              <button type="button" className={tb} title="소제목 (## )" onClick={() => linePrefix("## ")}><Heading2 size={15} /></button>
-              <button type="button" className={tb} title="목록 (- )" onClick={() => linePrefix("- ")}><List size={15} /></button>
-              <button type="button" className={tb} title="번호 목록 (1. )" onClick={() => linePrefix("1. ")}><ListOrdered size={15} /></button>
-              <button type="button" className={tb} title="안내 상자 (> )" onClick={() => linePrefix("> ")}><Quote size={15} /></button>
-              <button type="button" className={tb} title="링크(https)" onClick={addLink}><Link2 size={15} /></button>
+              <button type="button" className={tb} title="굵게 (Ctrl+B)" onMouseDown={(e) => e.preventDefault()} onClick={() => cmd("bold")} data-ed-cmd="bold"><Bold size={15} /></button>
+              <button type="button" className={tb} title="소제목 — 한 번 더 누르면 보통 글" onMouseDown={(e) => e.preventDefault()} onClick={() => cmd("h")} data-ed-cmd="h"><Heading2 size={15} /></button>
+              <button type="button" className={tb} title="목록" onMouseDown={(e) => e.preventDefault()} onClick={() => cmd("insertUnorderedList")} data-ed-cmd="ul"><List size={15} /></button>
+              <button type="button" className={tb} title="번호 목록" onMouseDown={(e) => e.preventDefault()} onClick={() => cmd("insertOrderedList")} data-ed-cmd="ol"><ListOrdered size={15} /></button>
+              <button type="button" className={tb} title="안내 상자 — 한 번 더 누르면 보통 글" onMouseDown={(e) => e.preventDefault()} onClick={() => cmd("quote")} data-ed-cmd="quote"><Quote size={15} /></button>
+              <button type="button" className={tb} title="링크(https) — 글자를 고른 뒤 누르면 그 글자에 링크" onMouseDown={(e) => e.preventDefault()} onClick={addLink} data-ed-cmd="link"><Link2 size={15} /></button>
               <div className="ml-auto flex items-center rounded-lg border border-slate-200 overflow-hidden h-7 text-[12px] bg-white">
                 {[["write", "쓰기"], ["split", "나란히"], ["preview", "미리 보기"]].map(([k, l], i) => <button key={k} onClick={() => setMode(k)} data-mode={k} className={`px-2.5 h-full ${i ? "border-l border-slate-200" : ""} ${k === "split" ? "hidden lg:block" : ""} ${mode === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{l}</button>)}
               </div>
             </div>
             <div className={`flex-1 min-h-0 flex ${mode === "split" ? "divide-x divide-slate-200" : ""}`}>
               {mode !== "preview" && (
-                <textarea ref={ta} value={body} onChange={(e) => setBody(e.target.value)} className="flex-1 min-w-0 w-full px-4 py-3 text-[14.5px] leading-[1.8] focus:outline-none resize-none block min-h-[300px]" data-testid="ed-body"
-                  placeholder={isQna ? "궁금한 점을 자세히 적어 주세요 — 자세할수록 답변이 빠릅니다.\n\n예)\n- 어떤 화면에서: CRM 견적 화면\n- 하려던 일: 할인율 적용\n- 막힌 점: 할인율 칸이 보이지 않습니다\n\n화면 캡처는 「첨부파일」 에 올려 주세요." : "내용을 입력하세요.\n\n예)\n## 접속 방법\n1. CRM 에 로그인합니다\n2. 메뉴에서 **기프트 세트** 를 누릅니다\n> 권한이 없으면 담당자에게 요청해 주세요"}></textarea>
+                <RichEditor ref={ta} value={body} onChange={setBody} onFiles={addFiles} testid="ed-body"
+                  placeholder={isQna ? "궁금한 점을 자세히 적어 주세요 — 자세할수록 답변이 빠릅니다.\n\n예)\n- 어떤 화면에서: CRM 견적 화면\n- 하려던 일: 할인율 적용\n- 막힌 점: 할인율 칸이 보이지 않습니다\n\n화면 캡처는 「첨부파일」 에 올려 주세요." : "내용을 입력하세요.\n\n예)\n## 접속 방법\n1. CRM 에 로그인합니다\n2. 메뉴에서 **기프트 세트** 를 누릅니다\n> 권한이 없으면 담당자에게 요청해 주세요"} />
               )}
               {mode !== "write" && <div className="flex-1 min-w-0 overflow-y-auto px-5 py-4 bg-white min-h-[300px]" data-testid="ed-preview">{body.trim() ? preview : <p className="text-[13px] text-slate-300">미리 볼 내용이 없습니다.</p>}</div>}
             </div>
             <div className="flex items-center gap-3 px-3 h-8 border-t border-slate-100 bg-slate-50/70 text-[11px] text-slate-400">
-              <span className="hidden sm:inline truncate">## 소제목 · - 목록 · 1. 번호 · **굵게** · &gt; 안내 · [글자](https://주소)</span>
+              <span className="hidden sm:inline truncate">위 단추로 굵게 · 소제목 · 목록 · 안내 상자 · 링크 — 쓰는 그대로 보입니다 · Ctrl+B 굵게</span>
               <span className={`ml-auto tabular-nums shrink-0 ${body.length > T365_BODY_MAX ? "text-red-600 font-semibold" : ""}`} data-testid="ed-body-count">{body.length.toLocaleString()} / {T365_BODY_MAX.toLocaleString()}자</span>
             </div>
           </div>
