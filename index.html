@@ -143,7 +143,7 @@ import { createRoot } from "react-dom/client";
 import {
   LayoutDashboard, LayoutList, MonitorSmartphone, Package, Headphones, GraduationCap, BookOpenCheck, Megaphone, MessagesSquare,
   Pin, Paperclip, Video, CheckCircle2, Eye, Users, KeyRound, History, LogIn, Search, Plus, Pencil, Trash2, X, Download, Upload,
-  ExternalLink, Mail, ShieldCheck, AlertTriangle, ArrowLeftToLine, ArrowRightFromLine, Menu, LockKeyhole, ChevronLeft, FileText,
+  ExternalLink, ArrowUpRight, Mail, ShieldCheck, AlertTriangle, ArrowLeftToLine, ArrowRightFromLine, Menu, LockKeyhole, ChevronLeft, FileText,
   Bold, List, ListOrdered, Heading2, Link2, Clock, BarChart3, Tags, HelpCircle, ListChecks, UserPlus, FileSpreadsheet, PlayCircle,
   Circle, Quote, BookOpen, LogOut, SquarePen, Truck, Container, Bus, Car, Gauge, Fuel, Wrench, Cog, HardHat, ClipboardList, Newspaper, Bell, Calendar, Gift, Star, Trophy, Award, Lightbulb, Target, Rocket, Zap, CircleDollarSign, Handshake, Briefcase, Building2, Phone, MapPin, Globe, Leaf, Flag, Camera, Sparkles, ImagePlus, Palette, GalleryHorizontal, ArrowRight, Pause, Play, AlignLeft, Rows3, ChevronRight, ChevronDown, ChevronUp, ChevronsLeft, ChevronsRight, TrendingUp, FileArchive, FileImage, FileVideo, Info, Inbox,
   BellRing, MessageCircleQuestion, MessageSquareReply, Copy,
@@ -1232,16 +1232,16 @@ function Field({ label, children, required, hint }) {
 }
 function PageHeader({ icon: Icon, title, subtitle, inline, right, tint }) {
   return (
-    <div className="flex items-start gap-3 mb-6">
-      <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: (tint && tint.soft) || BRAND.accentSoft }}>
-        {Icon && <Icon size={20} style={{ color: (tint && tint.color) || BRAND.accent }} />}
+    <div className="flex items-center gap-3 mb-4">
+      <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: (tint && tint.soft) || BRAND.accentSoft }}>
+        {Icon && <Icon size={18} style={{ color: (tint && tint.color) || BRAND.accent }} />}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-xl font-semibold text-slate-800">{title}</h1>
+          <h1 className="text-[18px] leading-6 font-semibold text-slate-800">{title}</h1>
           {inline}
         </div>
-        {subtitle && <p className="text-sm text-slate-500 mt-0.5">{subtitle}</p>}
+        {subtitle && <p className="text-[12.5px] leading-5 text-slate-500">{subtitle}</p>}
       </div>
       {right && <div className="shrink-0 flex items-center gap-2">{right}</div>}
     </div>
@@ -1843,27 +1843,23 @@ function SearchPopup({ ctx, initialQ, hidden, suspended, onClose, onOpen, onAsk,
 function QuickLinksRail({ links, onManage }) {
   if (!links.length && !onManage) return null;
   return (
-    <section className="bg-white rounded-xl border border-slate-200 overflow-hidden t365-portlet" data-testid="quick-links">
-      <div className="t365-portlet-head">
-        <span className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: BRAND.accentSoft }}><Link2 size={13} style={{ color: BRAND.accent }} /></span>
-        <h2 className="text-[15px] font-bold text-slate-900 tracking-[-0.01em] whitespace-nowrap">바로가기</h2>
-        {onManage && <button onClick={onManage} className="ml-auto text-[11.5px] text-slate-400 hover:text-slate-700 whitespace-nowrap" data-testid="links-manage">관리</button>}
+    <section className="bg-white rounded-xl border border-slate-200 p-1.5" data-testid="quick-links">
+      <div className="flex items-center justify-between px-2.5 pt-1.5 pb-1">
+        <span className="text-[11px] font-bold tracking-[0.08em] text-slate-400">바로가기</span>
+        {onManage && <button onClick={onManage} className="text-[11px] text-slate-400 hover:text-slate-700" data-testid="links-manage">관리</button>}
       </div>
       {links.length ? (
-        <div className="p-2 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-1 gap-1">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-1 gap-0.5">
           {links.map((l) => (
             <a key={l.id} href={l.href} target="_blank" rel="noopener noreferrer" data-link={l.id.slice(5)} title={l.desc ? `${l.desc}\n${l.href}` : l.href} aria-label={`${l.label} — 새 창으로 열기`}
-              className="group relative flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-slate-50 min-w-0">
-              <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ring-1 ring-slate-200 bg-white shadow-sm"><l.icon size={14} style={{ color: l.color }} /></span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[13px] font-semibold text-slate-800 truncate group-hover:text-[#2F7B7A]" data-link-title>{l.label}</span>
-                {l.desc && <span className="block text-[11px] text-slate-400 truncate">{l.desc}</span>}
-              </span>
-              <ExternalLink size={11} className="absolute right-1.5 top-1.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" aria-hidden="true" />
+              className="group flex items-center gap-2.5 px-2.5 h-10 rounded-lg hover:bg-slate-50 min-w-0 transition-colors">
+              <span className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: /^#[0-9a-f]{6}$/i.test(l.color || "") ? l.color + "1A" : BRAND.accentSoft }}><l.icon size={13} style={{ color: l.color }} /></span>
+              <span className="min-w-0 flex-1 text-[13px] font-medium text-slate-700 truncate group-hover:text-slate-900" data-link-title>{l.label}</span>
+              <ArrowUpRight size={13} className="shrink-0 text-slate-300 group-hover:text-slate-500 transition-colors" aria-hidden="true" />
             </a>
           ))}
         </div>
-      ) : <div className="px-4 py-4 text-[12px] text-slate-400">아직 바로가기가 없습니다. <button onClick={onManage} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>추가하기</button></div>}
+      ) : <div className="px-2.5 pb-2 text-[12px] text-slate-400">아직 바로가기가 없습니다. <button onClick={onManage} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>추가하기</button></div>}
     </section>
   );
 }
@@ -5448,14 +5444,14 @@ function App({ boot }) {
             <button onClick={t365Logout} data-testid="btn-logout" className={`${isMobile && showAps ? "hidden" : "block"} text-xs font-medium text-slate-500 border border-slate-200 rounded-lg px-3 py-1.5 hover:border-red-300 hover:text-red-500 transition-colors whitespace-nowrap`}>로그아웃</button>
           </div>
         </div>
-        <main className="t365-main-scroll flex-1 p-4 pb-24 md:p-6 md:pb-24 overflow-y-auto">
+        <main className="t365-main-scroll flex-1 p-4 pb-24 md:px-6 md:pt-4 md:pb-24 overflow-y-auto">
           <div className={`${tab === "overview" ? "max-w-[1840px]" : "max-w-[1600px]"} mx-auto`}>
             {tab !== "overview" && !(openPostId && (tab.startsWith("cat:") || tab === "all")) && (
               <PageHeader icon={meta[0]} title={cur.label} subtitle={meta[1]} tint={meta[2]} right={curCat && curCat.contacts && curCat.contacts.length ? (
-                <div className="hidden sm:flex items-center gap-1.5 text-[12px] text-slate-500" data-testid="board-contacts">
-                  <span className="text-slate-400">문의</span>
-                  {curCat.contacts.slice(0, 2).map((c) => <a key={c.email} href={mailtoOf(c.email)} title={c.email} className="inline-flex items-center gap-1.5 h-8 pl-1 pr-2.5 rounded-full border border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm"><span className="w-6 h-6 rounded-full flex items-center justify-center text-[10.5px] font-bold text-white" style={{ background: curCat.color }}>{String(c.name || c.email).slice(0, 1).toUpperCase()}</span><span className="text-slate-700 max-w-[110px] truncate">{c.name}</span></a>)}
-                  {curCat.contacts.length > 2 && <button onClick={() => setContactOpen(true)} className="h-8 px-2.5 rounded-full border border-slate-200 bg-white text-slate-500 hover:text-slate-800">+{curCat.contacts.length - 2}</button>}
+                <div className="hidden sm:flex items-center gap-2 h-11 pl-3 pr-1.5 rounded-xl border bg-white shadow-sm" style={{ borderColor: curCat.soft }} data-testid="board-contacts">
+                  <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold whitespace-nowrap" style={{ color: curCat.color }}><Mail size={14} />문의 담당자</span>
+                  {curCat.contacts.slice(0, 2).map((c) => <a key={c.email} href={mailtoOf(c.email)} title={`${c.email} 로 메일 쓰기`} className="inline-flex items-center gap-2 h-8 pl-1 pr-3 rounded-lg hover:brightness-95 transition" style={{ background: curCat.soft }}><span className="w-6 h-6 rounded-full flex items-center justify-center text-[10.5px] font-bold text-white shrink-0" style={{ background: curCat.color }}>{String(c.name || c.email).slice(0, 1).toUpperCase()}</span><span className="leading-tight min-w-0"><span className="block text-[12.5px] font-semibold text-slate-800 max-w-[140px] truncate">{c.name || c.email}</span><span className="block text-[10.5px] text-slate-500 max-w-[140px] truncate">{c.email}</span></span></a>)}
+                  {curCat.contacts.length > 2 && <button onClick={() => setContactOpen(true)} className="h-8 px-2.5 rounded-lg text-[12px] font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-800">+{curCat.contacts.length - 2}명</button>}
                 </div>) : null} />
             )}
             {showSetup && <SetupNotice status={listStatus} infoToo={tab === "overview" || T365_ADMIN_TABS.includes(tab)} />}
