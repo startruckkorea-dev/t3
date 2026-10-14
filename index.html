@@ -72,8 +72,7 @@
   /* 게시판 홈 표 — 칸 사이 옅은 세로선(줄 전체 높이) */
   .t365-cols > * + * { border-left: 1px solid #E9EEF3; padding-left: 12px; }
   .t365-boardchip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid transparent; font-size: 11.5px; font-weight: 600; line-height: 1; letter-spacing: -0.01em; }
-  .t365-postno { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 6px; background: #F1F5F9; color: #475569; font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: -0.02em; }
-  .t365-postno::before { content: "#"; color: #94A3B8; margin-right: 1px; }
+  .t365-meta > * + *::before { content: ""; display: inline-block; width: 1px; height: 10px; background: #CBD5E1; margin: 0 9px; vertical-align: -1px; }
   @media (max-width: 639px) { .t365-cols > * + * { border-left: 0; padding-left: 0; } }
   .t365-meta > span + span::before { content: ""; display: inline-block; width: 1px; height: 11px; background: #E2E8F0; margin: 0 12px; }
   .t365-pop { animation: t365-pop .22s cubic-bezier(.2,.9,.3,1.15); }
@@ -1478,10 +1477,31 @@ function BoardCell({ cat, bare }) {
     </span>
   );
 }
-// 글번호(10-14) — 게시물 고유 번호(SharePoint 항목 ID, 게시물 주소 #/cat/키/번호 와 같음). 지우거나 옮겨도 바뀌지 않아 이 번호로 찾을 수 있다
-const PostNoCell = ({ p }) => <span className="w-[64px] shrink-0 hidden sm:flex items-center" data-postno={p.id}><span className="t365-postno">{p.id}</span></span>;
-const postNoTerm = (t) => { const m = /^(?:#|no\.?|글번호)?(\d{1,9})$/i.exec(String(t || "").trim()); return m ? String(Number(m[1])) : ""; };
-const HomeColHead = ({ children }) => <div className="t365-cols px-4 h-9 flex items-stretch gap-3 bg-[#F1F4F8] border-b border-slate-200 text-[12px] font-semibold text-slate-600 select-none">{children}</div>;
+// 홈 「공지 · 필수」 · 「최근 게시물」 한 줄(10-14b) — 표 대신 게시판 소식 목록 모양:
+// 게시판(색 글자) → [공지]·[필수] + 제목 → 글번호 | 작성자 | 날짜 | 조회 (· 내 확인). 글번호 = 게시물 고유 번호(주소 #/cat/키/번호 와 같음) — 이 번호로 검색할 수 있다
+function HomePostRow({ p, cat, onOpen, seen, fresh, views, confirm, tags, attr, className }) {
+  const pin = pinActive(p);
+  return (
+    <button onClick={() => onOpen(p)} title={p.Title} {...attr} className={`group block w-full text-left px-5 py-3 border-t border-[#E9EEF3] first:border-t-0 hover:bg-[#F6FAF9] transition-colors min-w-0 ${className || ""}`}>
+      <span className="block text-[11.5px] font-semibold leading-4 truncate" style={{ color: cat ? cat.color : "#64748B" }} data-row-cat>{cat ? cat.label : "-"}</span>
+      <span className="mt-1 flex items-center gap-1.5 min-w-0">
+        {tags && pin && <span className="shrink-0 text-[14.5px] font-bold text-[#D9480F]" data-kind="pin">[공지]</span>}
+        {tags && p.RequireConfirm && <span className="shrink-0 text-[14.5px] font-bold text-[#C2410C]" data-kind="req">[필수]</span>}
+        <span className={`min-w-0 truncate text-[14.5px] leading-6 tracking-[-0.01em] group-hover:underline underline-offset-2 ${seen ? "font-medium text-slate-700" : "font-bold text-slate-900"}`}>{p.Title}</span>
+        {fresh && <NewDot />}
+        <PostMarks p={p} compact />
+      </span>
+      <span className="mt-1 flex items-center flex-wrap gap-y-0.5 text-[12px] text-slate-500 tabular-nums t365-meta">
+        <span data-postno={p.id} title="게시물 고유 번호 — 검색 칸에 번호를 넣어 찾을 수 있습니다">No. {p.id}</span>
+        <span className="truncate max-w-[160px]">{p.AuthorName || "-"}</span>
+        <span title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
+        <span>조회 {views || 0}</span>
+        {confirm && <span className="inline-flex items-center">{confirm}</span>}
+      </span>
+    </button>
+  );
+}
+const postNoTerm = (t) => { const m = /^(?:#|no\.?|글번호)?\s*(\d{1,9})$/i.exec(String(t || "").trim()); return m ? String(Number(m[1])) : ""; };
 // 새 글 점 — 7일 안에 올라왔고 내가 아직 열지 않은 글. 읽으면 사라진다(예전 「N」 대신)
 const NewDot = () => <span className="t365-newdot" role="img" aria-label="새 글 — 아직 읽지 않음" title="새 글 — 아직 읽지 않았습니다" data-new="1"></span>;
 // 공지 · 필수 종류 — 글씨 없는 아이콘 칩(공지 · 필수 상자 안에서)
@@ -1563,9 +1583,9 @@ function SearchPopup({ ctx, initialQ, hidden, suspended, onClose, onOpen, onAsk,
   const hits = useMemo(() => {
     if (!terms.length) return [];
     // 글번호로 찾기(10-14) — 「#12」 · 「12」 · 「No.12」 처럼 번호 하나만 넣으면 그 번호 글을 맨 위에(본문에 그 숫자가 든 글은 그 아래)
-    const no = terms.length === 1 ? postNoTerm(terms[0]) : "";
+    const no = postNoTerm(key);   // 「No. 12」 처럼 띄어 써도
     const byNo = no ? docs.find((d) => String(d.p.id) === no) : null;
-    if (byNo && terms[0].replace(/\d/g, "")) return [{ p: byNo.p, score: 1e9, snip: byNo.b.slice(0, 110), label: "글번호" }];   // 「#12」 처럼 표시가 붙었으면 그 글만
+    if (byNo && key.replace(/\d/g, "")) return [{ p: byNo.p, score: 1e9, snip: byNo.b.slice(0, 110), label: "글번호" }];   // 「#12」 처럼 표시가 붙었으면 그 글만
     const out = byNo ? [{ p: byNo.p, score: 1e9, snip: byNo.b.slice(0, 110), label: "글번호" }] : [];
     docs.forEach((d) => {
       if (byNo && d === byNo) return;
@@ -1821,30 +1841,10 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
               </span>
               {noticeAny && canAll && <button onClick={() => onSearch("", "notice")} title="지난 공지 · 필수까지 모두 보기" className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 whitespace-nowrap shrink-0 inline-flex items-center" data-testid="notice-more">지난 글<ChevronRight size={13} /></button>}
             </div>
-            {notice.length > 0 && <HomeColHead>
-              <span className="w-[64px] shrink-0 hidden sm:flex items-center" title="게시물 고유 번호 — 검색 칸에 번호(예: #12)를 넣어 찾을 수 있습니다">글번호</span><span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
-              <span className={`w-[108px] shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center`}>작성자</span>
-              <span className="w-[104px] shrink-0 hidden md:flex items-center">작성일</span>{ctx.isAgent && <span className="w-[46px] sm:w-[100px] shrink-0 flex items-center"><span className="hidden sm:inline">조회확인</span></span>}
-            </HomeColHead>}
             {notice.length ? notice.slice(0, NOTICE_MAX).map((p) => {
               const c = catMap[p.Category]; const r = myRow(p);
-              return (
-                <button key={p.id} onClick={() => openPost(p)} data-notice={p.id} title={p.Title} className="t365-cols w-full text-left px-4 h-11 flex items-stretch gap-3 border-t border-[#E9EEF3] first:border-t-0 even:bg-slate-50/70 hover:!bg-[#EEF6F5] min-w-0">
-                  <PostNoCell p={p} />
-                  <BoardCell cat={c} />
-                  <span className="min-w-0 flex-1 flex items-center gap-1.5">
-                    {fresh(p) && <NewDot />}
-                    <KindIcons p={p} />
-                    <span className={`min-w-0 truncate text-[13.5px] ${seen(p) ? "text-slate-600" : "font-semibold text-slate-900"}`}>{p.Title}</span>
-                    <PostMarks p={p} compact />
-                  </span>
-                  <span className={`w-[108px] text-[12px] text-slate-500 shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center min-w-0`}><span className="truncate">{p.AuthorName || ""}</span></span>
-                  <span className="text-[11.5px] text-slate-400 tabular-nums shrink-0 hidden md:flex items-center w-[104px]" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
-                  {ctx.isAgent && <span className="shrink-0 w-[46px] sm:w-[100px] flex items-center">
-                    {p.RequireConfirm ? (r && r.ConfirmedAt ? <SeenMark r={r} confirm tight /> : <UnconfirmedPill tight />) : r ? <SeenMark r={r} tight /> : <span className="text-[11.5px] text-slate-300">-</span>}
-                  </span>}
-                </button>
-              );
+              return <HomePostRow key={p.id} p={p} cat={c} onOpen={openPost} seen={seen(p)} fresh={fresh(p)} views={viewStats(readIdx, p.id).views} attr={{ "data-notice": p.id }}
+                tags confirm={ctx.isAgent ? (p.RequireConfirm ? (r && r.ConfirmedAt ? <SeenMark r={r} confirm /> : <UnconfirmedPill />) : r ? <SeenMark r={r} /> : null) : null} />;
             }) : <SmallEmpty icon={CheckCircle2}>최근 7일 동안 올라온 공지 · 필수 자료가 없습니다.{noticeAny && canAll && <> <button onClick={() => onSearch("", "notice")} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>지난 공지 · 필수 보기</button></>}</SmallEmpty>}
             {notice.length > NOTICE_MAX && canAll && <button onClick={() => onSearch("", "notice")} className="w-full h-9 border-t border-[#E9EEF3] text-[12px] font-medium text-slate-500 hover:bg-slate-50 inline-flex items-center justify-center gap-0.5" data-testid="notice-overflow">이번 주 공지 · 필수 {notice.length - NOTICE_MAX}건 더 보기<ChevronRight size={13} /></button>}
           </section>
@@ -1861,27 +1861,10 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
               </span>
               {canAll && <button onClick={() => setTab("all")} className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 inline-flex items-center shrink-0" data-testid="recent-more">전체 게시물<ChevronRight size={13} /></button>}
             </div>
-            {recent.length > 0 && <HomeColHead>
-              <span className="w-[64px] shrink-0 hidden sm:flex items-center" title="게시물 고유 번호 — 검색 칸에 번호(예: #12)를 넣어 찾을 수 있습니다">글번호</span><span className="w-[132px] shrink-0 hidden sm:flex items-center">게시판</span><span className="flex-1 flex items-center">제목</span>
-              <span className={`w-[108px] shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center`}>작성자</span><span className="w-[104px] shrink-0 flex items-center">작성일</span>
-              {ctx.isAgent && <span className="w-[100px] shrink-0 hidden sm:flex items-center">열람</span>}
-            </HomeColHead>}
-            {recent.length ? recent.slice(0, 12).map((p, i) => {
-              const c = catMap[p.Category]; const rd = seen(p);
-              return (
-                <button key={p.id} onClick={() => openPost(p)} data-wpost={p.id} title={p.Title} className={`t365-cols w-full text-left px-4 h-11 ${i >= 6 ? "hidden sm:flex" : "flex"} items-stretch gap-3 border-t border-[#E9EEF3] first:border-t-0 even:bg-slate-50/70 hover:!bg-[#EEF6F5] min-w-0`}>
-                  <PostNoCell p={p} />
-                  <BoardCell cat={c} />
-                  <span className="min-w-0 flex-1 flex items-center gap-1.5">
-                    {fresh(p) && <NewDot />}
-                    <span className={`min-w-0 truncate text-[13.5px] ${rd ? "text-slate-600" : "font-semibold text-slate-900"}`}>{p.Title}</span>
-                    <PostMarks p={p} compact />
-                  </span>
-                  <span className={`w-[108px] text-[12px] text-slate-500 shrink-0 hidden ${ctx.isAgent ? "2xl:flex" : "md:flex"} items-center min-w-0`}><span className="truncate">{p.AuthorName || ""}</span></span>
-                  <span className="w-[104px] text-[11.5px] text-slate-400 tabular-nums shrink-0 flex items-center" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
-                  {ctx.isAgent && <span className="w-[100px] shrink-0 hidden sm:flex items-center" data-read-col={p.id}>{myRow(p) ? <SeenMark r={myRow(p)} /> : <span className="text-[11.5px] text-slate-300">-</span>}</span>}
-                </button>
-              );
+            {recent.length ? recent.slice(0, 8).map((p, i) => {
+              const c = catMap[p.Category];
+              return <HomePostRow key={p.id} p={p} cat={c} onOpen={openPost} seen={seen(p)} fresh={fresh(p)} views={viewStats(readIdx, p.id).views} attr={{ "data-wpost": p.id }} className={i >= 5 ? "hidden sm:block" : ""}
+                confirm={ctx.isAgent && myRow(p) ? <SeenMark r={myRow(p)} /> : null} />;
             }) : <SmallEmpty>최근 7일 동안 올라온 새 글이 없습니다.{canAll && <> <button onClick={() => setTab("all")} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>전체 게시물 보기</button></>}</SmallEmpty>}
           </section>
         </div>
@@ -2029,7 +2012,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
     const t = String(p.Title || "").toLowerCase(), b = (plainPreview(p.Body, 4000) + " " + parseFiles(p.AttachmentsJson).map((f) => f.name).join(" ") + (p.Answer ? " " + plainPreview(p.Answer, 4000) : "")).toLowerCase(), a = String(p.AuthorName || "").toLowerCase();
     return field === "t" ? t : field === "b" ? b : field === "a" ? a : t + "\n" + b;
   };
-  const qNo = words.length === 1 ? postNoTerm(words[0]) : "";   // 글번호(10-14) — 번호 하나만 넣으면 그 번호 글도 함께
+  const qNo = postNoTerm(qq);   // 글번호(10-14) — 번호 하나만 넣으면 그 번호 글도 함께
   const hitWith = (any) => (p) => { if (!words.length) return true; if (qNo && String(p.id) === qNo) return true; const h = hayOf(p); return any ? words.some((w) => h.includes(w)) : words.every((w) => h.includes(w)); };
   const rateOf = (p) => (p.RequireConfirm ? confirmStats(p, readIdx, ctx.agents) : null);
   const isTodo = (p) => p.RequireConfirm && !(myRow(p) && myRow(p).ConfirmedAt);
@@ -2389,7 +2372,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
                 <div className="text-[11.5px] text-slate-500 tabular-nums mt-0.5">{fmtDate(post.PublishedAt || post._created)}{post.UpdatedAt && <span className="text-slate-400"> · 수정 {fmtDate(post.UpdatedAt)}</span>}</div>
               </div>
               <div className="sm:ml-auto flex items-center gap-1.5 flex-wrap">
-                <span className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-white border border-slate-200 text-[12px] text-slate-500" title="게시물 고유 번호 — 검색 칸에 번호(예: #12)를 넣어 찾을 수 있습니다" data-testid="post-no">글번호<span className="t365-postno !h-[18px] !px-1">{post.id}</span></span>
+                <span className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-white border border-slate-200 text-[12px] text-slate-500" title="게시물 고유 번호 — 검색 칸에 번호(예: #12)를 넣어 찾을 수 있습니다" data-testid="post-no">No.<b className="font-semibold text-slate-700 tabular-nums">{post.id}</b></span>
                 <span className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-white border border-slate-200 text-[12px] text-slate-600 tabular-nums" title="열어 본 횟수의 합 — 같은 사람이 다시 열어도 1씩 늘어납니다"><Eye size={13} className="text-slate-400" />조회 <b className="text-slate-800" data-testid="meta-views">{vs.views}</b></span>
                 {files.length > 0 && <button onClick={() => { const el = scrollRef.current && scrollRef.current.querySelector("[data-testid=attachments]"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-white border border-slate-200 text-[12px] text-slate-600 hover:border-[#9CCBC8] hover:text-[#2F7B7A]" data-testid="meta-files"><Paperclip size={13} className="text-slate-400" />첨부 <b className="text-slate-800">{files.length}</b></button>}
                 {ctx.isAgent && (post.RequireConfirm || confirmed) && <span className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold ${confirmed ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-orange-50 text-orange-700 border border-orange-200"}`} data-testid="meta-mine" title={confirmed ? `처음 확인 ${fmtDate(mine.ConfirmedAt)} — 조회확인은 처음 연 시각만 남습니다` : undefined}>{confirmed ? <><CheckCircle2 size={13} /><span className="tabular-nums">{shortDate(mine.ConfirmedAt)}</span></> : <><BellRing size={12} />확인 필요</>}</span>}
