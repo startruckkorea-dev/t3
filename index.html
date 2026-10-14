@@ -21,18 +21,18 @@
 <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
 <style>
   /* 글꼴 — 그룹웨어(GW)와 같은 맑은 고딕 하나로(영문 · 숫자 · 한글이 섞여도 같은 글꼴) · 로그인 카드 · 로딩 · 스크롤 막대(APS 공통) */
-  html, body { margin: 0; padding: 0; height: 100%; background: #F5F6F8; font-family: 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; }
-  body, button, input, select, textarea, .font-sans { font-family: 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; }
-  body .font-mono { font-family: 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+  html, body { margin: 0; padding: 0; height: 100%; background: #F5F6F8; font-family: 'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; }
+  body, button, input, select, textarea, .font-sans { font-family: 'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; }
+  body .font-mono { font-family: 'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
   #root { height: 100%; }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-    font-family: 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; color: #64748B; font-size: 14px; }
-  #login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(145deg,#0f2744 0%,#101B34 100%);font-family:'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif}
+    font-family: 'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; color: #64748B; font-size: 14px; }
+  #login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(145deg,#0f2744 0%,#101B34 100%);font-family:'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif}
   .login-card{background:#fff;border-radius:16px;padding:40px 36px;width:340px;max-width:calc(100vw - 32px);box-sizing:border-box;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center}
   .login-title{font-size:1.05rem;font-weight:700;color:#101B34;margin-bottom:4px}
   .login-co{font-size:.8rem;color:#8A94A6;margin-bottom:6px}
   .login-guide{font-size:.8rem;color:#8A94A6;margin-bottom:20px;line-height:1.6}
-  #loading{align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(145deg,#0f2744 0%,#101B34 100%);font-family:'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif}
+  #loading{align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(145deg,#0f2744 0%,#101B34 100%);font-family:'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif}
   .loading-card{display:flex;flex-direction:column;align-items:center;gap:16px}
   .loading-spinner{width:40px;height:40px;border-radius:50%;border:3px solid rgba(255,255,255,.12);border-top-color:#2F7B7A;animation:t365-spin .85s linear infinite}
   .loading-text{color:rgba(255,255,255,.7);font-size:.85rem}
@@ -1873,24 +1873,37 @@ function SearchPopup({ ctx, initialQ, hidden, suspended, onClose, onOpen, onAsk,
 // Overview 왼쪽 바로가기 열 — 관리자가 넣은 링크를 세로로(새 창). 사이드바 메뉴와 섞지 않고 홈에서 바로 보이게
 function QuickLinksRail({ links, onManage }) {
   if (!links.length && !onManage) return null;
+  const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (e) { return ""; } };
+  const tint = (c) => /^#[0-9a-f]{6}$/i.test(c || "") ? c : BRAND.accent;
   return (
-    <section className="bg-white rounded-xl border border-slate-200 p-1.5" data-testid="quick-links">
-      <div className="flex items-center justify-between px-2.5 pt-1.5 pb-1">
-        <span className="text-[11px] font-bold tracking-[0.08em] text-slate-400">바로가기</span>
-        {onManage && <button onClick={onManage} className="text-[11px] text-slate-400 hover:text-slate-700" data-testid="links-manage">관리</button>}
+    <section className="rounded-2xl overflow-hidden bg-white border border-slate-200 shadow-sm" data-testid="quick-links">
+      {/* 머리 — 사이드바 · 배너와 같은 남색 띠 */}
+      <div className="relative px-4 py-2.5 lg:pt-3.5 lg:pb-3 text-white overflow-hidden" style={{ background: "linear-gradient(135deg,#101B34 0%,#1A2B4C 60%,#22566A 100%)" }}>
+        <Link2 className="absolute -right-3 -bottom-4 text-white/[0.05]" size={72} strokeWidth={1.6} aria-hidden="true" />
+        <div className="relative flex items-center gap-2">
+          <span className="w-7 h-7 rounded-lg flex items-center justify-center bg-white/10 ring-1 ring-white/15"><Link2 size={14} className="text-[#7FD1CB]" /></span>
+          <div className="min-w-0 flex-1 leading-tight">
+            <div className="text-[13.5px] font-bold tracking-[-0.01em]">바로가기</div>
+            <div className="text-[10.5px] text-white/55 mt-0.5">자주 쓰는 사이트 · 새 창</div>
+          </div>
+          {onManage && <button onClick={onManage} className="relative h-6 px-2 rounded-md text-[11px] text-white/70 hover:text-white hover:bg-white/10" data-testid="links-manage">관리</button>}
+        </div>
       </div>
       {links.length ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-1 gap-0.5">
-          {links.map((l) => (
+        <div className="p-2 flex lg:grid lg:grid-cols-1 gap-1 overflow-x-auto lg:overflow-visible snap-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {links.map((l) => { const c = tint(l.color); const h = host(l.href); return (
             <a key={l.id} href={l.href} target="_blank" rel="noopener noreferrer" data-link={l.id.slice(5)} title={l.desc ? `${l.desc}\n${l.href}` : l.href} aria-label={`${l.label} — 새 창으로 열기`}
-              className="group flex items-center gap-2.5 px-2.5 h-10 rounded-lg hover:bg-slate-50 min-w-0 transition-colors">
-              <span className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: /^#[0-9a-f]{6}$/i.test(l.color || "") ? l.color + "1A" : BRAND.accentSoft }}><l.icon size={13} style={{ color: l.color }} /></span>
-              <span className="min-w-0 flex-1 text-[13px] font-medium text-slate-700 truncate group-hover:text-slate-900" data-link-title>{l.label}</span>
-              <ArrowUpRight size={13} className="shrink-0 text-slate-300 group-hover:text-slate-500 transition-colors" aria-hidden="true" />
+              className="group relative snap-start shrink-0 max-w-[230px] lg:max-w-none flex items-center gap-2.5 lg:gap-3 px-2.5 py-2 rounded-xl border border-slate-100 lg:border-transparent hover:border-slate-200 hover:bg-slate-50/80 hover:shadow-sm min-w-0 transition-all">
+              <span className="w-8 h-8 lg:w-9 lg:h-9 rounded-[10px] flex items-center justify-center shrink-0 transition-transform group-hover:scale-105" style={{ background: c + "17", boxShadow: `inset 0 0 0 1px ${c}26` }}><l.icon size={16} style={{ color: c }} /></span>
+              <span className="min-w-0 flex-1 leading-tight">
+                <span className="block text-[13px] font-semibold text-slate-800 whitespace-nowrap lg:whitespace-normal lg:line-clamp-2 break-keep group-hover:text-slate-950" data-link-title>{l.label}</span>
+                {(l.desc || h) && <span className="hidden lg:block text-[11px] text-slate-400 truncate mt-0.5">{l.desc || h}</span>}
+              </span>
+              <ArrowUpRight size={14} className="shrink-0 text-slate-300 group-hover:text-[#2F7B7A] group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" aria-hidden="true" />
             </a>
-          ))}
+          ); })}
         </div>
-      ) : <div className="px-2.5 pb-2 text-[12px] text-slate-400">아직 바로가기가 없습니다. <button onClick={onManage} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>추가하기</button></div>}
+      ) : <div className="px-4 py-3 text-[12px] text-slate-400">아직 바로가기가 없습니다. <button onClick={onManage} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>추가하기</button></div>}
     </section>
   );
 }
@@ -1951,7 +1964,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
   const showLinks = links.length > 0 || !!onManageLinks;
   return (
     <div className={showLinks ? "w-full flex flex-col lg:flex-row lg:items-start gap-4" : "w-full"}>
-      {showLinks && <aside className="lg:w-[184px] shrink-0 lg:sticky lg:top-0"><QuickLinksRail links={links} onManage={onManageLinks} /></aside>}
+      {showLinks && <aside className="lg:w-[220px] shrink-0 lg:sticky lg:top-0"><QuickLinksRail links={links} onManage={onManageLinks} /></aside>}
       <div className="min-w-0 flex-1">
       <BannerCarousel ctx={ctx} banners={banners || []} onManage={onManageBanners} strip={
         <div className="flex flex-col min-[1400px]:flex-row min-[1400px]:items-end gap-3 min-[1400px]:gap-5">
@@ -2538,11 +2551,13 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
                 <div className="text-[13.5px] font-semibold text-slate-800">{post.AuthorName || "-"}</div>
                 <div className="text-[11.5px] text-slate-500 tabular-nums mt-0.5">{fmtDate(post.PublishedAt || post._created)}{post.UpdatedAt && <span className="text-slate-400"> · 수정 {fmtDate(post.UpdatedAt)}</span>}</div>
               </div>
-              <div className="sm:ml-auto flex items-center gap-1.5 flex-wrap">
-                <span className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-white border border-slate-200 text-[12px] text-slate-500" title="게시물 고유 번호 — 검색 칸에 번호(예: #12)를 넣어 찾을 수 있습니다" data-testid="post-no">No.<b className="font-semibold text-slate-700 tabular-nums">{post.id}</b></span>
-                <span className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-white border border-slate-200 text-[12px] text-slate-600 tabular-nums" title="열어 본 횟수의 합 — 같은 사람이 다시 열어도 1씩 늘어납니다"><Eye size={13} className="text-slate-400" />조회 <b className="text-slate-800" data-testid="meta-views">{vs.views}</b></span>
-                {files.length > 0 && <button onClick={() => { const el = scrollRef.current && scrollRef.current.querySelector("[data-testid=attachments]"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-white border border-slate-200 text-[12px] text-slate-600 hover:border-[#9CCBC8] hover:text-[#2F7B7A]" data-testid="meta-files"><Paperclip size={13} className="text-slate-400" />첨부 <b className="text-slate-800">{files.length}</b></button>}
-                {ctx.isAgent && (post.RequireConfirm || confirmed) && <span className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold ${confirmed ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-orange-50 text-orange-700 border border-orange-200"}`} data-testid="meta-mine" title={confirmed ? `처음 확인 ${fmtDate(mine.ConfirmedAt)} — 조회확인은 처음 연 시각만 남습니다` : undefined}>{confirmed ? <><CheckCircle2 size={13} /><span className="tabular-nums">{shortDate(mine.ConfirmedAt)}</span></> : <><BellRing size={12} />확인 필요</>}</span>}
+              {/* 숫자 — 알약 없이 옅은 글자 · 가운뎃점(필수 확인 상태만 색) */}
+              <div className="sm:ml-auto flex items-center gap-x-2.5 gap-y-1 flex-wrap text-[12px] text-slate-400 tabular-nums">
+                <span title="게시물 고유 번호 — 검색 칸에 번호(예: #12)를 넣어 찾을 수 있습니다" data-testid="post-no">No. <b className="font-medium text-slate-600">{post.id}</b></span>
+                <span className="text-slate-300">·</span>
+                <span className="inline-flex items-center gap-1" title="열어 본 횟수의 합 — 같은 사람이 다시 열어도 1씩 늘어납니다"><Eye size={13} />조회 <b className="font-medium text-slate-600" data-testid="meta-views">{vs.views}</b></span>
+                {files.length > 0 && <><span className="text-slate-300">·</span><button onClick={() => { const el = scrollRef.current && scrollRef.current.querySelector("[data-testid=attachments]"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="inline-flex items-center gap-1 hover:text-[#2F7B7A]" title="첨부로 이동" data-testid="meta-files"><Paperclip size={13} />첨부 <b className="font-medium text-slate-600">{files.length}</b></button></>}
+                {ctx.isAgent && (post.RequireConfirm || confirmed) && <><span className="text-slate-300">·</span><span className={`inline-flex items-center gap-1 font-medium ${confirmed ? "text-emerald-600" : "text-orange-600"}`} data-testid="meta-mine" title={confirmed ? `처음 확인 ${fmtDate(mine.ConfirmedAt)} — 조회확인은 처음 연 시각만 남습니다` : undefined}>{confirmed ? <><CheckCircle2 size={13} /><span>{shortDate(mine.ConfirmedAt)} 확인</span></> : <><BellRing size={12} />확인 필요</>}</span></>}
               </div>
             </div>
           </header>
@@ -2569,23 +2584,22 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
             )}
           </section>
 
-          {/* 첨부 — 머리 줄이 있는 상자 + 파일 한 줄씩(옅은 선) */}
+          {/* 첨부 — 상자 없이 본문 아래 옅은 선 + 파일 줄(마우스를 올리면 받기 표시) */}
           {files.length > 0 && (
-            <section className="px-5 md:px-10 pt-1 pb-4" data-testid="attachments">
-              <div className="rounded-xl border border-slate-200 overflow-hidden bg-white">
-                <div className="px-4 h-10 flex items-center gap-2 bg-slate-50 border-b border-slate-200 text-[12.5px]">
-                  <Paperclip size={14} className="text-slate-500" /><span className="font-semibold text-slate-700">첨부파일</span>
-                  <span className="text-[11px] font-bold px-1.5 rounded-full leading-[18px] text-white tabular-nums" style={{ background: BRAND.accent }}>{files.length}</span>
-                  <span className="ml-auto text-slate-400 tabular-nums">{fmtSize(totalSize)}</span>
+            <section className="px-5 md:px-10 pb-5" data-testid="attachments">
+              <div className="border-t border-slate-100 pt-3">
+                <div className="flex items-center gap-1.5 mb-1 text-[12px] text-slate-400">
+                  <Paperclip size={13} /><span className="font-medium text-slate-500">첨부</span><span className="tabular-nums">{files.length}</span>
+                  <span className="ml-auto tabular-nums">{fmtSize(totalSize)}</span>
                 </div>
-                <ul>
+                <ul className="-mx-2">
                   {files.map((f) => { const k = fileKind(f.name); return (
-                    <li key={f.itemId} className="border-t border-slate-100 first:border-t-0">
-                      <button onClick={() => tDownload(f)} title={`${f.name} 내려받기`} className="group w-full flex items-center gap-3 px-4 h-11 hover:bg-[#F3F8F8] text-left min-w-0" data-file={f.itemId}>
-                        <span className="w-7 h-7 rounded-md flex items-center justify-center shrink-0" style={{ background: k.bg }}><k.Icon size={14} style={{ color: k.c }} /></span>
-                        <span className="min-w-0 flex-1 truncate text-[13px] text-slate-700 group-hover:text-slate-900">{f.name}</span>
-                        <span className="shrink-0 text-[11.5px] text-slate-400 tabular-nums">{fileExt(f.name).toUpperCase() || "FILE"} · {fmtSize(f.size)}</span>
-                        <span className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] text-slate-500 border border-slate-200 group-hover:text-white group-hover:border-transparent group-hover:bg-[#2F7B7A] transition-colors"><Download size={12} />받기</span>
+                    <li key={f.itemId}>
+                      <button onClick={() => tDownload(f)} title={`${f.name} 내려받기`} className="group w-full flex items-center gap-2.5 px-2 h-9 rounded-md hover:bg-slate-50 text-left min-w-0" data-file={f.itemId}>
+                        <k.Icon size={15} className="shrink-0" style={{ color: k.c }} />
+                        <span className="min-w-0 truncate text-[13px] text-slate-700 group-hover:text-[#2F7B7A] group-hover:underline underline-offset-2">{f.name}</span>
+                        <span className="shrink-0 text-[11.5px] text-slate-400 tabular-nums">{fmtSize(f.size)}</span>
+                        <Download size={14} className="ml-auto shrink-0 text-slate-300 group-hover:text-[#2F7B7A]" aria-label="받기" />
                       </button>
                     </li>
                   ); })}
@@ -4122,8 +4136,23 @@ function BoardIconStrip({ ctx, onGo }) {
   const { posts, cats, readIdx, me } = ctx;
   const since = Date.now() - T365_FRESH_MS;
   const read = (p) => seenBy(p, (readIdx.get(String(p.id)) || new Map()).get(normEmail(me.email)), me);
+  // 좁은 화면 — 칸 너비를 글자에 맞추고(겹치지 않게) 가로로 밀어 보는 줄. 더 있으면 양 끝이 흐려지고 화살표가 보인다
+  const ref = useRef(null);
+  const [edge, setEdge] = useState({ l: false, r: false });
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    const upd = () => setEdge({ l: el.scrollLeft > 4, r: el.scrollLeft + el.clientWidth < el.scrollWidth - 4 });
+    upd(); el.addEventListener("scroll", upd, { passive: true });
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(upd) : null; if (ro) ro.observe(el);
+    return () => { el.removeEventListener("scroll", upd); if (ro) ro.disconnect(); };
+  }, [cats.length]);
+  const slide = (d) => { const el = ref.current; if (el) el.scrollBy({ left: d * Math.max(160, el.clientWidth * 0.7), behavior: "smooth" }); };
+  const mask = edge.l && edge.r ? "linear-gradient(90deg,transparent,#000 36px,#000 calc(100% - 36px),transparent)" : edge.r ? "linear-gradient(90deg,#000 calc(100% - 44px),transparent)" : edge.l ? "linear-gradient(90deg,transparent,#000 44px)" : "none";
+  const arrow = "absolute top-1/2 -translate-y-[60%] z-10 w-7 h-7 rounded-full bg-white/90 text-slate-700 shadow-md shadow-black/30 flex items-center justify-center hover:bg-white";
   return (
-    <div className="overflow-x-auto pb-0.5 -mx-1 px-1"><div className="inline-grid grid-flow-col auto-cols-fr items-end gap-0.5 md:gap-1" data-testid="board-icons">
+    <div className="relative -mx-1" data-scroll-l={edge.l ? "1" : "0"} data-scroll-r={edge.r ? "1" : "0"}>
+      <div ref={ref} className="overflow-x-auto overflow-y-hidden snap-x snap-mandatory md:snap-none px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" style={{ WebkitMaskImage: mask, maskImage: mask }}>
+        <div className="flex items-start gap-1.5 md:gap-1 w-max" data-testid="board-icons">
       {cats.map((c) => {
         const fresh = posts.filter((p) => p.Category === c.key && postTs(p) >= since);
         const unread = fresh.filter((p) => !read(p)).length;
@@ -4131,16 +4160,20 @@ function BoardIconStrip({ ctx, onGo }) {
         const I = c.icon || FileText;
         return (
           <button key={c.key} onClick={() => onGo(c.key)} data-bicon={c.key} title={`${c.label}${n ? ` — 최근 7일 안 읽은 새 글 ${unread}건` : fresh.length ? ` — 최근 7일 새 글 ${fresh.length}건 · 모두 읽음` : ""}`}
-            className="group min-w-[60px] px-2 md:px-2.5 flex flex-col items-center gap-1 pt-2 pb-1 rounded-xl hover:bg-white/10 transition-colors">
-            <span className="relative w-9 h-9 md:w-10 md:h-10 rounded-xl flex items-center justify-center bg-white shadow-md shadow-black/20 transition-transform group-hover:-translate-y-0.5">
+            className="group snap-start shrink-0 w-[70px] md:w-auto md:min-w-[60px] px-1 md:px-1.5 flex flex-col items-center gap-1.5 pt-2 pb-1.5 rounded-xl hover:bg-white/10 transition-colors">
+            <span className="relative w-10 h-10 rounded-xl flex items-center justify-center bg-white shadow-md shadow-black/20 transition-transform group-hover:-translate-y-0.5">
               <I size={17} style={{ color: c.color }} />
               {n > 0 && <span data-badge={c.key} data-tone={red ? "red" : "gray"} className="absolute -top-1.5 -right-1.5 min-w-[19px] h-[19px] px-1 rounded-full text-[10.5px] font-bold text-white flex items-center justify-center tabular-nums" style={{ background: red ? "#E11D48" : "#94A3B8", boxShadow: "0 0 0 2px rgba(16,27,52,.9)" }}>{n > 99 ? "99+" : n}</span>}
             </span>
-            <span className="text-[10.5px] md:text-[11.5px] text-white/85 group-hover:text-white leading-tight whitespace-nowrap" data-blabel={c.key}>{c.label}</span>
+            <span className="w-full text-center text-[11px] md:text-[11.5px] text-white/85 group-hover:text-white leading-[1.25] break-keep line-clamp-2 md:whitespace-nowrap" data-blabel={c.key}>{c.label}</span>
           </button>
         );
       })}
-    </div></div>
+        </div>
+      </div>
+      {edge.l && <button type="button" onClick={() => slide(-1)} className={`${arrow} left-0`} aria-label="게시판 아이콘 앞으로" data-testid="bicon-prev"><ChevronLeft size={15} /></button>}
+      {edge.r && <button type="button" onClick={() => slide(1)} className={`${arrow} right-0`} aria-label="게시판 아이콘 더 보기" data-testid="bicon-next"><ChevronRight size={15} /></button>}
+    </div>
   );
 }
 function DefaultHero({ ctx, onManage, strip }) {
