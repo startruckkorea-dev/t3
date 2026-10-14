@@ -596,10 +596,14 @@ function parseFiles(json) {
 }
 async function tFileUrl(f) {
   if (!T365_ID_RE.test(f.driveId) || !T365_ID_RE.test(f.itemId)) throw new Error("파일 정보가 올바르지 않습니다.");
-  const j = await apiGet(`/drives/${f.driveId}/items/${f.itemId}?$select=id,name,@microsoft.graph.downloadUrl`);
-  const u = j["@microsoft.graph.downloadUrl"];
-  if (!u || !/^https:\/\//i.test(u)) throw new Error("내려받기 주소를 받지 못했습니다.");
-  return u;
+  // SharePoint 는 $select 에 내려받기 주소를 넣어도 빼고 돌려줄 때가 있다(10-14 동영상 재생 실패) → select 없이 다시,
+  // 그래도 없으면 내 로그인으로 파일을 직접 받아 브라우저 안 주소(blob)로
+  let u = (await apiGet(`/drives/${f.driveId}/items/${f.itemId}?$select=id,name,@microsoft.graph.downloadUrl`))["@microsoft.graph.downloadUrl"];
+  if (!u) u = (await apiGet(`/drives/${f.driveId}/items/${f.itemId}`))["@microsoft.graph.downloadUrl"];
+  if (u && /^https:\/\//i.test(u)) return u;
+  const res = await gfetch(`${GRAPH}/drives/${f.driveId}/items/${f.itemId}/content`, { headers: { Authorization: "Bearer " + (await getGraphToken()) } });
+  if (!res.ok) throw new Error(`내려받기 주소를 받지 못했습니다 (${res.status}).`);
+  return URL.createObjectURL(await res.blob());
 }
 /* ---- Overview 배너(training365_Banners · 선택) — 그림은 AttachedFiles › Training365_Media-Files/_banners/ ----
  * 카테고리 관리 「편집」 권한이 있을 때만 올리고 저장한다(쓰기 지킴이와 같은 기준). 그림은 PNG · JPG · WEBP 4MB 까지.
@@ -1601,8 +1605,8 @@ function HomePostRow({ p, cat, onOpen, seen, fresh, views, confirm, tags, attr, 
   return (
     <button onClick={() => onOpen(p)} title={p.Title} {...attr} className={`group block w-full text-left px-5 py-3 border-t border-[#E9EEF3] first:border-t-0 hover:bg-[#F6FAF9] transition-colors min-w-0 ${className || ""}`}>
       <span className="flex items-center gap-1.5 min-w-0">
-        {tags && pin && <span className="shrink-0 text-[14.5px] font-bold text-[#D9480F]" data-kind="pin">[공지]</span>}
-        {tags && p.RequireConfirm && <span className="shrink-0 text-[14.5px] font-bold text-[#C2410C]" data-kind="req">[필수]</span>}
+        {tags && pin && <span data-kind="pin"><NoticePill /></span>}
+        {tags && p.RequireConfirm && <span data-kind="req"><ReqPill /></span>}
         <span className={`min-w-0 truncate text-[14.5px] leading-6 tracking-[-0.01em] group-hover:underline underline-offset-2 ${seen ? "font-medium text-slate-700" : "font-bold text-slate-900"}`}>{p.Title}</span>
         {fresh && <NewDot />}
         <PostMarks p={p} compact />
@@ -1654,8 +1658,9 @@ const SeenMark = ({ r, confirm, tight }) => {
   return <span className="inline-flex items-center gap-1 text-[11.5px] font-medium text-emerald-700 tabular-nums whitespace-nowrap" title={tip} data-confirm-state={confirm ? "done" : undefined} data-seen="1"><CheckCircle2 size={13} className="shrink-0" />{tight ? <span className="hidden sm:inline">{shortDate(at)}</span> : shortDate(at)}</span>;
 };
 // 게시물 앞의 작은 표시 — 공지 · 필수(제목 왼쪽)
-const NoticePill = () => <span className="t365-pill bg-amber-100 text-amber-800" data-pill="pin"><Pin size={10} />공지</span>;
-const ReqPill = () => <span className="t365-pill" style={{ background: "#FDEEE6", color: "#C2410C" }} data-pill="req"><BellRing size={10} />필수</span>;
+// 공지 · 필수 표시 — 옅은 바탕 + 가는 테두리의 작은 알약(괄호 글자 대신)
+const NoticePill = () => <span className="t365-pill !rounded-full !px-2 !font-semibold bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200/80" data-pill="pin"><Pin size={10} />공지</span>;
+const ReqPill = () => <span className="t365-pill !rounded-full !px-2 !font-semibold bg-orange-50 text-[#C2410C] ring-1 ring-inset ring-orange-200/80" data-pill="req"><BellRing size={10} />필수</span>;
 const dateCell = (p) => shortDate(p.PublishedAt || p._created);   // 게시판 목록 작성일 — 시각까지(KST)
 // 입력 칸에서 치는 글자(검색어 등)와 겹치지 않을 때만 「/」 로 검색 칸 열기
 const isTyping = (e) => { const t = e.target; return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable); };
@@ -2206,7 +2211,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
         <div className="px-3 md:px-4 border-b border-slate-200 flex flex-col md:flex-row md:items-center gap-2 md:gap-3 pt-2 md:pt-0">
           {/* 보기 탭 — 회색 바탕 위의 둥근 조각(segmented) · 아이콘 + 개수 */}
           <div className="order-2 md:order-1 py-2 md:py-2.5 overflow-x-auto">
-            <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-100 ring-1 ring-inset ring-slate-200/70" role="tablist">
+            <div className="inline-flex items-center gap-5" role="tablist">
               {tabs.map(([k, label]) => {
                 const on = filter === k || (k === "notice" && filter === "pinned") || (k === "notice" && filter === "required" && !ctx.isAgent);
                 const n = cnt(k);
@@ -2215,10 +2220,11 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
                 const urgent = (k === "todo" || (k === "qwait" && ctx.qnaDuty)) && n > 0;   // 할 일이 있는 탭 — 고르지 않아도 개수를 주황으로
                 return (
                   <button key={k} role="tab" aria-selected={on} onClick={() => setFilter(k)} data-filter={k}
-                    className={`h-8 px-3 rounded-lg text-[13px] whitespace-nowrap inline-flex items-center gap-1.5 transition-all ${on ? "bg-white text-slate-900 font-semibold shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-800 hover:bg-white/60"}`}>
+                    className={`relative h-9 text-[13px] whitespace-nowrap inline-flex items-center gap-1.5 transition-colors ${on ? "text-slate-900 font-semibold" : "text-slate-500 hover:text-slate-800"}`}>
                     <TI size={14} style={{ color: on ? tint : "#94A3B8" }} />
                     {label}
-                    <span className={`min-w-[20px] text-center text-[11px] font-semibold tabular-nums rounded-full px-1.5 leading-[18px] ${on || urgent ? "text-white" : "bg-slate-200/80 text-slate-500"}`} style={on ? { background: tint } : urgent ? { background: "#C2410C" } : undefined}>{n}</span>
+                    <span className="text-[11.5px] font-semibold tabular-nums" style={{ color: urgent ? "#C2410C" : on ? tint : "#94A3B8" }}>{n}</span>
+                    {on && <span className="absolute left-0 right-0 -bottom-[9px] md:-bottom-[11px] h-[2px] rounded-full" style={{ background: tint }} aria-hidden="true"></span>}
                   </button>
                 );
               })}
@@ -2272,7 +2278,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
                 {rows.length ? rows.map(({ p, pin }) => {
                   const vs = viewStats(readIdx, p.id);
                   return (
-                    <tr key={(pin ? "pin" : "") + p.id} onClick={() => setOpenId(p.id)} data-post={p.id} data-pin={pin ? "1" : undefined} title={p.Title} className={`border-t border-slate-200/80 first:border-t-0 cursor-pointer ${pin ? "bg-[#FFFBEB] hover:bg-amber-50" : "hover:bg-[#F3F8F8]"}`}>
+                    <tr key={(pin ? "pin" : "") + p.id} onClick={() => setOpenId(p.id)} data-post={p.id} data-pin={pin ? "1" : undefined} title={p.Title} className={`border-t border-slate-200/80 first:border-t-0 cursor-pointer ${pin ? "bg-[#FFFCF5] hover:bg-[#FFF8EA] shadow-[inset_3px_0_0_#F59E0B]" : "hover:bg-[#F3F8F8]"}`}>
                       <td className="px-3 h-12 text-left text-[12.5px] text-slate-400 tabular-nums">{numOf.get(p.id)}</td>
                       {!catKey && <td className="px-3 h-12 truncate"><span className="flex"><BoardCell cat={catMap[p.Category]} bare /></span></td>}
                       <td className="px-3 h-12 min-w-0"><TitleLine p={p} pin={pin} inTable /></td>
@@ -2295,7 +2301,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
             const vs = viewStats(readIdx, p.id); const nf = parseFiles(p.AttachmentsJson).length;
             const pv = view === "summary" ? plainPreview(p.Body, 220) : "";
             return (
-              <button key={(pin ? "pin" : "") + p.id} onClick={() => setOpenId(p.id)} data-post={p.id} className={`w-full text-left px-4 ${view === "summary" ? "md:px-5 py-3.5" : "py-3"} border-t border-slate-100 first:border-t-0 block ${pin ? "bg-amber-50/50 hover:bg-amber-50" : "hover:bg-slate-50"}`}>
+              <button key={(pin ? "pin" : "") + p.id} onClick={() => setOpenId(p.id)} data-post={p.id} className={`w-full text-left px-4 ${view === "summary" ? "md:px-5 py-3.5" : "py-3"} border-t border-slate-100 first:border-t-0 block ${pin ? "bg-[#FFFCF5] hover:bg-[#FFF8EA] shadow-[inset_3px_0_0_#F59E0B]" : "hover:bg-slate-50"}`}>
                 <TitleLine p={p} pin={pin} big={view === "summary"} />
                 {pv && <p className="text-[13px] text-slate-500 leading-relaxed mt-1 t365-clamp2 hidden md:block"><HlTerms text={pv} terms={field === "b" || field === "tb" ? words : null} /></p>}
                 <div className="flex items-center gap-1.5 mt-1.5 text-[11.5px] text-slate-400 min-w-0">
@@ -2382,17 +2388,27 @@ function PostModalShell({ onClose, children, label, suspended, narrow, panelClas
 }
 // 첨부한 동영상(mp4 · webm · mov · m4v) — 글 보기에서 바로 재생. 처음에는 표지(이름 · 크기)만, 누르면 그때 내려받기 주소를 받아 스트리밍
 const isVideoFile = (f) => T365_VIDEO_EXT.includes(fileExt(f && f.name));
+const T365_VIDEO_SIZES = [["s", "작게", 420], ["m", "보통", 640], ["l", "크게", 0]];
 function AttachedVideo({ f }) {
   const [src, setSrc] = useState(""); const [busy, setBusy] = useState(false);
+  const [size, setSize] = usePref("videoSize", "m", ["s", "m", "l"]);
+  const maxW = (T365_VIDEO_SIZES.find((x) => x[0] === size) || [])[2];
   async function play() { if (busy) return; setBusy(true); try { setSrc(await tFileUrl(f)); } catch (e) { uiAlert(`동영상을 열 수 없습니다 — ${e.message}`); } setBusy(false); }
-  return src ? (
-    <figure className="m-0"><video src={src} controls autoPlay playsInline preload="metadata" className="w-full aspect-video rounded-xl bg-black" data-video-player={f.itemId}></video>
-      <figcaption className="mt-1.5 text-[12px] text-slate-500 truncate">{f.name} · {fmtSize(f.size)}</figcaption></figure>
-  ) : (
-    <button onClick={play} className="group relative w-full aspect-video rounded-xl overflow-hidden bg-gradient-to-br from-slate-800 to-slate-950 text-white flex flex-col items-center justify-center gap-3" data-video={f.itemId} title={`${f.name} 재생`}>
-      <span className="w-16 h-16 rounded-full bg-white/15 group-hover:bg-white/25 backdrop-blur flex items-center justify-center transition-colors">{busy ? <span className="w-6 h-6 rounded-full border-2 border-white/40 border-t-white animate-spin"></span> : <Play size={28} className="ml-1" fill="currentColor" />}</span>
-      <span className="text-[13px] text-white/85 px-4 truncate max-w-full">{f.name} · {fmtSize(f.size)}</span>
-    </button>
+  return (
+    <figure className="m-0 transition-[max-width] duration-300" style={{ maxWidth: maxW || "100%" }}>
+      {src ? <video src={src} controls autoPlay playsInline preload="metadata" className="w-full aspect-video rounded-xl bg-black" data-video-player={f.itemId}></video> : (
+        <button onClick={play} className="group relative w-full aspect-video rounded-xl overflow-hidden bg-gradient-to-br from-slate-800 to-slate-950 text-white flex flex-col items-center justify-center gap-3" data-video={f.itemId} title={`${f.name} 재생`}>
+          <span className="w-14 h-14 rounded-full bg-white/15 group-hover:bg-white/25 backdrop-blur flex items-center justify-center transition-colors">{busy ? <span className="w-6 h-6 rounded-full border-2 border-white/40 border-t-white animate-spin"></span> : <Play size={24} className="ml-1" fill="currentColor" />}</span>
+          <span className="text-[12.5px] text-white/80 px-4 truncate max-w-full">눌러서 재생</span>
+        </button>
+      )}
+      <figcaption className="mt-2 flex items-center gap-2 min-w-0">
+        <FileVideo size={14} className="text-slate-400 shrink-0" /><span className="text-[12px] text-slate-500 truncate min-w-0 flex-1">{f.name} · {fmtSize(f.size)}</span>
+        <span className="inline-flex shrink-0 rounded-md ring-1 ring-slate-200 overflow-hidden text-[11px]" role="group" aria-label="동영상 크기">
+          {T365_VIDEO_SIZES.map(([k, l]) => <button key={k} type="button" onClick={() => setSize(k)} aria-pressed={size === k} data-video-size={k} className={`px-2 h-6 ${size === k ? "bg-slate-800 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}>{l}</button>)}
+        </span>
+      </figcaption>
+    </figure>
   );
 }
 function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, suspended }) {
@@ -3094,7 +3110,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
       <div className="px-3.5 pb-3">{children}</div>
     </section>
   );
-const Tip = ({ icon: I, children }) => <li className="flex items-start gap-2"><span className="w-5 h-5 rounded-md bg-slate-100 flex items-center justify-center shrink-0 mt-px"><I size={11} className="text-slate-500" /></span><span className="min-w-0">{children}</span></li>;
+const Tip = ({ icon: I, children }) => <li className="flex items-center gap-2 min-w-0"><I size={13} className="text-slate-400 shrink-0" /><span className="min-w-0 truncate">{children}</span></li>;
   const FileRow = ({ f, isNew, onRemove }) => { const k = fileKind(f.name); return (
     <div className="flex items-center gap-2.5 py-1.5">
       <span className="w-7 h-7 rounded-md flex items-center justify-center shrink-0" style={{ background: k.bg }}><k.Icon size={14} style={{ color: k.c }} /></span>
@@ -3198,13 +3214,11 @@ const Tip = ({ icon: I, children }) => <li className="flex items-start gap-2"><s
           </Card>}
           <Card title="첨부파일" icon={Paperclip} right={<span className="text-[11px] text-slate-400 tabular-nums">{allCount} / {T365_FILES_MAX}{allCount ? ` · ${fmtSize(totalSize)}` : ""}</span>}>
             <label onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); addFiles(e.dataTransfer.files); }}
-              className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed px-3 py-4 cursor-pointer text-center transition-colors ${drag ? "border-[#2F7B7A] bg-[#E4F1F0]" : "border-slate-300 bg-slate-50/60 hover:border-[#2F7B7A]/60 hover:bg-[#F3F9F8]"}`} data-testid="ed-drop">
-              <span className="w-9 h-9 rounded-full bg-white shadow-sm ring-1 ring-slate-200 flex items-center justify-center"><Upload size={16} className={drag ? "text-[#2F7B7A]" : "text-slate-500"} /></span>
-              <span className="text-[12.5px] text-slate-700 font-semibold"><span className="hidden md:inline">끌어다 놓거나 눌러서 선택</span><span className="md:hidden">눌러서 파일 선택</span></span>
-              <span className="flex flex-wrap justify-center gap-1 text-[10.5px] text-slate-500">
-                <span className="px-1.5 rounded bg-white ring-1 ring-slate-200 leading-[18px]">최대 {T365_FILES_MAX}개</span>
-                <span className="px-1.5 rounded bg-white ring-1 ring-slate-200 leading-[18px]">파일 {Math.round(T365_ATTACH_MAX / 1048576)}MB</span>
-                <span className="px-1.5 rounded bg-white ring-1 ring-slate-200 leading-[18px] inline-flex items-center gap-0.5"><PlayCircle size={10} />동영상 {Math.round(T365_VIDEO_MAX / 1048576)}MB · 바로 재생</span>
+              className={`flex items-center gap-3 rounded-xl border border-dashed px-3 py-3 cursor-pointer transition-colors ${drag ? "border-[#2F7B7A] bg-[#E4F1F0]" : "border-slate-300 hover:border-[#2F7B7A]/60 hover:bg-[#F3F9F8]"}`} data-testid="ed-drop">
+              <span className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center shrink-0"><Upload size={16} className={drag ? "text-[#2F7B7A]" : "text-slate-500"} /></span>
+              <span className="min-w-0 leading-tight">
+                <span className="block text-[12.5px] text-slate-700 font-semibold"><span className="hidden md:inline">파일을 끌어다 놓거나 눌러서 추가</span><span className="md:hidden">눌러서 파일 추가</span></span>
+                <span className="block mt-0.5 text-[11px] text-slate-400 truncate">최대 {T365_FILES_MAX}개 · {Math.round(T365_ATTACH_MAX / 1048576)}MB · 동영상 {Math.round(T365_VIDEO_MAX / 1048576)}MB</span>
               </span>
               <input type="file" multiple onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} className="hidden" data-testid="ed-files" />
             </label>
@@ -3230,18 +3244,18 @@ const Tip = ({ icon: I, children }) => <li className="flex items-start gap-2"><s
           </Card>
           <Card title={isQna ? "질문 안내" : "작성 안내"} icon={Info}>
             {isQna ? (
-            <ul className="text-[11.5px] text-slate-500 space-y-2 leading-snug" data-testid="ed-tips-qna">
-              <Tip icon={ShieldCheck}>다른 Agent 도 볼 수 있습니다 — <b className="text-slate-700">고객 개인정보 · 민감정보</b>는 빼 주세요.</Tip>
-              <Tip icon={Sparkles}>답변이 달리면 Overview 와 Q&A 게시판에 <b className="text-slate-700">「새 답변」</b> 으로 알려 드립니다.</Tip>
-              <Tip icon={Camera}>화면 캡처를 첨부하면 더 빨리 답변해 드릴 수 있습니다.</Tip>
-              <Tip icon={LockKeyhole}>답변이 달리기 전까지 본인만 고치거나 지울 수 있습니다.</Tip>
+            <ul className="text-[12px] text-slate-500 space-y-2" data-testid="ed-tips-qna">
+              <Tip icon={ShieldCheck}>고객 개인정보 · 민감정보는 빼 주세요</Tip>
+              <Tip icon={Sparkles}>답변이 달리면 「새 답변」 으로 알려 드려요</Tip>
+              <Tip icon={Camera}>화면 캡처를 첨부하면 답변이 빨라요</Tip>
+              <Tip icon={LockKeyhole}>답변 전까지 본인만 수정 · 삭제할 수 있어요</Tip>
             </ul>
             ) : (
-            <ul className="text-[11.5px] text-slate-500 space-y-2 leading-snug" data-testid="ed-tips">
-              <Tip icon={ListOrdered}>첫 줄에 핵심을, 단계는 <b className="text-slate-700">번호 목록</b>으로 정리하면 읽기 쉽습니다.</Tip>
-              <Tip icon={PlayCircle}>링크는 https 주소만 연결됩니다. 동영상은 <b className="text-slate-700">첨부</b>하면 글에서 바로 재생됩니다.</Tip>
-              <Tip icon={ShieldCheck}>고객 개인정보 · 연락처는 올리지 마세요.</Tip>
-              <Tip icon={History}>쓰는 동안 이 기기에 <b className="text-slate-700">임시 저장</b>됩니다 · <kbd className="px-1 rounded border border-slate-200 bg-white text-[10px]">Ctrl</kbd>+<kbd className="px-1 rounded border border-slate-200 bg-white text-[10px]">Enter</kbd> 로 바로 게시</Tip>
+            <ul className="text-[12px] text-slate-500 space-y-2" data-testid="ed-tips">
+              <Tip icon={ListOrdered}>핵심은 첫 줄에, 단계는 번호 목록으로</Tip>
+              <Tip icon={PlayCircle}>동영상은 첨부하면 글에서 바로 재생돼요</Tip>
+              <Tip icon={ShieldCheck}>고객 개인정보 · 연락처는 올리지 마세요</Tip>
+              <Tip icon={History}>쓰는 동안 이 기기에 임시 저장돼요 · Ctrl+Enter 게시</Tip>
             </ul>
             )}
             {hasOldVideo && <p className="mt-2 text-[11px] text-slate-500 bg-slate-50 rounded-md px-2 py-1.5" data-testid="ed-old-video"><PlayCircle size={11} className="inline -mt-0.5 mr-1" />이 글에 연결된 동영상은 보기 화면에서 그대로 재생됩니다.</p>}
