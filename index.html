@@ -1210,8 +1210,12 @@ function UiDialog({ d, onDone }) {
     onDone(v);
     setTimeout(() => { try { if (pf && pf.focus && document.contains(pf)) pf.focus(); } catch (e) {} }, 0);
   };
+  // 처음 열 때 한 번만 — 글자를 칠 때마다 다시 고르면 친 글자가 계속 덮어써진다(링크 넣기 10-15)
   useEffect(() => {
     const t = setTimeout(() => { const el = d.kind === "prompt" ? inRef.current : okRef.current; if (el) { el.focus(); if (el.select) el.select(); } }, 20);
+    return () => clearTimeout(t);
+  }, []);
+  useEffect(() => {
     // 창 위에서는 키를 먼저 받는다(capture) — 밑에 깔린 글쓰기 창의 Esc 닫기 등이 함께 돌지 않게
     const k = (e) => {
       if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(false); return; }
@@ -1228,7 +1232,7 @@ function UiDialog({ d, onDone }) {
       }
     };
     window.addEventListener("keydown", k, true);
-    return () => { clearTimeout(t); window.removeEventListener("keydown", k, true); };
+    return () => window.removeEventListener("keydown", k, true);
   });
   const title = d.title || (d.kind === "alert" ? "알림" : d.kind === "prompt" ? "입력" : "확인");
   const okText = d.okText || "확인";
@@ -1570,14 +1574,13 @@ const QnaPill = ({ p, age }) => {
   return <span className={`t365-pill whitespace-nowrap ${late ? "" : "bg-slate-100 text-slate-500"}`} style={late ? { background: "#FDEEE6", color: "#C2410C" } : undefined} data-qna="wait" data-wait-days={age ? d : undefined}
     title={d >= 1 ? `질문한 지 ${d}일째 답변을 기다리고 있습니다` : undefined}>{late && <Clock size={10} />}{d >= 1 ? `대기 ${d}일` : "답변 대기"}</span>;
 };
-// 제목 옆 작은 표시 — Q&A 상태 · 필수 · 첨부 · 동영상
+// 제목 옆 작은 표시 — Q&A 상태 · 첨부 · 동영상(조회확인 필수 표시는 뺐다 — 10-15 요청, 공지 · 필수 상자 · 확인 대기에서 구분)
 function PostMarks({ p, compact, noQna }) {
   const att = parseFiles(p.AttachmentsJson).length > 0;
   const vid = !!(safeHttpsUrl(p.VideoUrl) || parseFiles(p.VideoFileJson).length);
   return (
     <span className="inline-flex items-center gap-1 shrink-0 align-middle">
       {p.Category === "qna" && !noQna && <QnaPill p={p} />}
-      {p.RequireConfirm && !compact && <span className="text-[10px] font-bold px-1 rounded leading-[16px]" style={{ background: "#FDEEE6", color: "#C2410C" }}>필수</span>}
       {att && <Paperclip size={12} className="text-slate-400" aria-label="첨부" />}
       {vid && <PlayCircle size={12.5} className="text-slate-400" aria-label="동영상" />}
     </span>
@@ -1655,7 +1658,6 @@ function HomePostRow({ p, cat, onOpen, seen, fresh, views, confirm, tags, attr, 
     <button onClick={() => onOpen(p)} title={p.Title} {...attr} className={`group block w-full text-left px-5 py-2.5 border-t border-[#E9EEF3] first:border-t-0 hover:bg-[#F6FAF9] transition-colors min-w-0 ${className || ""}`}>
       <span className="flex items-center gap-1.5 min-w-0">
         {tags && pin && <span data-kind="pin"><NoticePill /></span>}
-        {tags && p.RequireConfirm && <span data-kind="req"><ReqPill /></span>}
         <span className={`min-w-0 truncate text-[14.5px] leading-6 tracking-[-0.01em] group-hover:underline underline-offset-2 ${seen ? "font-medium text-slate-700" : "font-bold text-slate-900"}`}>{p.Title}</span>
         {fresh && <NewDot />}
         <PostMarks p={p} compact />
@@ -1709,6 +1711,7 @@ const SeenMark = ({ r, confirm, tight }) => {
 // 게시물 앞의 작은 표시 — 공지 · 필수(제목 왼쪽)
 // 공지 · 필수 표시 — 옅은 바탕 + 가는 테두리의 작은 알약(괄호 글자 대신)
 const NoticePill = () => <span className="t365-pill !rounded-full !px-2 !font-semibold bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200/80" data-pill="pin"><Pin size={10} />공지</span>;
+// 필수 알약은 쓰지 않는다(10-15 요청) — 확인 여부는 미확인 · ✓ 시각으로
 const ReqPill = () => <span className="t365-pill !rounded-full !px-2 !font-semibold bg-orange-50 text-[#C2410C] ring-1 ring-inset ring-orange-200/80" data-pill="req"><BellRing size={10} />필수</span>;
 // 게시판 목록 작성일 — 연도까지 「2026.10.14 21:54」(KST)
 const dateCell = (p) => { const d = fmtDate(p.PublishedAt || p._created); return d === "-" ? d : d.replace(/-/g, "."); };
@@ -1859,7 +1862,7 @@ function SearchPopup({ ctx, initialQ, hidden, suspended, onClose, onOpen, onAsk,
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1.5 min-w-0">
                       {isNewPost(p) && !seen && <NewDot />}
-                      {pinActive(p) && <NoticePill />}{p.RequireConfirm && <ReqPill />}
+                      {pinActive(p) && <NoticePill />}
                       <span className={`truncate text-[14px] ${seen ? "text-slate-800" : "font-semibold text-slate-900"}`}><HlTerms text={p.Title} terms={terms} /></span>
                       {p.Category === "qna" && <QnaPill p={p} />}
                     </span>
@@ -1990,20 +1993,19 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
     <div className={showLinks ? "w-full flex flex-col lg:flex-row lg:items-start gap-4" : "w-full"}>
       {showLinks && <aside className="lg:w-[220px] shrink-0 lg:sticky lg:top-0"><QuickLinksRail links={links} onManage={onManageLinks} /></aside>}
       <div className="min-w-0 flex-1">
-      <BannerCarousel ctx={ctx} banners={banners || []} onManage={onManageBanners} strip={
-        <div className="flex flex-col min-[1400px]:flex-row min-[1400px]:items-end gap-3 min-[1400px]:gap-5">
-          <div className="min-w-0 flex-1"><BoardIconStrip ctx={ctx} onGo={(k) => setTab("cat:" + k)} /></div>
-          {/* 전체 검색 — 배너 안 오른쪽 아래(유리 느낌) */}
-          <form onSubmit={(e) => { e.preventDefault(); setSearching(q.trim()); }} className="flex items-center gap-1.5 w-full lg:max-w-[520px] min-[1400px]:w-[340px] shrink-0 min-[1400px]:mb-2" role="search" data-testid="home-search">
-            <div className="relative flex-1">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/60" />
-              <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="게시물 검색" title="모든 게시판의 제목 · 내용 · 첨부 이름 · Q&A 답변에서 찾습니다" aria-label="게시물 검색" className="h-10 w-full rounded-lg text-[13px] pl-9 pr-9 text-white placeholder:text-white/55 bg-white/10 border border-white/25 backdrop-blur focus:bg-white focus:text-slate-900 focus:placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#7FD1CB]/60 transition-colors" data-testid="home-search-input" />
-              <kbd className="hidden md:inline absolute right-2.5 top-1/2 -translate-y-1/2 text-[10.5px] text-white/60 border border-white/25 rounded px-1.5 leading-[18px]">/</kbd>
-            </div>
-            <button type="submit" className="h-10 px-4 rounded-lg text-[13px] font-semibold bg-white text-slate-900 hover:bg-[#E4F1F0] shrink-0">검색</button>
-          </form>
-        </div>
-      } />
+      <BannerCarousel ctx={ctx} banners={banners || []} onManage={onManageBanners} />
+      {/* 게시판 바로가기 · 전체 검색 — 배너 아래 흰 줄(배너 그림을 가리지 않게) */}
+      <section className="mb-4 bg-white rounded-2xl border border-slate-200 shadow-[0_1px_2px_rgba(15,23,42,.04)] px-2 md:px-3 py-2 flex flex-col min-[1600px]:flex-row min-[1600px]:items-center gap-1.5 min-[1600px]:gap-0" data-testid="board-bar">
+        <div className="min-w-0 flex-1"><BoardIconStrip ctx={ctx} onGo={(k) => setTab("cat:" + k)} /></div>
+        <form onSubmit={(e) => { e.preventDefault(); setSearching(q.trim()); }} className="flex items-center gap-1.5 w-full min-[1600px]:w-[340px] shrink-0 px-1 pt-2 pb-1 border-t border-slate-100 min-[1600px]:border-t-0 min-[1600px]:p-0 min-[1600px]:pl-4 min-[1600px]:ml-2 min-[1600px]:border-l min-[1600px]:border-slate-200 min-[1600px]:self-stretch" role="search" data-testid="home-search">
+          <div className="relative flex-1">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="게시물 검색" title="모든 게시판의 제목 · 내용 · 첨부 이름 · Q&A 답변에서 찾습니다" aria-label="게시물 검색" className="h-10 w-full rounded-xl text-[13px] pl-9 pr-9 text-slate-900 placeholder:text-slate-400 bg-slate-50 border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-[#7FB8B4] focus:outline-none focus:ring-4 focus:ring-[#2F7B7A]/10 transition-colors" data-testid="home-search-input" />
+            <kbd className="hidden md:inline absolute right-2.5 top-1/2 -translate-y-1/2 text-[10.5px] text-slate-400 bg-white border border-slate-200 rounded px-1.5 leading-[18px]">/</kbd>
+          </div>
+          <button type="submit" className="h-10 px-4 rounded-xl text-[13px] font-semibold text-white shrink-0 hover:brightness-110 transition" style={{ background: BRAND.accent }}>검색</button>
+        </form>
+      </section>
       {/* 인사 · 요약 · 전체 검색 — 배너로 옮김(검색) · 인사 줄은 없앰 */}
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
@@ -2088,6 +2090,8 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                     </span>
                     <span className="mt-1 flex items-center gap-1.5 text-[11.5px] text-slate-400 min-w-0">
                       {isNew ? <span className="t365-pill text-white" style={{ background: "#1D4ED8" }} data-qna="new"><Sparkles size={10} />새 답변</span> : <QnaPill p={p} age={duty} />}
+                      <span className="tabular-nums shrink-0" data-postno={p.id}>No. {p.id}</span>
+                      <span className="text-slate-300">·</span>
                       {mineQ(p) ? <span className="t365-pill bg-slate-100 text-slate-500" data-mine="1">내 질문</span> : <span className="truncate max-w-[120px]">{p.AuthorName || ""}</span>}
                       <span className="text-slate-300">·</span>
                       <span className="tabular-nums shrink-0" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
@@ -2259,7 +2263,6 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
       <div className="flex items-center gap-1.5 min-w-0">
         {unread && isNewPost(p) && <NewDot />}
         {(pin || pinActive(p)) && <NoticePill />}
-        {p.RequireConfirm && kind !== "required" && <ReqPill />}
         <span className={`truncate ${big ? "text-[15px]" : "text-[14px]"} ${pin || unread ? "font-semibold text-slate-900" : "text-slate-600"}`} data-unread-title={unread ? "1" : undefined}><HlTerms text={p.Title} terms={field === "t" || field === "tb" ? words : null} /></span>
         {kind === "qna" && isMine(p) && <span className="t365-pill bg-slate-100 text-slate-500 font-semibold" data-mine="1">내 질문</span>}
         <PostMarks p={p} compact noQna={inTable && kind === "qna"} />
@@ -2563,7 +2566,6 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
                 {post.Category === "qna" && <QnaPill p={post} />}
                 {post.Category === "qna" && normEmail(post.AuthorEmail) === normEmail(me.email) && <span className="t365-pill bg-slate-100 text-slate-500" data-mine="1">내 질문</span>}
                 {pinActive(post) && <NoticePill />}
-                {post.RequireConfirm && <span className="t365-pill" style={{ background: "#FDEEE6", color: "#C2410C" }}><BellRing size={10} />조회확인 필수</span>}
                 {!ctx.isAgent && pinUntilOf(post) && (post.IsPinned || post.RequireConfirm) && <span className="text-[11.5px] text-slate-400 tabular-nums" title="홈 「공지 · 필수」 노출 기한 — 게시판 맨 위 고정도 이날까지" data-testid="pin-until">홈 노출 {pinUntilOf(post).slice(5).replace("-", ".")}까지{pinUntilOf(post) < kstToday() ? " (지남)" : ""}</span>}
               </div>
             )}
@@ -3382,7 +3384,6 @@ const Tip = ({ icon: I, children }) => <li className="flex items-center gap-2 mi
               <div className="flex items-center gap-1.5 min-w-0">
                 {canFlag && pinned && <span className="text-[10px] font-bold px-1 rounded leading-[16px] bg-amber-100 text-amber-800 shrink-0">공지</span>}
                 <span className={`truncate text-[13.5px] font-semibold ${title.trim() ? "text-slate-900" : "text-slate-300"}`}>{title.trim() || "제목을 입력하세요"}</span>
-                {canFlag && reqConfirm && <span className="text-[9.5px] font-bold px-1 rounded leading-[15px] shrink-0" style={{ background: "#FDEEE6", color: "#C2410C" }}>필수</span>}
                 {allCount > 0 && <Paperclip size={11.5} className="text-slate-400 shrink-0" />}
                 <NewDot />
               </div>
@@ -4221,11 +4222,11 @@ function BoardIconStrip({ ctx, onGo }) {
   }, [cats.length]);
   const slide = (d) => { const el = ref.current; if (el) el.scrollBy({ left: d * Math.max(160, el.clientWidth * 0.7), behavior: "smooth" }); };
   const mask = edge.l && edge.r ? "linear-gradient(90deg,transparent,#000 36px,#000 calc(100% - 36px),transparent)" : edge.r ? "linear-gradient(90deg,#000 calc(100% - 44px),transparent)" : edge.l ? "linear-gradient(90deg,transparent,#000 44px)" : "none";
-  const arrow = "absolute top-1/2 -translate-y-[60%] z-10 w-7 h-7 rounded-full bg-white/90 text-slate-700 shadow-md shadow-black/30 flex items-center justify-center hover:bg-white";
+  const arrow = "absolute top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white border border-slate-200 text-slate-600 shadow-md flex items-center justify-center hover:text-slate-900 hover:border-slate-300";
   return (
     <div className="relative -mx-1" data-scroll-l={edge.l ? "1" : "0"} data-scroll-r={edge.r ? "1" : "0"}>
       <div ref={ref} className="overflow-x-auto overflow-y-hidden snap-x snap-mandatory md:snap-none px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" style={{ WebkitMaskImage: mask, maskImage: mask }}>
-        <div className="grid grid-flow-col auto-cols-[76px] md:inline-grid md:auto-cols-fr gap-1 md:gap-1.5 w-max items-start" data-testid="board-icons">
+        <div className="grid grid-flow-col auto-cols-[76px] md:[grid-auto-columns:minmax(92px,1fr)] gap-0.5 md:gap-1 w-max md:w-full items-start" data-testid="board-icons">
       {cats.map((c) => {
         const fresh = posts.filter((p) => p.Category === c.key && postTs(p) >= since);
         const unread = fresh.filter((p) => !read(p)).length;
@@ -4233,12 +4234,12 @@ function BoardIconStrip({ ctx, onGo }) {
         const I = c.icon || FileText;
         return (
           <button key={c.key} onClick={() => onGo(c.key)} data-bicon={c.key} title={`${c.label}${n ? ` — 최근 7일 안 읽은 새 글 ${unread}건` : fresh.length ? ` — 최근 7일 새 글 ${fresh.length}건 · 모두 읽음` : ""}`}
-            className="group snap-start min-w-0 md:min-w-[76px] px-1 md:px-2.5 flex flex-col items-center gap-1.5 pt-2.5 pb-1.5 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-white/50">
-            <span className="relative w-10 h-10 rounded-xl flex items-center justify-center bg-white shadow-md shadow-black/20 transition-all duration-200 ease-out group-hover:scale-[1.14] group-hover:-translate-y-1 group-hover:shadow-xl group-hover:shadow-black/40 group-hover:ring-4 group-hover:ring-white/20 group-active:scale-105">
-              <I size={17} style={{ color: c.color }} className="transition-transform duration-200" />
-              {n > 0 && <span data-badge={c.key} data-tone={red ? "red" : "gray"} className="absolute -top-1.5 -right-1.5 min-w-[19px] h-[19px] px-1 rounded-full text-[10.5px] font-bold text-white flex items-center justify-center tabular-nums" style={{ background: red ? "#E11D48" : "#94A3B8", boxShadow: "0 0 0 2px rgba(16,27,52,.9)" }}>{n > 99 ? "99+" : n}</span>}
+            className="group snap-start min-w-0 px-1 md:px-2 flex flex-col items-center gap-1.5 pt-2 pb-1.5 rounded-xl hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2F7B7A]/40" style={{ "--bc": c.color, "--bs": c.soft || (/^#[0-9a-f]{6}$/i.test(c.color || "") ? c.color + "1A" : "#EEF2F6") }}>
+            <span className="relative w-10 h-10 md:w-11 md:h-11 rounded-[13px] flex items-center justify-center bg-[var(--bs)] text-[var(--bc)] group-hover:bg-[var(--bc)] group-hover:text-white transition-all duration-200 ease-out group-hover:scale-110 group-hover:-translate-y-0.5 group-hover:shadow-lg group-hover:shadow-slate-300/70 group-active:scale-100">
+              <I size={18} />
+              {n > 0 && <span data-badge={c.key} data-tone={red ? "red" : "gray"} className="absolute -top-1.5 -right-1.5 min-w-[19px] h-[19px] px-1 rounded-full text-[10.5px] font-bold text-white flex items-center justify-center tabular-nums" style={{ background: red ? "#E11D48" : "#94A3B8", boxShadow: "0 0 0 2px #fff" }}>{n > 99 ? "99+" : n}</span>}
             </span>
-            <span className="w-full text-center text-[11px] md:text-[11.5px] text-white/80 group-hover:text-white group-hover:font-semibold leading-[1.25] break-keep line-clamp-2 md:whitespace-nowrap transition-colors" data-blabel={c.key}>{c.label}</span>
+            <span className="w-full text-center text-[11px] md:text-[12px] font-medium text-slate-600 group-hover:text-slate-900 leading-[1.25] break-keep line-clamp-2 transition-colors" data-blabel={c.key}>{c.label}</span>
           </button>
         );
       })}
