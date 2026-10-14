@@ -2691,6 +2691,9 @@ function QnaAnswer({ ctx, post }) {
   const [text, setText] = useState(post.Answer || "");
   const [busy, setBusy] = useState(false);
   const taRef = useRef(null);
+  // 답변이 없는 질문 — 답변할 수 있는 사람에게는 편집 칸을 처음부터 펼쳐 둔다(「답변 쓰기」 를 누를 필요 없이). 열 때 커서는 옮기지 않는다(창이 아래로 밀리지 않게)
+  const openAlways = canAnswer && !has;
+  const showEd = editing || openAlways;
   // 답변 첨부 — AnswerFilesJson(그 글 폴더/answer). keep = 남길 기존 파일, adds = 새로 붙일 파일
   const ansFiles = parseFiles(post.AnswerFilesJson);
   const [keep, setKeep] = useState(ansFiles);
@@ -2767,12 +2770,12 @@ function QnaAnswer({ ctx, post }) {
           {showSeen && (askerSeen
             ? <span className="inline-flex items-center gap-1 text-emerald-600" title={`질문자가 ${fmtDate(askerRow.LastViewedAt)} 에 답변을 봤습니다`} data-testid="qna-seen" data-seen="1"><CheckCircle2 size={12} />질문자 확인</span>
             : <span className="text-slate-400" title={notifyHref ? "질문자가 아직 답변을 보지 않았습니다 — 「질문자에게 알리기」 로 메일을 보낼 수 있습니다" : "질문자가 아직 답변을 보지 않았습니다"} data-testid="qna-seen" data-seen="0">질문자 아직 안 봄</span>)}
-          {canAnswer && !editing && <span className="ml-auto flex items-center gap-3">
+          {canAnswer && !showEd && <span className="ml-auto flex items-center gap-3">
             {notifyHref && <a href={notifyHref} onClick={() => t365Log("게시물", "답변 알림 메일", post.Title, { info: { 질문자: asker } })} className="inline-flex items-center gap-1 text-slate-500 hover:text-[#1D4ED8]" data-testid="qna-notify" title={`${asker} 에게 답변 알림 메일 쓰기`}><Mail size={13} />질문자에게 알리기</a>}
             <button onClick={() => setEditing(true)} className="inline-flex items-center gap-1 font-semibold text-[#1D4ED8] hover:underline underline-offset-2" data-testid="qna-answer-btn"><SquarePen size={13} />{has ? "답변 수정" : "답변 쓰기"}</button>
           </span>}
         </div>
-        {editing ? (
+        {showEd ? (
           <div className="mt-2">
             {/* 보이는 대로 편집(글 편집기와 같은 RichEditor) — 굵게 · 목록이 바로 그 모양으로 보이고, 저장은 지금처럼 표기 글자 */}
             <div className="rounded-lg border border-slate-300 focus-within:border-[#93B4F0] focus-within:ring-2 focus-within:ring-[#1D4ED8]/20 overflow-hidden bg-white">
@@ -2800,7 +2803,7 @@ function QnaAnswer({ ctx, post }) {
             </div>
             <div className="mt-2 flex items-center justify-end gap-2">
               {upMsg && <span className="mr-auto text-[12px] text-slate-500 tabular-nums" data-testid="qna-answer-upmsg">{upMsg}</span>}
-              <button onClick={() => { setEditing(false); setText(post.Answer || ""); setKeep(parseFiles(post.AnswerFilesJson)); setAdds([]); }} disabled={busy} className={btnCls}>취소</button>
+              {!openAlways && <button onClick={() => { setEditing(false); setText(post.Answer || ""); setKeep(parseFiles(post.AnswerFilesJson)); setAdds([]); }} disabled={busy} className={btnCls}>취소</button>}
               <button onClick={save} disabled={busy} className="h-9 px-4 rounded-lg text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: "#1D4ED8" }} data-testid="qna-answer-save">{busy ? "저장 중..." : has ? "수정 저장" : "답변 등록"}</button>
             </div>
           </div>
