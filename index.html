@@ -5441,10 +5441,20 @@ function App({ boot }) {
   // 앱 안에서 쌓인 이동 수 — 위쪽 「뒤로」 단추는 이 값이 있으면 브라우저 뒤로, 없으면 Overview 로
   const [navIdx, setNavIdx] = useState(() => { try { return (history.state && history.state.t365) || 0; } catch (e) { return 0; } });
   const navRef = useRef(navIdx); navRef.current = navIdx;
+  // 글 창 기록 — 목록 위에 글을 연 기록에는 몇 겹째인지(t365pd)를 남겨, 닫을 때 그만큼 뒤로 간다.
+  // (닫기를 새 기록으로 쌓으면 「뒤로」 가 방금 닫은 글을 다시 열고, 닫으면 또 쌓이는 되풀이가 생겼다 — 10-15)
+  const curRef = useRef({ tab, post: openPostId }); curRef.current = { tab, post: openPostId };
   function setTab(t, post = null, push = true) {
+    const cur = curRef.current; const st = (() => { try { return history.state || {}; } catch (e) { return {}; } })();
+    if (push && post == null && t === cur.tab && cur.post) {
+      const pd = st.t365pd || 0;
+      if (pd > 0) { try { history.go(-pd); return; } catch (e) {} }
+      push = false;   // 주소로 바로 연 글 — 닫기는 기록을 바꿔 쓰기만
+    }
     setTabRaw(t); setOpenPostRaw(post);
     const h = hashOf(t, post);
-    try { if (window.location.hash !== h) { const i = push ? navRef.current + 1 : navRef.current; (push ? history.pushState : history.replaceState).call(history, { t365: i }, "", h); navRef.current = i; setNavIdx(i); } } catch (e) {}
+    const pd = post != null && t === cur.tab ? (cur.post ? (st.t365pd || 0) + 1 : 1) : 0;
+    try { if (window.location.hash !== h) { const i = push ? navRef.current + 1 : navRef.current; (push ? history.pushState : history.replaceState).call(history, { t365: i, t365pd: push ? pd : (st.t365pd && post != null ? st.t365pd : 0) }, "", h); navRef.current = i; setNavIdx(i); } } catch (e) {}
     const m = document.querySelector("main"); if (m) m.scrollTop = 0;
   }
   const setOpenId = (id) => setTab(tab, id ? String(id) : null);
@@ -5473,8 +5483,8 @@ function App({ boot }) {
   useEffect(() => { if (hasLoadedOnce && !tabAllowed(tab)) setTab("overview", null, false); }, [hasLoadedOnce, tab, permSig, catRows]);
 
   // 사이드바 접기 · 휴대폰 서랍 — MKQR 과 같은 동작(선택은 이 브라우저에 기억)
-  const [sideCollapsed, setSideCollapsed] = useState(() => { try { const v = localStorage.getItem("t365.sideCollapsed"); if (v === "1" || v === "0") return v === "1"; } catch (e) {} return window.innerWidth < 1100; });
-  const toggleSide = () => setSideCollapsed((v) => { const nv = !v; try { localStorage.setItem("t365.sideCollapsed", nv ? "1" : "0"); } catch (e) {} return nv; });
+  const [sideCollapsed, setSideCollapsed] = useState(() => { try { const v = localStorage.getItem("t365.sideCollapsed2"); if (v === "1" || v === "0") return v === "1"; } catch (e) {} return true; });   // 기본은 접힌 아이콘 줄(10-15) — 펼치면 이 기기에서 기억
+  const toggleSide = () => setSideCollapsed((v) => { const nv = !v; try { localStorage.setItem("t365.sideCollapsed2", nv ? "1" : "0"); } catch (e) {} return nv; });
   const MOBILE_Q = "(max-width: 767px)";
   const [isMobile, setIsMobile] = useState(() => { try { return window.matchMedia(MOBILE_Q).matches; } catch (e) { return false; } });
   const [drawerOpen, setDrawerOpen] = useState(false);
