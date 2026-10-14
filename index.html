@@ -645,12 +645,12 @@ async function tDeleteRemovedFiles(postId, removed) {
 const T365_ID_RE = /^[A-Za-z0-9!_\-]{1,200}$/;
 // 저장된 첨부 정보(JSON) — 형식이 맞는 것만 받는다(게시물 목록을 손으로 고쳐도 경로가 엉뚱한 곳을 가리키지 않게)
 // 받기 줄 — 글 보기 첨부 · 답변 첨부 같은 꼴(아이콘 · 이름 · 크기 · 받기)
-function FileRows({ files, testid }) {
+function FileRows({ files, testid, post }) {   // 10-15 post — 내려받기 기록에 글 제목 · 번호를 남긴다
   return (
     <ul className="-mx-2" data-testid={testid}>
       {files.map((f) => { const k = fileKind(f.name); return (
         <li key={f.itemId}>
-          <button onClick={() => tDownload(f)} title={`${f.name} 내려받기`} className="group w-full flex items-center gap-2.5 px-2 h-9 rounded-md hover:bg-slate-50 text-left min-w-0" data-file={f.itemId}>
+          <button onClick={() => tDownload(f, post, testid === "qna-answer-attachments" ? "답변 첨부" : "첨부")} title={`${f.name} 내려받기`} className="group w-full flex items-center gap-2.5 px-2 h-9 rounded-md hover:bg-slate-50 text-left min-w-0" data-file={f.itemId}>
             <k.Icon size={15} className="shrink-0" style={{ color: k.c }} />
             <span className="min-w-0 truncate text-[13px] text-slate-700 group-hover:text-[#2F7B7A] group-hover:underline underline-offset-2">{f.name}</span>
             <span className="shrink-0 text-[11.5px] text-slate-400 tabular-nums">{fmtSize(f.size)}</span>
@@ -741,12 +741,18 @@ function parseBanners(rows) {
     link: safeHttpsUrl(r.LinkUrl) || "", image: parseFiles(r.ImageJson)[0] || null, order: Number(r.SortOrder) || 0, active: r.Active !== false }))
     .sort((a, b) => a.order - b.order || Number(a.id) - Number(b.id));
 }
-async function tDownload(f) {
+async function tDownload(f, post, kind) {
+  // 10-15 내려받기가 된 뒤 기록, 실패하면 실패 기록(기록은 기다리지 않는다 — 실패해도 내려받기에 영향 없음)
+  const info = { 게시물ID: post ? post.id : "", 구분: kind || "첨부", 파일: f.name, 크기: f.size ? fmtSize(f.size) : "" };
   try {
     const url = await tFileUrl(f);
     const a = document.createElement("a");
     a.href = url; a.download = f.name; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
-  } catch (e) { uiAlert(`파일을 열 수 없습니다 — ${e.message}\n권한이 없으면 관리자에게 문의해 주세요.`); }
+    t365Log("게시물", "첨부 다운로드", post ? post.Title : f.name, { info });
+  } catch (e) {
+    t365Log("게시물", "첨부 다운로드 실패", post ? post.Title : f.name, { info: { ...info, 오류: String((e && e.message) || e || "").slice(0, 80) } });
+    uiAlert(`파일을 열 수 없습니다 — ${e.message}\n권한이 없으면 관리자에게 문의해 주세요.`);
+  }
 }
 
 /* ---- system_config_final.xlsx — 문의 메일(TRAINING365_CONTACT · TRAINING365_IT)만 읽는다. 권한 판정에는 쓰지 않는다 ----
@@ -887,6 +893,15 @@ const T365Session = {
     this.persist();
     return { resumed, itemId };
   },
+  // 10-15 로그인 기록을 기다리지 않고 시작 — 실패는 콘솔 경고만(예전: await 라 SharePoint 429 재시도 동안 첫 화면이 늦게 떴다)
+  starting: null,
+  begin(info) {
+    const p = Promise.resolve().then(() => this.start(info))
+      .catch((e) => { console.warn("[Training365] 접속 기록 실패:", e && e.message); });
+    this.starting = p;
+    p.then(() => { if (this.starting === p) this.starting = null; });
+    return p;
+  },
   persist() {
     try {
       sessionStorage.setItem("t365.sid", this.sid); sessionStorage.setItem("t365.sessItem", this.itemId || "");
@@ -926,6 +941,8 @@ const T365Session = {
     window.addEventListener("pagehide", () => this.flush());
   },
   async logout() {
+    // 10-15 로그인 기록이 아직 진행 중이면 잠깐(3초까지) 기다린다 — 그 행에 로그아웃을 적기 위해
+    if (this.starting) { try { await Promise.race([this.starting, new Promise((ok) => setTimeout(ok, 3000))]); } catch (e) {} }
     const now = new Date().toISOString();
     if (this.itemId) {
       try {
@@ -2649,7 +2666,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
                   <Paperclip size={13} /><span className="font-medium text-slate-500">첨부</span><span className="tabular-nums">{files.length}</span>
                   <span className="ml-auto tabular-nums">{fmtSize(totalSize)}</span>
                 </div>
-                <FileRows files={files} />
+                <FileRows files={files} post={post} />
               </div>
             </section>
           )}
@@ -2845,7 +2862,7 @@ function QnaAnswer({ ctx, post }) {
             <div className="text-[14px]" data-testid="qna-answer-body"><RichText text={post.Answer} /></div>
             {ansFiles.length > 0 && <div className="mt-2.5">
               <div className="flex items-center gap-1.5 text-[11.5px] text-slate-400"><Paperclip size={12} />답변 첨부 <span className="tabular-nums">{ansFiles.length}</span></div>
-              <FileRows files={ansFiles} testid="qna-answer-attachments" />
+              <FileRows files={ansFiles} testid="qna-answer-attachments" post={post} />
             </div>}
           </div>
         ) : (
@@ -3842,7 +3859,9 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
     const ws = XLSX.utils.aoa_to_sheet([["이메일", "이름", "회사/지점", "역할", "작성 카테고리"], ["agent.kim@example.com", "김영업", "서울모터스 강서지점", "Agent", ""], ["writer.lee@hyosung.com", "이작성", "STK Sales", "작성자", "crm,training"]]);
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "사용자");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["역할 값"], ...T365_ROLES.map((r) => [r]), [], ["카테고리 키"], ...T365_DEFAULT_CATEGORIES.map((c) => [`${c.key} = ${c.label}`]), [], ["메뉴별 개별 권한은 등록 후 화면 표에서 지정합니다"]]), "안내");
-    XLSX.writeFile(wb, "Training365_사용자_일괄등록_양식.xlsx");
+    try { XLSX.writeFile(wb, "Training365_사용자_일괄등록_양식.xlsx"); }
+    catch (e) { t365Log("사용자", "양식 다운로드 실패", "사용자 일괄 등록 양식", { info: { 오류: String((e && e.message) || e || "").slice(0, 80) } }); throw e; }
+    t365Log("사용자", "양식 다운로드", "사용자 일괄 등록 양식", {});   // 10-15
   }
   async function pickImport(e) {
     const f = (e.target.files || [])[0]; e.target.value = ""; if (!f) return;
@@ -5142,7 +5161,7 @@ function AccessLogTab({ ctx }) {
 /* ------------------------------------------------------------------ */
 /* 활동 이력 — MKQR 과 같은 파일 방식(APS 「이력 조회」 에서도 보임)           */
 /* ------------------------------------------------------------------ */
-const T365_LOG_CATS = ["게시물", "사용자", "카테고리", "조회확인", "접속 기록"];
+const T365_LOG_CATS = ["게시물", "사용자", "카테고리", "배너", "바로가기", "조회확인", "접속 기록", "활동 이력"];   // 10-15 배너 · 바로가기 · 활동 이력
 function logCatStyle(c) { return { "게시물": "bg-teal-50 text-teal-700", "사용자": "bg-violet-50 text-violet-700", "카테고리": "bg-blue-50 text-blue-700", "조회확인": "bg-orange-50 text-orange-700", "접속 기록": "bg-slate-100 text-slate-600" }[c] || "bg-slate-100 text-slate-600"; }
 function logVerbStyle(v) { return /삭제|중지/.test(v) ? "text-red-600" : /등록|추가|사용$/.test(v) ? "text-emerald-700" : "text-slate-700"; }
 function fmtVal(v) { return v === true ? "예" : v === false ? "아니요" : v === "" || v == null ? "(빈 값)" : String(v); }
@@ -5198,7 +5217,10 @@ function ActivityLogTab() {
   function exportExcel() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(view.map((l) => ({ "시각(KST)": l.timestampKST, 사용자: l.userName ? `${l.userName} (${l.user})` : l.user, 구분: l.category, 작업: l.verb, 대상: l.target, 내용: logSummary(l) }))), "활동이력");
-    XLSX.writeFile(wb, `Training365_활동이력_${from}_${to}.xlsx`);
+    const info = { 건수: view.length, 구분: cat, 검색어: q.trim() };
+    try { XLSX.writeFile(wb, `Training365_활동이력_${from}_${to}.xlsx`); }
+    catch (e) { t365Log("활동 이력", "Excel 내보내기 실패", `${from} ~ ${to}`, { info: { ...info, 오류: String((e && e.message) || e || "").slice(0, 80) } }); throw e; }
+    t365Log("활동 이력", "Excel 내보내기", `${from} ~ ${to}`, { info });   // 10-15
   }
   const ctrl = "h-9 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/40";
   const td = "px-3 py-[5px] text-[12.5px] leading-5 whitespace-nowrap overflow-hidden text-ellipsis";
@@ -5846,8 +5868,8 @@ async function t365Boot(account) {
   const company = (myRow && myRow.Company) || "";
   _tLogUser = { email, name: (myRow && myRow.Title) || ident.shortName };
   // 접속 기록 — 통과 · 차단 모두. 기록 실패(목록 없음 · 권한)는 화면을 막지 않는다
-  try { await T365Session.start({ email, name: (myRow && myRow.Title) || ident.shortName, role: role || "", company }); }
-  catch (e) { console.warn("[Training365] 접속 기록 실패:", e.message); }
+  // 10-15 기다리지 않는다(begin) — 기록이 늦거나 실패해도 첫 화면은 바로 뜬다
+  T365Session.begin({ email, name: (myRow && myRow.Title) || ident.shortName, role: role || "", company });
   const loadingEl = document.getElementById("loading"); if (loadingEl) loadingEl.remove();
   const root = createRoot(document.getElementById("root"));
   if (!role) { root.render(<AccessDenied ident={{ ...ident, email }} reason={reason} contact={T365_MAILS.contact} />); return; }
