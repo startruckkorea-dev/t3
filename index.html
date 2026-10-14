@@ -1600,8 +1600,7 @@ function HomePostRow({ p, cat, onOpen, seen, fresh, views, confirm, tags, attr, 
   const pin = pinActive(p);
   return (
     <button onClick={() => onOpen(p)} title={p.Title} {...attr} className={`group block w-full text-left px-5 py-3 border-t border-[#E9EEF3] first:border-t-0 hover:bg-[#F6FAF9] transition-colors min-w-0 ${className || ""}`}>
-      <span className="block text-[11.5px] font-semibold leading-4 truncate" style={{ color: cat ? cat.color : "#64748B" }} data-row-cat>{cat ? cat.label : "-"}</span>
-      <span className="mt-1 flex items-center gap-1.5 min-w-0">
+      <span className="flex items-center gap-1.5 min-w-0">
         {tags && pin && <span className="shrink-0 text-[14.5px] font-bold text-[#D9480F]" data-kind="pin">[공지]</span>}
         {tags && p.RequireConfirm && <span className="shrink-0 text-[14.5px] font-bold text-[#C2410C]" data-kind="req">[필수]</span>}
         <span className={`min-w-0 truncate text-[14.5px] leading-6 tracking-[-0.01em] group-hover:underline underline-offset-2 ${seen ? "font-medium text-slate-700" : "font-bold text-slate-900"}`}>{p.Title}</span>
@@ -1609,7 +1608,8 @@ function HomePostRow({ p, cat, onOpen, seen, fresh, views, confirm, tags, attr, 
         <PostMarks p={p} compact />
       </span>
       <span className="mt-1 flex items-center flex-wrap gap-y-0.5 text-[12px] text-slate-500 tabular-nums t365-meta">
-        <span data-postno={p.id} title="게시물 고유 번호 — 검색 칸에 번호를 넣어 찾을 수 있습니다">No. {p.id}</span>
+        <span className="inline-flex items-center gap-1 font-semibold min-w-0 max-w-[160px]" style={{ color: cat ? cat.color : "#64748B" }} data-row-cat>{cat && cat.icon ? <cat.icon size={12} className="shrink-0" /> : null}<span className="truncate">{cat ? cat.label : "-"}</span></span>
+        <span data-postno={p.id} title="게시물 등록 번호(SharePoint ID) — 게시물 주소 · 검색에 쓰는 고유 번호">No. {p.id}</span>
         <span className="truncate max-w-[160px]">{p.AuthorName || "-"}</span>
         <span title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
         <span>조회 {views || 0}</span>
@@ -1947,12 +1947,11 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
               <h2 className="text-[15px] font-bold text-slate-900 tracking-[-0.01em] whitespace-nowrap shrink-0">공지 · 필수</h2>
               {ctx.isAgent && (noticeTodo
                 ? <span className="text-[11px] font-bold px-2 rounded-full leading-5 text-white whitespace-nowrap" style={{ background: "#C2410C" }} data-testid="todo-required">확인 필요 {noticeTodo}건</span>
-                : !todo.length && notice.some((p) => p.RequireConfirm) ? <span className="text-[11px] font-medium px-2 rounded-full leading-5 bg-emerald-50 text-emerald-700 whitespace-nowrap" data-testid="todo-required">모두 확인 완료</span> : null)}
-              <span className="inline-flex items-center gap-1.5 min-w-0 text-[11.5px] text-slate-400" title="공지 · 필수 자료는 게시 후 7일 동안 이곳에 보이고, 지나면 자동으로 내려갑니다(기한을 정한 글은 그날까지). 지난 글은 「지난 글」 에서 볼 수 있습니다." data-testid="notice-window">
-                <span className="inline-flex items-center gap-1 px-1.5 rounded-md bg-slate-100 text-slate-500 font-medium leading-[18px] shrink-0 whitespace-nowrap"><Clock size={11} /><span className="sm:hidden">7일</span><span className="hidden sm:inline">게시 후 7일간 노출</span></span>
-                <span className="truncate hidden md:inline">{ctx.isAgent ? "필수 자료는 열어 보면 자동으로 조회확인됩니다" : "꼭 읽어야 할 공지와 필수 자료입니다"}</span>
+                : !todo.length && notice.some((p) => p.RequireConfirm) ? <span className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-emerald-600 whitespace-nowrap" data-testid="todo-required"><CheckCircle2 size={13} />모두 확인 완료</span> : null)}
+              <span className="ml-auto inline-flex items-center gap-1 min-w-0 text-[11.5px] text-slate-400 whitespace-nowrap cursor-help" title={`공지 · 필수 자료는 게시 후 7일 동안 이곳에 보이고, 지나면 자동으로 내려갑니다(기한을 정한 글은 그날까지). 지난 글은 「지난 글」 에서 볼 수 있습니다.${ctx.isAgent ? "\n필수 자료는 열어 보면 자동으로 조회확인됩니다." : ""}`} data-testid="notice-window">
+                <Clock size={12} className="shrink-0" /><span>게시 후 7일간 노출</span><Info size={12} className="shrink-0 text-slate-300" />
               </span>
-              {noticeAny && canAll && <button onClick={() => onSearch("", "notice")} title="지난 공지 · 필수까지 모두 보기" className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 whitespace-nowrap shrink-0 inline-flex items-center" data-testid="notice-more">지난 글<ChevronRight size={13} /></button>}
+              {noticeAny && canAll && <><span className="w-px h-3 bg-slate-200 shrink-0"></span><button onClick={() => onSearch("", "notice")} title="지난 공지 · 필수까지 모두 보기" className="text-[12px] text-slate-500 hover:text-slate-800 whitespace-nowrap shrink-0 inline-flex items-center" data-testid="notice-more">지난 글<ChevronRight size={13} /></button></>}
             </div>
             {notice.length ? notice.slice(0, NOTICE_MAX).map((p) => {
               const c = catMap[p.Category]; const r = myRow(p);
@@ -1967,12 +1966,11 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
             <div className="t365-portlet-head">
               <span className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: BRAND.accentSoft }}><LayoutList size={13} style={{ color: BRAND.accent }} /></span>
               <h2 className="text-[15px] font-bold text-slate-900 tracking-[-0.01em] whitespace-nowrap shrink-0">최근 게시물</h2>
-              <span className="inline-flex items-center gap-1.5 min-w-0 text-[11.5px] text-slate-400" title="최근 7일 동안 올라온 글입니다. 공지 · 필수는 위 「공지 · 필수」 에서, 질문은 오른쪽 Q&A 에서 따로 보여 드립니다." data-testid="recent-window">
-                <span className="inline-flex items-center gap-1 px-1.5 rounded-md bg-slate-100 text-slate-500 font-medium leading-[18px] shrink-0 whitespace-nowrap"><Clock size={11} />최근 7일</span>
-                <span className="truncate hidden sm:inline">공지 · 필수 글은 제외하고 보여 드립니다</span>
-                <span className="hidden lg:inline-flex items-center gap-1.5 shrink-0"><span className="text-slate-300">·</span><NewDot />안 읽은 글</span>
+              <span className="ml-auto inline-flex items-center gap-1 min-w-0 text-[11.5px] text-slate-400 whitespace-nowrap cursor-help" title="최근 7일 동안 올라온 글입니다. 공지 · 필수는 위 「공지 · 필수」 에서, 질문은 오른쪽 Q&A 에서 따로 보여 드립니다." data-testid="recent-window">
+                <Clock size={12} className="shrink-0" /><span>최근 7일</span><span className="hidden sm:inline text-slate-300">·</span><span className="hidden sm:inline">공지 · 필수 글은 제외</span>
               </span>
-              {canAll && <button onClick={() => setTab("all")} className="ml-auto text-[12px] text-slate-400 hover:text-slate-700 inline-flex items-center shrink-0" data-testid="recent-more">전체 게시물<ChevronRight size={13} /></button>}
+              <span className="hidden lg:inline-flex items-center gap-1 text-[11.5px] text-slate-400 shrink-0 whitespace-nowrap"><span className="w-px h-3 bg-slate-200 mx-1"></span><NewDot />안 읽음</span>
+              {canAll && <><span className="w-px h-3 bg-slate-200 shrink-0"></span><button onClick={() => setTab("all")} className="text-[12px] text-slate-500 hover:text-slate-800 inline-flex items-center shrink-0 whitespace-nowrap" data-testid="recent-more">전체 게시물<ChevronRight size={13} /></button></>}
             </div>
             {recent.length ? recent.slice(0, 8).map((p, i) => {
               const c = catMap[p.Category];
