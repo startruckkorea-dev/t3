@@ -2043,15 +2043,15 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
       <div className="min-w-0 flex-1">
       <BannerCarousel ctx={ctx} banners={banners || []} onManage={onManageBanners} />
       {/* 게시판 바로가기 · 전체 검색 — 배너 아래 흰 줄(배너 그림을 가리지 않게) */}
-      <section className="mb-4 bg-white rounded-2xl border border-slate-200 shadow-[0_1px_2px_rgba(15,23,42,.04)] px-2 md:px-3 py-2 flex flex-col min-[1600px]:flex-row min-[1600px]:items-center gap-1.5 min-[1600px]:gap-0" data-testid="board-bar">
+      <section className="mb-4 bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_2px_rgba(15,23,42,.04),0_8px_24px_-16px_rgba(15,23,42,.18)] px-2 md:px-4 py-1.5 flex flex-col min-[1600px]:flex-row min-[1600px]:items-center gap-1.5 min-[1600px]:gap-0" data-testid="board-bar">
         <div className="min-w-0 flex-1"><BoardIconStrip ctx={ctx} onGo={(k) => setTab("cat:" + k)} /></div>
-        <form onSubmit={(e) => { e.preventDefault(); setSearching(q.trim()); }} className="flex items-center gap-1.5 w-full min-[1600px]:w-[340px] shrink-0 px-1 pt-2 pb-1 border-t border-slate-100 min-[1600px]:border-t-0 min-[1600px]:p-0 min-[1600px]:pl-4 min-[1600px]:ml-2 min-[1600px]:border-l min-[1600px]:border-slate-200 min-[1600px]:self-stretch" role="search" data-testid="home-search">
-          <div className="relative flex-1">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="게시물 검색" title="모든 게시판의 제목 · 내용 · 첨부 이름 · Q&A 답변에서 찾습니다" aria-label="게시물 검색" className="h-10 w-full rounded-xl text-[13px] pl-9 pr-9 text-slate-900 placeholder:text-slate-400 bg-slate-50 border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-[#7FB8B4] focus:outline-none focus:ring-4 focus:ring-[#2F7B7A]/10 transition-colors" data-testid="home-search-input" />
-            <kbd className="hidden md:inline absolute right-2.5 top-1/2 -translate-y-1/2 text-[10.5px] text-slate-400 bg-white border border-slate-200 rounded px-1.5 leading-[18px]">/</kbd>
+        <form onSubmit={(e) => { e.preventDefault(); setSearching(q.trim()); }} className="w-full min-[1600px]:w-[360px] shrink-0 px-1 pt-2 pb-1 border-t border-slate-100 min-[1600px]:border-t-0 min-[1600px]:p-0 min-[1600px]:pl-5 min-[1600px]:ml-2 min-[1600px]:border-l min-[1600px]:border-slate-200 min-[1600px]:self-center" role="search" data-testid="home-search">
+          <div className="relative group/s">
+            <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within/s:text-[#2F7B7A] transition-colors" />
+            <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="게시물 검색" title="모든 게시판의 제목 · 내용 · 첨부 이름 · Q&A 답변에서 찾습니다(글번호도)" aria-label="게시물 검색" className="h-11 w-full rounded-full text-[13.5px] pl-11 pr-[92px] text-slate-900 placeholder:text-slate-400 bg-slate-100/70 border border-transparent hover:bg-slate-100 focus:bg-white focus:border-[#9CCBC8] focus:outline-none focus:ring-4 focus:ring-[#2F7B7A]/10 transition-all" data-testid="home-search-input" />
+            <kbd className="hidden md:inline absolute right-[68px] top-1/2 -translate-y-1/2 text-[10.5px] text-slate-400 bg-white border border-slate-200 rounded px-1.5 leading-[18px] group-focus-within/s:hidden">/</kbd>
+            <button type="submit" className="absolute right-1.5 top-1/2 -translate-y-1/2 h-8 px-4 rounded-full text-[12.5px] font-semibold text-white hover:brightness-110 active:scale-[.97] transition" style={{ background: BRAND.navy }}>검색</button>
           </div>
-          <button type="submit" className="h-10 px-4 rounded-xl text-[13px] font-semibold text-white shrink-0 hover:brightness-110 transition" style={{ background: BRAND.accent }}>검색</button>
         </form>
       </section>
       {/* 인사 · 요약 · 전체 검색 — 배너로 옮김(검색) · 인사 줄은 없앰 */}
@@ -4276,7 +4276,7 @@ function BoardIconStrip({ ctx, onGo }) {
   return (
     <div className="relative -mx-1" data-scroll-l={edge.l ? "1" : "0"} data-scroll-r={edge.r ? "1" : "0"}>
       <div ref={ref} className="overflow-x-auto overflow-y-hidden snap-x snap-mandatory md:snap-none px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" style={{ WebkitMaskImage: mask, maskImage: mask }}>
-        <div className="grid grid-flow-col auto-cols-[76px] md:[grid-auto-columns:minmax(92px,1fr)] gap-0.5 md:gap-1 w-max md:w-full items-start" data-testid="board-icons">
+        <div className="grid grid-flow-col auto-cols-[76px] md:[grid-auto-columns:minmax(92px,1fr)] w-max md:w-full items-stretch md:[&>*+*]:before:content-[''] md:[&>*+*]:before:absolute md:[&>*+*]:before:left-0 md:[&>*+*]:before:top-1/2 md:[&>*+*]:before:-translate-y-1/2 md:[&>*+*]:before:h-7 md:[&>*+*]:before:w-px md:[&>*+*]:before:bg-slate-200/80" data-testid="board-icons">
       {cats.map((c) => {
         const fresh = posts.filter((p) => p.Category === c.key && postTs(p) >= since);
         const unread = fresh.filter((p) => !read(p)).length;
@@ -4284,12 +4284,13 @@ function BoardIconStrip({ ctx, onGo }) {
         const I = c.icon || FileText;
         return (
           <button key={c.key} onClick={() => onGo(c.key)} data-bicon={c.key} title={`${c.label}${n ? ` — 최근 7일 안 읽은 새 글 ${unread}건` : fresh.length ? ` — 최근 7일 새 글 ${fresh.length}건 · 모두 읽음` : ""}`}
-            className="group snap-start min-w-0 px-1 md:px-2 flex flex-col items-center gap-1.5 pt-2 pb-1.5 rounded-xl hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2F7B7A]/40" style={{ "--bc": c.color, "--bs": c.soft || (/^#[0-9a-f]{6}$/i.test(c.color || "") ? c.color + "1A" : "#EEF2F6") }}>
-            <span className="relative w-10 h-10 md:w-11 md:h-11 rounded-[13px] flex items-center justify-center bg-[var(--bs)] text-[var(--bc)] group-hover:bg-[var(--bc)] group-hover:text-white transition-all duration-200 ease-out group-hover:scale-110 group-hover:-translate-y-0.5 group-hover:shadow-lg group-hover:shadow-slate-300/70 group-active:scale-100">
-              <I size={18} />
-              {n > 0 && <span data-badge={c.key} data-tone={red ? "red" : "gray"} className="absolute -top-1.5 -right-1.5 min-w-[19px] h-[19px] px-1 rounded-full text-[10.5px] font-bold text-white flex items-center justify-center tabular-nums" style={{ background: red ? "#E11D48" : "#94A3B8", boxShadow: "0 0 0 2px #fff" }}>{n > 99 ? "99+" : n}</span>}
+            className="group relative snap-start min-w-0 px-1 md:px-2 flex flex-col items-center justify-center gap-1.5 py-3 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#2F7B7A]/40 rounded-lg" style={{ "--bc": c.color, "--bs": c.soft || (/^#[0-9a-f]{6}$/i.test(c.color || "") ? c.color + "1A" : "#EEF2F6") }}>
+            <span className="relative flex items-center justify-center w-8 h-8 text-[var(--bc)] transition-transform duration-200 ease-out group-hover:-translate-y-0.5">
+              <I size={21} strokeWidth={1.7} />
+              {n > 0 && <span data-badge={c.key} data-tone={red ? "red" : "gray"} className="absolute -top-1 -right-2 min-w-[17px] h-[17px] px-1 rounded-full text-[10px] font-bold text-white flex items-center justify-center tabular-nums" style={{ background: red ? "#E11D48" : "#94A3B8", boxShadow: "0 0 0 2px #fff" }}>{n > 99 ? "99+" : n}</span>}
             </span>
-            <span className="w-full text-center text-[11px] md:text-[12px] font-medium text-slate-600 group-hover:text-slate-900 leading-[1.25] break-keep line-clamp-2 transition-colors" data-blabel={c.key}>{c.label}</span>
+            <span className="w-full text-center text-[11.5px] md:text-[12.5px] font-medium tracking-[-0.01em] text-slate-500 group-hover:text-slate-900 leading-[1.25] break-keep line-clamp-2 transition-colors" data-blabel={c.key}>{c.label}</span>
+            <span className="absolute left-1/2 -translate-x-1/2 bottom-0 h-[2px] w-8 rounded-full bg-[var(--bc)] scale-x-0 group-hover:scale-x-100 transition-transform duration-200 origin-center" aria-hidden="true"></span>
           </button>
         );
       })}
