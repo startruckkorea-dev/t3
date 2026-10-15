@@ -140,6 +140,61 @@
   /* 공지 · 필수 종류 — 글씨 없는 작은 아이콘 칩(공지 · 필수 상자 안에서는 글씨가 겹치므로) */
   .t365-kind { width: 20px; height: 20px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
   @media (prefers-reduced-motion: reduce) { .t365-newdot::after { animation: none; display: none; } }
+  /* Overview 다듬기(10-15 t365-ui) — 게시판 바로가기 줄: 내려 보면 배너는 지나가고 이 줄만 위에 붙어 얇게 접힌다(올리면 다시 펼침).
+     감싼 칸(t365-bb-wrap)이 펼친 높이를 그대로 차지해 접히고 펴질 때 아래 내용이 튀지 않는다.
+     top -8px — main 의 위 여백(16px) 안쪽 기준이라 실제로는 화면 칸 위에서 8px 아래에 붙는다 */
+  .t365-bb-wrap { position: sticky; top: -8px; z-index: 30; margin-bottom: 1rem; pointer-events: none; }
+  .t365-bb-wrap > * { pointer-events: auto; }
+  .t365-bb-wrap::before { content: ""; position: absolute; left: -10px; right: -10px; top: -10px; height: 32px; background: linear-gradient(#F5F6F8 45%, rgba(245,246,248,0)); opacity: 0; transition: opacity .25s ease; pointer-events: none; }
+  .t365-bb-wrap[data-stuck]::before { opacity: 1; }
+  .t365-bb { position: relative; transition: padding .3s cubic-bezier(.2,.7,.2,1), box-shadow .3s ease, background-color .3s ease, border-color .3s ease; }
+  .t365-bb[data-compact] { padding-top: 2px; padding-bottom: 2px; row-gap: 0; background-color: rgba(255,255,255,.86); -webkit-backdrop-filter: saturate(1.5) blur(14px); backdrop-filter: saturate(1.5) blur(14px); border-color: rgba(203,213,225,.75); box-shadow: 0 1px 2px rgba(15,23,42,.06), 0 14px 30px -16px rgba(15,23,42,.32); }
+  .t365-bi { transition: padding .3s cubic-bezier(.2,.7,.2,1), gap .3s ease, color .2s ease; }
+  .t365-bi-ic { transition: width .3s cubic-bezier(.2,.7,.2,1), height .3s cubic-bezier(.2,.7,.2,1), transform .2s ease-out; }
+  .t365-bi-ic > svg { transition: width .3s ease, height .3s ease; }
+  .t365-bb[data-compact] [data-testid=board-icons] { grid-auto-columns: minmax(max-content, 1fr) !important; }
+  @media (max-width: 767.98px) { .t365-bb[data-compact] [data-testid=board-icons] { grid-auto-columns: max-content !important; } }   /* 휴대폰 — 글자 너비만큼(가로로 밀어 보기) */
+  .t365-bb[data-compact] .t365-bi { flex-direction: row; gap: 7px; padding: 7px 10px; animation: t365-bb-in .32s cubic-bezier(.2,.7,.2,1) both; }
+  .t365-bb[data-seen]:not([data-compact]) .t365-bi { animation: t365-bb-out .32s cubic-bezier(.2,.7,.2,1) both; }
+  .t365-bb[data-compact] .t365-bi-ic { width: 18px; height: 18px; }
+  .t365-bb[data-compact] .t365-bi-ic > svg { width: 16px; height: 16px; }
+  .t365-bb[data-compact] .t365-bi-lb { width: auto; display: block; overflow: visible; white-space: nowrap; -webkit-line-clamp: unset; font-size: 13px; }   /* 펼친 줄 14px(f121aea) → 접힌 줄 13px */
+  .t365-bb[data-compact] [data-badge] { top: -2px; right: -3px; min-width: 8px; width: 8px; height: 8px; padding: 0; font-size: 0; }   /* 접힌 줄 — 숫자 대신 작은 점(숫자는 칸 설명에) */
+  @keyframes t365-bb-in { from { opacity: .35; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+  @keyframes t365-bb-out { from { opacity: .35; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+  .t365-bb-search { max-height: 80px; transition: max-height .3s cubic-bezier(.2,.7,.2,1), opacity .2s ease, padding .3s ease, border-color .3s ease; }
+  @media (max-width: 1599.98px) {
+    /* 검색 칸이 둘째 줄로 내려가는 너비 — 접히면 검색 줄은 감추고 줄 끝 동그란 검색 단추로(누르면 검색 창) */
+    .t365-bb[data-compact] .t365-bb-search { max-height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; border-top-color: transparent; overflow: hidden; visibility: hidden; transition: max-height .3s cubic-bezier(.2,.7,.2,1), opacity .15s ease, padding .3s ease, border-color .3s ease, visibility 0s linear .3s; }
+    .t365-bb[data-compact] .t365-bb-sbtn { display: inline-flex; animation: t365-pop .28s cubic-bezier(.2,.9,.3,1.15) both; }
+  }
+  @media (min-width: 1600px) { .t365-bb[data-compact] .t365-bb-search input { height: 36px; } }
+  /* 내 확인 대기 — 머리 위 얇은 색 선(남았으면 주황이 천천히 흐름 · 다 봤으면 초록) · 옅은 머리 바탕 · 마우스를 올리면 살짝 뜸 */
+  [data-testid=w-todo].t365-portlet { position: relative; transition: transform .28s cubic-bezier(.2,.7,.2,1), box-shadow .28s ease; animation: t365-rise .6s cubic-bezier(.2,.7,.2,1) backwards; }
+  [data-testid=w-todo].t365-portlet:hover { transform: translateY(-2px); box-shadow: 0 1px 2px rgba(16,24,40,.05), 0 20px 38px -24px rgba(16,24,40,.34) !important; }
+  [data-testid=w-todo]::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; z-index: 1; background: linear-gradient(90deg, #10B981, #34D399); }
+  [data-testid=w-todo][data-tone=pending]::before { background: linear-gradient(90deg, #EA580C, #FB923C, #F59E0B, #EA580C); background-size: 200% 100%; animation: t365-flow 6s linear infinite; }
+  @keyframes t365-flow { to { background-position: 200% 0; } }
+  [data-testid=w-todo][data-tone=pending] .t365-portlet-head { background: linear-gradient(180deg, #FFF7F0, #fff); }
+  [data-testid=w-todo][data-tone=done] .t365-portlet-head { background: linear-gradient(180deg, #F2FAF6, #fff); }
+  .t365-todo-badge { animation: t365-attn 2.6s ease-out 1s infinite; }
+  @keyframes t365-attn { 0% { box-shadow: 0 0 0 0 rgba(234,88,12,.45); } 70%, 100% { box-shadow: 0 0 0 7px rgba(234,88,12,0); } }
+  .t365-fill { position: relative; overflow: hidden; transform-origin: left center; animation: t365-fill 1s cubic-bezier(.2,.7,.2,1) .15s both; }
+  @keyframes t365-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  [data-state=pending] .t365-fill::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.55), rgba(255,255,255,0)); transform: translateX(-100%); animation: t365-sheen 3s ease-in-out 1.4s infinite; }
+  @keyframes t365-sheen { 0% { transform: translateX(-100%); } 55%, 100% { transform: translateX(100%); } }
+  .t365-todo-check { animation: t365-pop .45s cubic-bezier(.2,.9,.3,1.3) .55s both; }
+  .t365-todo-row { position: relative; }
+  .t365-todo-row::before { content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; border-radius: 0 3px 3px 0; background: #EA580C; transform: scaleY(0); transition: transform .2s ease; }
+  .t365-todo-row:hover::before, .t365-todo-row:focus-visible::before { transform: scaleY(1); }
+  .t365-todo-go { opacity: 0; transform: translateX(-4px); transition: opacity .2s ease, transform .2s ease; }
+  .t365-todo-row:hover .t365-todo-go, .t365-todo-row:focus-visible .t365-todo-go { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .t365-bb, .t365-bi, .t365-bi-ic, .t365-bi-ic > svg, .t365-bb-search, .t365-bb-wrap::before, [data-testid=w-todo].t365-portlet, .t365-todo-row::before, .t365-todo-go { transition: none !important; }
+    .t365-bb .t365-bi, .t365-bb .t365-bb-sbtn, [data-testid=w-todo].t365-portlet, [data-testid=w-todo]::before, .t365-todo-badge, .t365-fill, .t365-todo-check, .t365-todo-row { animation: none !important; }
+    [data-testid=w-todo].t365-portlet:hover { transform: none; }
+    .t365-fill::after { display: none !important; }
+  }
 
 html, * { scrollbar-width: thin; scrollbar-color: #CBD5E1 transparent; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -2147,6 +2202,55 @@ function QuickLinksRail({ links, onManage }) {
     </section>
   );
 }
+// 움직임 줄이기(prefers-reduced-motion) — 켜져 있으면 숫자 세기 · 막대 채우기 같은 움직임을 건너뛴다
+function t365ReducedMotion() { try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return false; } }
+// 숫자가 0 에서 목표까지 부드럽게 올라간다(값이 바뀌면 지금 값에서 새 값까지)
+function useCountUp(target, ms = 800) {
+  const [v, setV] = useState(() => (t365ReducedMotion() ? target : 0));
+  const cur = useRef(v);
+  useEffect(() => {
+    const from = cur.current;
+    if (from === target || t365ReducedMotion()) { cur.current = target; setV(target); return; }
+    let raf = 0; const t0 = performance.now();
+    const step = (t) => { const k = Math.min(1, (t - t0) / ms); const x = Math.round(from + (target - from) * (1 - Math.pow(1 - k, 3))); cur.current = x; setV(x); if (k < 1) raf = requestAnimationFrame(step); };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target]);
+  return v;
+}
+// 위에 붙는 줄 — 앱의 실제 스크롤 칸(main.t365-main-scroll, 없으면 창)의 스크롤을 rAF 로 지켜보다가, 붙는 칸(bar 의 부모)이
+// 바로 앞 표지(sentinel · 원래 자리)보다 아래로 밀려 있으면 위에 붙은 것(stuck) — 스크롤 칸의 여백과 상관없이 정확하다.
+// 펼친 높이를 재 두고(접힌 동안 · 다시 펴지는 동안은 재지 않음) 감싼 칸에 주어, 접히고 펴질 때 아래 내용이 움직이지 않게 한다.
+function useStickyBar(sentinelRef, barRef) {
+  const [stuck, setStuck] = useState(false);
+  const [seen, setSeen] = useState(false);
+  const [h, setH] = useState(null);
+  const st = useRef({ stuck: false, settle: 0 });
+  useEffect(() => {
+    const s = sentinelRef.current, bar = barRef.current; if (!s || !bar || !bar.parentElement) return;
+    const wrap = bar.parentElement;
+    const sc = s.closest(".t365-main-scroll"); const tgt = sc || window;
+    let raf = 0;
+    const check = () => {
+      raf = 0;
+      const on = wrap.getBoundingClientRect().top - s.getBoundingClientRect().top > 0.5;
+      if (on !== st.current.stuck) { st.current.stuck = on; if (on) setSeen(true); else st.current.settle = Date.now() + 360; setStuck(on); }
+    };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(check); };
+    const measure = () => { if (!st.current.stuck && Date.now() > st.current.settle) setH(bar.offsetHeight); };
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => { measure(); onScroll(); }) : null;
+    if (ro) ro.observe(bar);
+    tgt.addEventListener("scroll", onScroll, { passive: true }); window.addEventListener("resize", onScroll);
+    check(); measure();
+    return () => { tgt.removeEventListener("scroll", onScroll); window.removeEventListener("resize", onScroll); if (ro) ro.disconnect(); if (raf) cancelAnimationFrame(raf); };
+  }, []);
+  useEffect(() => {   // 다시 펼쳐진 뒤(전환이 끝나면) 펼친 높이를 새로 잰다 — 접힌 동안 너비가 바뀌었을 수 있다
+    if (stuck) return;
+    const t = setTimeout(() => { const bar = barRef.current; if (bar && !st.current.stuck) setH(bar.offsetHeight); }, 380);
+    return () => clearTimeout(t);
+  }, [stuck]);
+  return [stuck, h, seen];
+}
 function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banners, onManageBanners, links = [], onManageLinks }) {
   const { posts, cats, catMap, readIdx, me } = ctx;
   // Overview 는 Agent 가 정보를 얻는 첫 화면 — 확인율 · 미확인 Agent · 활성 사용자 같은 관리 숫자는 넣지 않는다(조회확인 현황 · 접속 기록 화면에서)
@@ -2159,6 +2263,8 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
   // Agent 의 필수 자료 진행 — 확인한 수 / 전체 필수
   const reqAll = ctx.isAgent ? vis.filter((p) => p.RequireConfirm) : [];
   const reqDone = reqAll.length - todo.length;
+  const reqDoneShown = useCountUp(reqDone);   // 확인한 수 — 0 에서 세어 올라간다(움직임 줄이기면 바로)
+  const reqPct = reqAll.length ? Math.round((reqDone / reqAll.length) * 100) : 0;
   // 공지 · 필수 — 게시 후 7일(기한을 정한 글은 그날까지). Agent 는 아직 확인 안 한 필수 자료가 먼저, 그다음 공지, 그다음 최신순
   const NOTICE_MAX_C = 6;
   const notice = vis.filter(onNoticeBox).sort((a, b) => (isTodo(b) ? 1 : 0) - (isTodo(a) ? 1 : 0) || (pinActive(b) ? 1 : 0) - (pinActive(a) ? 1 : 0) || byNewest(a, b));
@@ -2194,10 +2300,17 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
   const open = openId ? vis.find((p) => String(p.id) === String(openId)) : null;
   const fromSearch = !!(open && searching !== null && searchList && searchList.some((x) => String(x.id) === String(open.id)));
   const searchRef = useRef(null);
+  const bbSentinel = useRef(null), bbRef = useRef(null);
+  const [bbStuck, bbH, bbSeen] = useStickyBar(bbSentinel, bbRef);
   const overlayOpen = searching !== null || !!openId || !!editing;   // 검색 창 · 글 · 글쓰기 창이 떠 있으면 「/」 로 뒤의 배너 검색 칸을 잡지 않는다
   useEffect(() => {
     if (overlayOpen) return;
-    const k = (e) => { if (e.key === "/" && !isTyping(e) && !e.ctrlKey && !e.metaKey && searchRef.current) { e.preventDefault(); searchRef.current.focus(); } };
+    const k = (e) => {
+      if (e.key === "/" && !isTyping(e) && !e.ctrlKey && !e.metaKey && searchRef.current) {
+        e.preventDefault(); const inp = searchRef.current; const f = inp.closest("form");
+        if (f && getComputedStyle(f).visibility !== "hidden" && inp.getBoundingClientRect().height > 20) inp.focus(); else setSearching(inp.value.trim());   // 접힌 줄에서 검색 칸이 숨었으면 검색 창
+      }
+    };
     window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k);
   }, [overlayOpen]);
 
@@ -2207,18 +2320,24 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
       {showLinks && <aside className="lg:w-[220px] shrink-0 lg:sticky lg:top-0"><QuickLinksRail links={links} onManage={onManageLinks} /></aside>}
       <div className="min-w-0 flex-1">
       <BannerCarousel ctx={ctx} banners={banners || []} onManage={onManageBanners} />
-      {/* 게시판 바로가기 · 전체 검색 — 배너 아래 흰 줄(배너 그림을 가리지 않게) */}
-      <section className="mb-4 bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_2px_rgba(15,23,42,.04),0_8px_24px_-16px_rgba(15,23,42,.18)] px-2 md:px-4 py-1.5 flex flex-col min-[1600px]:flex-row min-[1600px]:items-center gap-1.5 min-[1600px]:gap-0" data-testid="board-bar">
-        <div className="min-w-0 flex-1"><BoardIconStrip ctx={ctx} onGo={(k) => setTab("cat:" + k)} /></div>
-        <form onSubmit={(e) => { e.preventDefault(); setSearching(q.trim()); }} className="w-full min-[1600px]:w-[360px] shrink-0 px-1 pt-2 pb-1 border-t border-slate-100 min-[1600px]:border-t-0 min-[1600px]:p-0 min-[1600px]:pl-5 min-[1600px]:ml-2 min-[1600px]:border-l min-[1600px]:border-slate-200 min-[1600px]:self-center" role="search" data-testid="home-search">
+      {/* 게시판 바로가기 · 전체 검색 — 배너 아래 흰 줄(배너 그림을 가리지 않게). 내려 보면 배너는 지나가고 이 줄만 위에 붙어 얇게 접힌다(10-15 t365-ui) */}
+      <div ref={bbSentinel} className="h-0" aria-hidden="true"></div>
+      <div className="t365-bb-wrap" data-stuck={bbStuck ? "1" : undefined} style={bbH ? { height: bbH } : undefined} data-testid="board-bar-wrap">
+      <section ref={bbRef} className="t365-bb bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_2px_rgba(15,23,42,.04),0_8px_24px_-16px_rgba(15,23,42,.18)] px-2 md:px-4 py-1 flex flex-col min-[1600px]:flex-row min-[1600px]:items-center gap-1 min-[1600px]:gap-0" data-testid="board-bar" data-compact={bbStuck ? "1" : undefined} data-seen={bbSeen ? "1" : undefined}>
+        <div className="min-w-0 flex-1 flex items-center gap-1.5">
+          <div className="min-w-0 flex-1"><BoardIconStrip ctx={ctx} onGo={(k) => setTab("cat:" + k)} /></div>
+          <button type="button" onClick={() => setSearching(q.trim())} tabIndex={bbStuck ? 0 : -1} title="게시물 검색" aria-label="게시물 검색" className="t365-bb-sbtn hidden shrink-0 w-9 h-9 rounded-full items-center justify-center text-white shadow-sm hover:brightness-110 active:scale-95 transition" style={{ background: BRAND.navy }} data-testid="bb-search-btn"><Search size={15} /></button>
+        </div>
+        <form onSubmit={(e) => { e.preventDefault(); setSearching(q.trim()); }} className="t365-bb-search w-full min-[1600px]:w-[360px] shrink-0 px-1 pt-1.5 pb-1 border-t border-slate-100 min-[1600px]:border-t-0 min-[1600px]:p-0 min-[1600px]:pl-5 min-[1600px]:ml-2 min-[1600px]:border-l min-[1600px]:border-slate-200 min-[1600px]:self-center" role="search" data-testid="home-search">
           <div className="relative group/s">
             <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within/s:text-[#2F7B7A] transition-colors" />
-            <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="게시물 검색" title="모든 게시판의 제목 · 내용 · 첨부 이름 · Q&A 답변에서 찾습니다(글번호도)" aria-label="게시물 검색" className="h-11 w-full rounded-full text-[13.5px] pl-11 pr-[92px] text-slate-900 placeholder:text-slate-400 bg-slate-100/70 border border-transparent hover:bg-slate-100 focus:bg-white focus:border-[#9CCBC8] focus:outline-none focus:ring-4 focus:ring-[#2F7B7A]/10 transition-all" data-testid="home-search-input" />
+            <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="게시물 검색" title="모든 게시판의 제목 · 내용 · 첨부 이름 · Q&A 답변에서 찾습니다(글번호도)" aria-label="게시물 검색" className="h-10 w-full rounded-full text-[13.5px] pl-11 pr-[92px] text-slate-900 placeholder:text-slate-400 bg-slate-100/70 border border-transparent hover:bg-slate-100 focus:bg-white focus:border-[#9CCBC8] focus:outline-none focus:ring-4 focus:ring-[#2F7B7A]/10 transition-all" data-testid="home-search-input" />
             <kbd className="hidden md:inline absolute right-[68px] top-1/2 -translate-y-1/2 text-[10.5px] text-slate-400 bg-white border border-slate-200 rounded px-1.5 leading-[18px] group-focus-within/s:hidden">/</kbd>
-            <button type="submit" className="absolute right-1.5 top-1/2 -translate-y-1/2 h-8 px-4 rounded-full text-[12.5px] font-semibold text-white hover:brightness-110 active:scale-[.97] transition" style={{ background: BRAND.navy }}>검색</button>
+            <button type="submit" className="absolute right-1.5 top-1/2 -translate-y-1/2 h-7 px-4 rounded-full text-[12.5px] font-semibold text-white hover:brightness-110 active:scale-[.97] transition" style={{ background: BRAND.navy }}>검색</button>
           </div>
         </form>
       </section>
+      </div>
       {/* 인사 · 요약 · 전체 검색 — 배너로 옮김(검색) · 인사 줄은 없앰 */}
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
@@ -2266,23 +2385,37 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
         {/* 오른쪽 작은 상자 — Agent: 내 확인 대기 · Q&A · 많이 본 글 / 그 밖: Q&A · 많이 본 글. 할 일이 있는 Q&A 는 많이 본 글보다 위 */}
         <aside className="xl:col-span-4 min-w-0 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-1 gap-3 items-start content-start">
           {ctx.isAgent && (
-            <WidgetCard icon={BookOpenCheck} tint="#C2410C" title="내 확인 대기" testid="w-todo" right={todo.length ? <span className="text-[11px] font-bold px-1.5 rounded-full leading-[18px] text-white" style={{ background: "#C2410C" }}>{todo.length}</span> : null}>
+            <WidgetCard icon={BookOpenCheck} tint="#C2410C" title="내 확인 대기" testid="w-todo" tone={todo.length ? "pending" : reqAll.length ? "done" : undefined}
+              right={todo.length ? <span className="t365-todo-badge text-[11px] font-bold px-1.5 min-w-[18px] text-center rounded-full leading-[18px] text-white tabular-nums" style={{ background: "#C2410C" }} title={`확인할 필수 자료 ${todo.length}건`}>{todo.length}</span>
+                : reqAll.length ? <span className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-emerald-600 whitespace-nowrap" data-testid="todo-allok"><CheckCircle2 size={13} />완료</span> : null}>
               {reqAll.length > 0 && (
-                <div className="px-4 pt-3 pb-3 border-b border-slate-100" data-testid="todo-progress">
-                  <div className="flex items-center justify-between text-[12px]">
-                    <span className="text-slate-500">필수 자료 확인</span>
-                    <span className="tabular-nums font-semibold" style={{ color: todo.length ? "#C2410C" : "#047857" }}>{reqDone} / {reqAll.length}</span>
+                <div className="px-4 pt-3 pb-3.5 border-b border-slate-100" data-testid="todo-progress" data-state={todo.length ? "pending" : "done"}>
+                  <div className="flex items-end justify-between gap-3">
+                    <span className="min-w-0 leading-tight">
+                      <span className="block text-[12px] text-slate-500">필수 자료 확인</span>
+                      <span className="block mt-0.5 text-[11px] tabular-nums" style={{ color: todo.length ? "#9A3412" : "#047857" }}>{todo.length ? `남은 자료 ${todo.length}건 · ${reqPct}%` : "100% 완료"}</span>
+                    </span>
+                    <span className="tabular-nums font-bold leading-none whitespace-nowrap" style={{ color: todo.length ? "#C2410C" : "#047857" }} title={`${reqDone} / ${reqAll.length}`}><span className="text-[22px] tracking-[-0.03em]">{reqDoneShown}</span><span className="text-[13px] font-semibold text-slate-400"> / {reqAll.length}</span></span>
                   </div>
-                  <div className="mt-1.5 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full transition-[width] duration-700" style={{ width: `${Math.round((reqDone / reqAll.length) * 100)}%`, background: todo.length ? "linear-gradient(90deg,#F97316,#EA580C)" : "#10B981" }}></div></div>
+                  <div className="mt-2.5 h-2 rounded-full bg-slate-100 overflow-hidden"><div className="t365-fill h-full rounded-full transition-[width] duration-700" style={{ width: `${reqPct}%`, background: todo.length ? "linear-gradient(90deg,#FB923C,#EA580C)" : "linear-gradient(90deg,#34D399,#10B981)" }}></div></div>
                 </div>
               )}
-              {todo.length ? todo.slice(0, 5).map((p) => { const c = catMap[p.Category]; const I = (c && c.icon) || FileText; return (
-                <button key={p.id} onClick={() => openPost(p)} title={p.Title} data-todo={p.id} className="w-full text-left px-4 h-11 flex items-center gap-2.5 border-t border-slate-100 first:border-t-0 hover:bg-orange-50/50 min-w-0">
+              {todo.length ? todo.slice(0, 5).map((p, i) => { const c = catMap[p.Category]; const I = (c && c.icon) || FileText; return (
+                <button key={p.id} onClick={() => openPost(p)} title={p.Title} data-todo={p.id} className="t365-todo-row group/t w-full text-left px-4 h-11 flex items-center gap-2.5 border-t border-slate-100 first:border-t-0 hover:bg-orange-50/50 transition-colors min-w-0 t365-rise" style={{ animationDelay: `${120 + i * 60}ms` }}>
                   <span className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: c && c.soft }} title={c && c.label}><I size={12} style={{ color: c && c.color }} /></span>
                   <span className="min-w-0 flex-1 flex items-center gap-1.5">{fresh(p) && <NewDot />}<span className="truncate text-[13px] text-slate-800 font-medium">{p.Title}</span></span>
                   <span className="text-[11px] text-slate-400 tabular-nums shrink-0" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
+                  <ChevronRight size={14} className="t365-todo-go shrink-0 -mr-1 text-orange-600" aria-hidden="true" />
                 </button>
-              ); }) : <SmallEmpty icon={CheckCircle2}>{reqAll.length ? "필수 자료를 모두 확인했습니다." : "확인할 필수 자료가 없습니다."}</SmallEmpty>}
+              ); }) : reqAll.length ? (
+                <div className="px-4 py-3.5 flex items-center gap-3" data-testid="todo-done">
+                  <span className="t365-todo-check w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100"><CheckCircle2 size={17} /></span>
+                  <span className="min-w-0 leading-snug">
+                    <span className="block text-[13px] font-semibold text-slate-800">필수 자료를 모두 확인했습니다.</span>
+                    <span className="block mt-0.5 text-[11.5px] text-slate-400">새 필수 자료가 올라오면 이곳에 바로 보입니다.</span>
+                  </span>
+                </div>
+              ) : <SmallEmpty icon={CheckCircle2}>확인할 필수 자료가 없습니다.</SmallEmpty>}
               {todo.length > 5 && canAll && <button onClick={() => onSearch("", "todo")} className="w-full h-9 border-t border-slate-100 text-[12px] font-medium text-orange-700 hover:bg-orange-50/50" data-testid="todo-more">확인할 자료 {todo.length - 5}건 더 보기</button>}
             </WidgetCard>
           )}
@@ -4449,12 +4582,12 @@ function BoardIconStrip({ ctx, onGo }) {
         const I = c.icon || FileText;
         return (
           <button key={c.key} onClick={() => onGo(c.key)} data-bicon={c.key} title={`${c.label}${n ? ` — 최근 7일 안 읽은 새 글 ${unread}건` : fresh.length ? ` — 최근 7일 새 글 ${fresh.length}건 · 모두 읽음` : ""}`}
-            className="group relative snap-start min-w-0 px-1 md:px-2 flex flex-col items-center justify-center gap-1.5 py-3 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#2F7B7A]/40 rounded-lg" style={{ "--bc": c.color, "--bs": c.soft || (/^#[0-9a-f]{6}$/i.test(c.color || "") ? c.color + "1A" : "#EEF2F6") }}>
-            <span className="relative flex items-center justify-center w-8 h-8 text-[var(--bc)] transition-transform duration-200 ease-out group-hover:-translate-y-0.5">
-              <I size={21} strokeWidth={1.7} />
+            className="t365-bi group relative snap-start min-w-0 px-1 md:px-2 flex flex-col items-center justify-center gap-1 py-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#2F7B7A]/40 rounded-lg" style={{ "--bc": c.color, "--bs": c.soft || (/^#[0-9a-f]{6}$/i.test(c.color || "") ? c.color + "1A" : "#EEF2F6") }}>
+            <span className="t365-bi-ic relative flex items-center justify-center w-7 h-7 text-[var(--bc)] group-hover:-translate-y-0.5">
+              <I size={20} strokeWidth={1.7} />
               {n > 0 && <span data-badge={c.key} data-tone={red ? "red" : "gray"} className="absolute -top-1 -right-2 min-w-[17px] h-[17px] px-1 rounded-full text-[10px] font-bold text-white flex items-center justify-center tabular-nums" style={{ background: red ? "#E11D48" : "#94A3B8", boxShadow: "0 0 0 2px #fff" }}>{n > 99 ? "99+" : n}</span>}
             </span>
-            <span className="w-full text-center text-[12.5px] md:text-[14px] font-medium tracking-[-0.01em] text-slate-600 group-hover:text-slate-900 leading-[1.25] break-keep line-clamp-2 transition-colors" data-blabel={c.key}>{c.label}</span>
+            <span className="t365-bi-lb w-full text-center text-[12.5px] md:text-[14px] font-medium tracking-[-0.01em] text-slate-600 group-hover:text-slate-900 leading-[1.25] break-keep line-clamp-2 transition-colors" data-blabel={c.key}>{c.label}</span>
             <span className="absolute left-1/2 -translate-x-1/2 bottom-0 h-[2px] w-8 rounded-full bg-[var(--bc)] scale-x-0 group-hover:scale-x-100 transition-transform duration-200 origin-center" aria-hidden="true"></span>
           </button>
         );
