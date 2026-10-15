@@ -1835,13 +1835,17 @@ async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
   try { const ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select(); const ok = document.execCommand("copy"); ta.remove(); return !!ok; } catch (e) { return false; }
 }
-// 메일 쓰기 주소(mailto) — 메일 앱 한계(약 2,000자)를 넘으면 본문을 링크만으로 · 제목을 줄여 다시 만들고,
+// 메일 쓰기 주소(Outlook 웹 새 메일) — 주소 길이 한계를 넘으면 본문을 링크만으로 · 제목을 줄여 다시 만들고,
 // 그래도 길면(받는 사람이 많을 때) null → 부르는 쪽에서 주소 복사로 대신
+// 알림 메일 — Outlook 웹 「새 메일」 창 주소(10-15). 예전 mailto: 는 Windows Outlook(데스크톱)이 한글 제목 · 본문을 받으면서
+// 글자가 겹치거나(「안녕하세요하세요」) 빠지고 띄어지는 문제가 있었다 — 웹 창은 UTF-8 을 그대로 받는다. 받는 사람 · 숨은 참조 · 제목 · 본문은 모두 인코딩
+const T365_OWA_COMPOSE = "https://outlook.office.com/mail/deeplink/compose";
 function mailtoHref({ to = [], bcc = [], subject = "", body = "", link = "" }) {
-  const build = (sub, bod) => `mailto:${to.map((x) => encodeURIComponent(x)).join(",")}?${[bcc.length ? `bcc=${encodeURIComponent(bcc.join(","))}` : "", `subject=${encodeURIComponent(sub)}`, `body=${encodeURIComponent(bod)}`].filter(Boolean).join("&")}`;
+  const q = (k, v) => `${k}=${encodeURIComponent(v)}`;
+  const build = (sub, bod) => `${T365_OWA_COMPOSE}?${[to.length ? q("to", to.join(";")) : "", bcc.length ? q("bcc", bcc.join(";")) : "", q("subject", sub), q("body", String(bod).replace(/\r?\n/g, "\r\n"))].filter(Boolean).join("&")}`;
   let href = build(subject, body);
-  if (href.length > 1900 && link) href = build(subject.length > 48 ? subject.slice(0, 47) + "…" : subject, link);
-  return href.length <= 1900 ? href : null;
+  if (href.length > 7000 && link) href = build(subject.length > 48 ? subject.slice(0, 47) + "…" : subject, link);
+  return href.length <= 7000 ? href : null;
 }
 // Agent 조회확인 상태 — 버튼이 아니라 표시(글을 열면 자동으로 확인 완료)
 // tight = 휴대폰에서는 아이콘만(좁은 칸)
@@ -2921,7 +2925,7 @@ function QnaAnswer({ ctx, post }) {
             ? <span className="inline-flex items-center gap-1 text-emerald-600" title={`질문자가 ${fmtDate(askerRow.LastViewedAt)} 에 답변을 봤습니다`} data-testid="qna-seen" data-seen="1"><CheckCircle2 size={12} />질문자 확인</span>
             : <span className="text-slate-400" title={notifyHref ? "질문자가 아직 답변을 보지 않았습니다 — 「질문자에게 알리기」 로 메일을 보낼 수 있습니다" : "질문자가 아직 답변을 보지 않았습니다"} data-testid="qna-seen" data-seen="0">질문자 아직 안 봄</span>)}
           {canAnswer && !showEd && <span className="ml-auto flex items-center gap-3">
-            {notifyHref && <a href={notifyHref} onClick={() => t365Log("게시물", "답변 알림 메일", post.Title, { info: { 질문자: asker } })} className="inline-flex items-center gap-1 text-slate-500 hover:text-[#1D4ED8]" data-testid="qna-notify" title={`${asker} 에게 답변 알림 메일 쓰기`}><Mail size={13} />질문자에게 알리기</a>}
+            {notifyHref && <a href={notifyHref} target="_blank" rel="noopener noreferrer" onClick={() => t365Log("게시물", "답변 알림 메일", post.Title, { info: { 질문자: asker } })} className="inline-flex items-center gap-1 text-slate-500 hover:text-[#1D4ED8]" data-testid="qna-notify" title={`${asker} 에게 답변 알림 메일 쓰기`}><Mail size={13} />질문자에게 알리기</a>}
             <button onClick={() => setEditing(true)} className="inline-flex items-center gap-1 font-semibold text-[#1D4ED8] hover:underline underline-offset-2" data-testid="qna-answer-btn"><SquarePen size={13} />{has ? "답변 수정" : "답변 쓰기"}</button>
           </span>}
         </div>
@@ -3055,8 +3059,8 @@ function ConfirmPanel({ ctx, post }) {
           <span className="text-[12px] text-slate-500">역할과 관계없이 열어 본 모든 사람 · 최근 열람 순</span>
           <span className="ml-auto flex items-center gap-1.5">
             {unseenAgents.length > 0 && (nudgeHref
-              ? <a href={nudgeHref} onClick={() => t365Log("게시물", "안 본 Agent 메일", post.Title, { info: { 인원: unseenAgents.length } })} className={`${btnCls} h-8`} data-testid="nudge-mail" title="메일 앱이 열리고 아직 이 글을 열지 않은 Agent 가 숨은 참조(BCC)로 들어갑니다"><Mail size={13} />안 본 Agent {unseenAgents.length}명에게 메일</a>
-              : <button onClick={copyUnseen} className={`${btnCls} h-8`} data-testid="nudge-mail" title="인원이 많아 메일 앱으로 바로 넘길 수 없습니다 — 주소를 복사합니다"><Copy size={13} />안 본 Agent {unseenAgents.length}명 주소 복사</button>)}
+              ? <a href={nudgeHref} target="_blank" rel="noopener noreferrer" onClick={() => t365Log("게시물", "안 본 Agent 메일", post.Title, { info: { 인원: unseenAgents.length } })} className={`${btnCls} h-8`} data-testid="nudge-mail" title="Outlook 웹 새 메일 창이 열리고 아직 이 글을 열지 않은 Agent 가 숨은 참조(BCC)로 들어갑니다"><Mail size={13} />안 본 Agent {unseenAgents.length}명에게 메일</a>
+              : <button onClick={copyUnseen} className={`${btnCls} h-8`} data-testid="nudge-mail" title="인원이 많아 메일 창으로 바로 넘길 수 없습니다 — 주소를 복사합니다"><Copy size={13} />안 본 Agent {unseenAgents.length}명 주소 복사</button>)}
             <button onClick={exportExcel} className={`${btnCls} h-8`}><Download size={13} /> Excel</button>
           </span>
         </div>
@@ -3093,8 +3097,8 @@ function ConfirmPanel({ ctx, post }) {
                 </div>
                 <div className="ml-auto flex items-center gap-1.5">
                   {pendingEmails.length > 0 && (remindHref
-                    ? <a href={remindHref} onClick={() => t365Log("조회확인", "미확인 메일", post.Title, { info: { 인원: pendingEmails.length } })} className="h-8 px-3 rounded-lg text-[12.5px] font-semibold text-white inline-flex items-center gap-1.5 hover:brightness-110" style={{ background: "#C2410C" }} data-testid="remind-mail" title="메일 앱이 열리고 미확인 Agent 가 숨은 참조(BCC)로 들어갑니다"><Mail size={13} />미확인 {pendingEmails.length}명에게 메일</a>
-                    : <button onClick={copyPending} className="h-8 px-3 rounded-lg text-[12.5px] font-semibold text-white inline-flex items-center gap-1.5" style={{ background: "#C2410C" }} data-testid="remind-mail" title="인원이 많아 메일 앱으로 바로 넘길 수 없습니다 — 주소를 복사합니다"><Copy size={13} />미확인 {pendingEmails.length}명 주소 복사</button>)}
+                    ? <a href={remindHref} target="_blank" rel="noopener noreferrer" onClick={() => t365Log("조회확인", "미확인 메일", post.Title, { info: { 인원: pendingEmails.length } })} className="h-8 px-3 rounded-lg text-[12.5px] font-semibold text-white inline-flex items-center gap-1.5 hover:brightness-110" style={{ background: "#C2410C" }} data-testid="remind-mail" title="Outlook 웹 새 메일 창이 열리고 미확인 Agent 가 숨은 참조(BCC)로 들어갑니다"><Mail size={13} />미확인 {pendingEmails.length}명에게 메일</a>
+                    : <button onClick={copyPending} className="h-8 px-3 rounded-lg text-[12.5px] font-semibold text-white inline-flex items-center gap-1.5" style={{ background: "#C2410C" }} data-testid="remind-mail" title="인원이 많아 메일 창으로 바로 넘길 수 없습니다 — 주소를 복사합니다"><Copy size={13} />미확인 {pendingEmails.length}명 주소 복사</button>)}
                   {pendingEmails.length > 0 && remindHref && <button onClick={copyPending} className={`${btnCls} h-8 px-2.5`} title="미확인 Agent 메일 주소만 복사" aria-label="미확인 주소 복사" data-testid="remind-copy"><Copy size={13} /></button>}
                   <button onClick={exportExcel} className={`${btnCls} h-8`}><Download size={13} /> Excel</button>
                 </div>
