@@ -119,6 +119,9 @@
   .t365-meta > * + *::before { content: ""; display: inline-block; width: 1px; height: 10px; background: #CBD5E1; margin: 0 9px; vertical-align: -1px; }
   @media (max-width: 639px) { .t365-cols > * + * { border-left: 0; padding-left: 0; } }
   .t365-meta > span + span::before { content: ""; display: inline-block; width: 1px; height: 11px; background: #E2E8F0; margin: 0 12px; }
+  /* 줄마다 같은 자리 — 게시판 · 번호 · 작성자 · 날짜 · 조회 칸 너비를 고정해 위아래 줄이 세로로 맞는다(10-15 t365-meta-cols). 긴 값은 … */
+  .t365-mc { flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .t365-meta > .t365-mc:not(.inline-flex) { display: inline-block; }
   .t365-pop { animation: t365-pop .22s cubic-bezier(.2,.9,.3,1.15); }
   @keyframes t365-pop { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }
   .t365-fade { animation: t365-fade .18s ease-out; }
@@ -1956,11 +1959,11 @@ function HomePostRow({ p, cat, onOpen, seen, fresh, views, confirm, tags, attr, 
         <PostMarks p={p} compact />
       </span>
       <span className="mt-1 flex items-center flex-wrap gap-y-0.5 text-[12px] text-slate-500 tabular-nums t365-meta">
-        <span className="inline-flex items-center gap-1 font-semibold min-w-0 max-w-[160px]" style={{ color: cat ? cat.color : "#64748B" }} data-row-cat>{cat && cat.icon ? <cat.icon size={12} className="shrink-0" /> : null}<span className="truncate">{cat ? cat.label : "-"}</span></span>
-        <span data-postno={p.id} title="게시물 등록 번호(SharePoint ID) — 게시물 주소 · 검색에 쓰는 고유 번호">No. {p.id}</span>
-        <span className="truncate max-w-[160px]">{p.AuthorName || "-"}</span>
-        <span title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
-        <span>조회 {views || 0}</span>
+        <span className="t365-mc inline-flex items-center gap-1 font-semibold max-w-[160px] sm:max-w-none sm:w-[132px]" style={{ color: cat ? cat.color : "#64748B" }} data-row-cat title={cat ? cat.label : ""}>{cat && cat.icon ? <cat.icon size={12} className="shrink-0" /> : null}<span className="truncate">{cat ? cat.label : "-"}</span></span>
+        <span className="t365-mc sm:w-[78px]" data-postno={p.id} title="게시물 등록 번호(SharePoint ID) — 게시물 주소 · 검색에 쓰는 고유 번호">No. {p.id}</span>
+        <span className="t365-mc max-w-[160px] sm:max-w-none sm:w-[124px]" title={p.AuthorName || ""}>{p.AuthorName || "-"}</span>
+        <span className="t365-mc sm:w-[104px]" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
+        <span className="t365-mc sm:w-[90px]">조회 {views || 0}</span>
         {confirm && <span className="inline-flex items-center">{confirm}</span>}
       </span>
     </button>
@@ -2459,10 +2462,10 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                       <span className={`truncate text-[13px] ${seen(p) && !isNew ? "text-slate-700" : "font-semibold text-slate-900"}`}>{p.Title}</span>
                     </span>
                     <span className="mt-1 flex items-center gap-1.5 text-[11.5px] text-slate-400 min-w-0">
-                      {isNew ? <span className="t365-pill text-white" style={{ background: "#1D4ED8" }} data-qna="new"><Sparkles size={10} />새 답변</span> : <QnaPill p={p} age={duty} />}
-                      <span className="tabular-nums shrink-0" data-postno={p.id}>No. {p.id}</span>
+                      <span className="t365-mc w-[64px] inline-flex">{isNew ? <span className="t365-pill text-white" style={{ background: "#1D4ED8" }} data-qna="new"><Sparkles size={10} />새 답변</span> : <QnaPill p={p} age={duty} />}</span>
+                      <span className="t365-mc w-[44px] tabular-nums" data-postno={p.id}>No. {p.id}</span>
                       <span className="text-slate-300">·</span>
-                      {mineQ(p) ? <span className="t365-pill bg-slate-100 text-slate-500" data-mine="1">내 질문</span> : <span className="truncate max-w-[120px]">{p.AuthorName || ""}</span>}
+                      <span className="t365-mc w-[84px] inline-flex">{mineQ(p) ? <span className="t365-pill bg-slate-100 text-slate-500" data-mine="1">내 질문</span> : <span className="truncate" title={p.AuthorName || ""}>{p.AuthorName || ""}</span>}</span>
                       <span className="text-slate-300">·</span>
                       <span className="tabular-nums shrink-0" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
                     </span>
@@ -2486,7 +2489,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-1.5 min-w-0">{fresh(p) && <NewDot />}<span className={`truncate text-[13px] ${seen(p) ? "text-slate-700" : "font-semibold text-slate-900"}`}>{p.Title}</span></span>
                           <span className="mt-1 flex items-center gap-1.5 text-[11.5px] text-slate-400 min-w-0">
-                            <span className="inline-flex items-center gap-1 min-w-0 font-medium" style={{ color: c && c.color }}><span className="w-4 h-4 rounded flex items-center justify-center shrink-0" style={{ background: c && c.soft }}><I size={10} style={{ color: c && c.color }} /></span><span className="truncate">{c ? c.label : "-"}</span></span>
+                            <span className="t365-mc w-[132px] inline-flex items-center gap-1 font-medium" style={{ color: c && c.color }} title={c ? c.label : ""}><span className="w-4 h-4 rounded flex items-center justify-center shrink-0" style={{ background: c && c.soft }}><I size={10} style={{ color: c && c.color }} /></span><span className="truncate">{c ? c.label : "-"}</span></span>
                             <span className="text-slate-300">·</span><span className="inline-flex items-center gap-0.5 tabular-nums shrink-0"><Eye size={11} />조회 {v}</span>
                           </span>
                         </span>
