@@ -79,6 +79,18 @@
   .t365-portlet { border: 1px solid #E6E9EE !important; border-radius: 16px !important; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 12px 32px -24px rgba(16,24,40,.18) !important; }
   .t365-portlet-head { height: 3.5rem !important; padding: 0 1.25rem !important; border-bottom-color: #EEF0F3 !important; }
   .t365-portlet-head h2 { font-size: 16px !important; letter-spacing: -0.02em; }
+  /* 상자 머리의 작은 색 아이콘 네모는 숨기고 제목만(10-15 다듬기) */
+  .t365-portlet-head > span.w-6.h-6:first-child { display: none; }
+  .t365-portlet-head h3 { font-size: 16px !important; letter-spacing: -0.02em; }
+  /* 게시판 목록 — 효성 게시판처럼: 표 위 굵은 선 · 얇은 줄 선 · 넉넉한 줄 높이 · 옅은 머리 */
+  [data-testid=board] { border-radius: 16px !important; }
+  [data-testid=board] select, [data-testid=board] input[data-testid=board-search] { border-color: #E5E7EB !important; border-radius: 8px !important; }
+  [data-testid=board-table] thead { background: #fff !important; color: #374151 !important; }
+  [data-testid=board-table] thead th { height: 48px !important; font-size: 13px !important; border-top: 2px solid #1F2937 !important; border-bottom: 1px solid #D1D5DB !important; }
+  [data-testid=board-table] tbody td { height: 56px !important; }
+  [data-testid=board-table] tbody tr { border-top-color: #EEF0F3 !important; }
+  [data-testid=board-table] tbody tr:hover { background: #F8FAFA !important; }
+  [data-testid=board-count] b { color: #111827; }
   /* 정책 안내 창(10-15) — 효성 개인정보처리방침 페이지 모양: 요약 카드 · 조 목차 · 「제N조」 제목 */
   .t365-pol-sec { scroll-margin-top: 72px; }
   .t365-policy .t365-body { font-size: 14px; line-height: 1.9; color: #4B5563; }
@@ -1472,17 +1484,16 @@ function Field({ label, children, required, hint }) {
   );
 }
 function PageHeader({ icon: Icon, title, subtitle, inline, right, tint }) {
+  // 10-15 다듬기 — 아이콘 네모 대신 큰 제목 · 옅은 설명(효성 누리집처럼 글자 중심). 게시판 색은 제목 앞 짧은 막대로만
   return (
-    <div className="flex items-center gap-3 mb-4">
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: (tint && tint.soft) || BRAND.accentSoft }}>
-        {Icon && <Icon size={18} style={{ color: (tint && tint.color) || BRAND.accent }} />}
-      </div>
+    <div className="flex items-end gap-4 mb-5 pt-1" data-testid="page-header">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-[18px] leading-6 font-semibold text-slate-800">{title}</h1>
+          <span className="w-1 h-6 rounded-full shrink-0" style={{ background: (tint && tint.color) || BRAND.accent }} aria-hidden="true"></span>
+          <h1 className="text-[24px] md:text-[26px] leading-tight font-bold text-slate-900 tracking-[-0.03em]">{title}</h1>
           {inline}
         </div>
-        {subtitle && <p className="text-[12.5px] leading-5 text-slate-500">{subtitle}</p>}
+        {subtitle && <p className="mt-1.5 pl-4 text-[13.5px] leading-5 text-slate-500 break-keep">{subtitle}</p>}
       </div>
       {right && <div className="shrink-0 flex items-center gap-2">{right}</div>}
     </div>
@@ -2093,25 +2104,20 @@ function QuickLinksRail({ links, onManage }) {
   const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (e) { return ""; } };
   const tint = (c) => /^#[0-9a-f]{6}$/i.test(c || "") ? c : BRAND.accent;
   return (
-    <section className="rounded-2xl overflow-hidden bg-white border border-slate-200 shadow-sm" data-testid="quick-links">
-      {/* 머리 — 사이드바 · 배너와 같은 남색 띠 */}
-      <div className="relative px-4 py-2.5 lg:pt-3.5 lg:pb-3 text-white overflow-hidden" style={{ background: "linear-gradient(135deg,#101B34 0%,#1A2B4C 60%,#22566A 100%)" }}>
-        <Link2 className="absolute -right-3 -bottom-4 text-white/[0.05]" size={72} strokeWidth={1.6} aria-hidden="true" />
-        <div className="relative flex items-center gap-2">
-          <span className="w-7 h-7 rounded-lg flex items-center justify-center bg-white/10 ring-1 ring-white/15"><Link2 size={14} className="text-[#7FD1CB]" /></span>
-          <div className="min-w-0 flex-1 leading-tight">
-            <div className="text-[13.5px] font-bold tracking-[-0.01em]">바로가기</div>
-            <div className="text-[10.5px] text-white/55 mt-0.5">자주 쓰는 사이트 · 새 창</div>
-          </div>
-          {onManage && <button onClick={onManage} className="relative h-6 px-2 rounded-md text-[11px] text-white/70 hover:text-white hover:bg-white/10" data-testid="links-manage">관리</button>}
+    <section className="overflow-hidden bg-white t365-portlet" data-testid="quick-links">
+      {/* 머리 — 다른 상자와 같은 흰 머리(10-15 다듬기 — 남색 띠는 무거워 보여 뺌) */}
+      <div className="flex items-center gap-2 px-4 h-14 border-b border-[#EEF0F3]">
+        <div className="min-w-0 flex-1 leading-tight">
+          <div className="text-[16px] font-bold text-slate-900 tracking-[-0.02em]">바로가기</div>
         </div>
+        {onManage && <button onClick={onManage} className="text-[12px] text-slate-400 hover:text-slate-700" data-testid="links-manage">관리</button>}
       </div>
       {links.length ? (
         <div className="p-2 flex lg:grid lg:grid-cols-1 gap-1 overflow-x-auto lg:overflow-visible snap-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {links.map((l) => { const c = tint(l.color); const h = host(l.href); return (
             <a key={l.id} href={l.href} target="_blank" rel="noopener noreferrer" data-link={l.id.slice(5)} title={l.desc ? `${l.desc}\n${l.href}` : l.href} aria-label={`${l.label} — 새 창으로 열기`}
               className="group relative snap-start shrink-0 max-w-[230px] lg:max-w-none flex items-center gap-2.5 lg:gap-3 px-2.5 py-2 rounded-xl border border-slate-100 lg:border-transparent hover:border-slate-200 hover:bg-slate-50/80 hover:shadow-sm min-w-0 transition-all">
-              <span className="w-8 h-8 lg:w-9 lg:h-9 rounded-[10px] flex items-center justify-center shrink-0 transition-transform group-hover:scale-105" style={{ background: c + "17", boxShadow: `inset 0 0 0 1px ${c}26` }}><l.icon size={16} style={{ color: c }} /></span>
+              <span className="w-8 h-8 lg:w-9 lg:h-9 rounded-full flex items-center justify-center shrink-0 bg-[#F4F5F7] transition-colors group-hover:bg-white group-hover:shadow-[0_0_0_1px_#E5E7EB]"><l.icon size={16} strokeWidth={1.7} style={{ color: c }} /></span>
               <span className="min-w-0 flex-1 leading-tight">
                 <span className="block text-[13px] font-semibold text-slate-800 whitespace-nowrap lg:whitespace-normal lg:line-clamp-2 break-keep group-hover:text-slate-950" data-link-title>{l.label}</span>
                 {(l.desc || h) && <span className="hidden lg:block text-[11px] text-slate-400 truncate mt-0.5">{l.desc || h}</span>}
