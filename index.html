@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Training365</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23101B34'/%3E%3Cpath d='M18 20h28v6H35v22h-6V26H18z' fill='%23fff'/%3E%3Ccircle cx='47' cy='45' r='6' fill='%232F7B7A'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
 <script src="https://cdn.tailwindcss.com"></script>
 <script type="importmap">
 {
@@ -21,18 +22,18 @@
 <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
 <style>
   /* 글꼴 — 그룹웨어(GW)와 같은 맑은 고딕 하나로(영문 · 숫자 · 한글이 섞여도 같은 글꼴) · 로그인 카드 · 로딩 · 스크롤 막대(APS 공통) */
-  html, body { margin: 0; padding: 0; height: 100%; background: #F5F6F8; font-family: 'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; }
-  body, button, input, select, textarea, .font-sans { font-family: 'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; }
-  body .font-mono { font-family: 'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+  html, body { margin: 0; padding: 0; height: 100%; background: #F5F6F8; font-family: 'Pretendard Variable', Pretendard, 'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; }
+  body, button, input, select, textarea, .font-sans { font-family: 'Pretendard Variable', Pretendard, 'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; }
+  body .font-mono { font-family: 'Pretendard Variable', Pretendard, 'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
   #root { height: 100%; }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-    font-family: 'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; color: #64748B; font-size: 14px; }
-  #login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(145deg,#0f2744 0%,#101B34 100%);font-family:'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif}
+    font-family: 'Pretendard Variable', Pretendard, 'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; color: #64748B; font-size: 14px; }
+  #login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(145deg,#0f2744 0%,#101B34 100%);font-family:'Pretendard Variable', Pretendard, 'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif}
   .login-card{background:#fff;border-radius:16px;padding:40px 36px;width:340px;max-width:calc(100vw - 32px);box-sizing:border-box;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center}
   .login-title{font-size:1.05rem;font-weight:700;color:#101B34;margin-bottom:4px}
   .login-co{font-size:.8rem;color:#8A94A6;margin-bottom:6px}
   .login-guide{font-size:.8rem;color:#8A94A6;margin-bottom:20px;line-height:1.6}
-  #loading{align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(145deg,#0f2744 0%,#101B34 100%);font-family:'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif}
+  #loading{align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(145deg,#0f2744 0%,#101B34 100%);font-family:'Pretendard Variable', Pretendard, 'Segoe UI', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif}
   .loading-card{display:flex;flex-direction:column;align-items:center;gap:16px}
   .loading-spinner{width:40px;height:40px;border-radius:50%;border:3px solid rgba(255,255,255,.12);border-top-color:#2F7B7A;animation:t365-spin .85s linear infinite}
   .loading-text{color:rgba(255,255,255,.7);font-size:.85rem}
@@ -73,7 +74,14 @@
   .t365-body a { color: #1D6F8F; text-decoration: underline; text-decoration-color: rgba(29,111,143,.35); text-underline-offset: 3px; }
   .t365-body a:hover { text-decoration-color: currentColor; }
   .t365-body strong { font-weight: 700; color: #0F172A; }
-  .t365-policy .t365-body { font-size: 13.5px; line-height: 1.8; color: #334155; }
+  /* 전체 다듬기(10-15) — 글꼴 Pretendard · 상자는 얇은 테두리 · 큰 둥글기 · 옅은 그림자(머리 위 남색 굵은 선 없앰) */
+  body { letter-spacing: -0.01em; -webkit-font-smoothing: antialiased; }
+  .t365-portlet { border: 1px solid #E6E9EE !important; border-radius: 16px !important; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 12px 32px -24px rgba(16,24,40,.18) !important; }
+  .t365-portlet-head { height: 3.5rem !important; padding: 0 1.25rem !important; border-bottom-color: #EEF0F3 !important; }
+  .t365-portlet-head h2 { font-size: 16px !important; letter-spacing: -0.02em; }
+  /* 정책 안내 창(10-15) — 효성 개인정보처리방침 페이지 모양: 요약 카드 · 조 목차 · 「제N조」 제목 */
+  .t365-pol-sec { scroll-margin-top: 72px; }
+  .t365-policy .t365-body { font-size: 14px; line-height: 1.9; color: #4B5563; }
   .t365-policy .t365-body p, .t365-policy .t365-body ul, .t365-policy .t365-body ol, .t365-policy .t365-body blockquote { margin-bottom: .5em; }
   .t365-editor { font-size: 14.5px; line-height: 1.8; min-height: 300px; }
   .t365-editor p, .t365-editor blockquote p { margin: 0; }
@@ -563,7 +571,12 @@ function parsePolicyBook(buf) {
   rowsOf("Info").forEach((r) => {
     const k = str(r.Key, 30).toLowerCase(); if (!T365_POLICY_KEYS.includes(k)) return;
     out[k] = { title: str(r.Title, 80) || T365_POLICY_LABEL[k], version: str(r.Version, 30), effective: str(r.EffectiveDate instanceof Date ? r.EffectiveDate.toISOString().slice(0, 10) : r.EffectiveDate, 30),
-      link: safeHttpsUrl(str(r.LinkUrl, 500)) || "", linkLabel: str(r.LinkLabel, 80), sections: [] };
+      link: safeHttpsUrl(str(r.LinkUrl, 500)) || "", linkLabel: str(r.LinkLabel, 80), intro: str(r.Intro, 400), sections: [] };
+  });
+  rowsOf("Summary").filter((r) => String(r.Active || "Y").trim().toUpperCase() !== "N").sort((a, b) => (Number(a.Order) || 0) - (Number(b.Order) || 0)).forEach((r) => {
+    const k = str(r.Key, 30).toLowerCase(); if (!T365_POLICY_KEYS.includes(k) || !out[k]) return;
+    const title = str(r.Title, 40), body = str(r.Body, 300); if (!title && !body) return;
+    (out[k].cards = out[k].cards || []).length < 8 && out[k].cards.push({ icon: str(r.Icon, 20).toLowerCase(), title, body });
   });
   rowsOf("Sections").filter((r) => String(r.Active || "Y").trim().toUpperCase() !== "N").sort((a, b) => (Number(a.Order) || 0) - (Number(b.Order) || 0)).forEach((r) => {
     const k = str(r.Key, 30).toLowerCase(); if (!T365_POLICY_KEYS.includes(k)) return;
@@ -1382,6 +1395,7 @@ function Modal({ title, onClose, children, wide, xl }) {
   );
 }
 // 정책 안내 창(10-15) — 화면 맨 아래 「개인정보처리방침 · 쿠키 안내 · 접근성」. 내용은 SharePoint 정책 파일(없으면 기본 안내)
+const T365_POLICY_ICONS = { search: Search, users: Users, share: Handshake, shield: ShieldCheck, trash: Trash2, clock: Clock, eye: Eye, key: KeyRound, mail: Mail, info: Info, globe: Globe, file: FileText, phone: Phone };
 function PolicyModal({ k, onClose, onSwitch }) {
   const [st, setSt] = useState({ loading: true, data: null });
   useEffect(() => {
@@ -1397,20 +1411,44 @@ function PolicyModal({ k, onClose, onSwitch }) {
           className={`h-9 px-3 text-[13px] -mb-px border-b-2 transition-colors ${x === k ? "border-[#2F7B7A] text-slate-900 font-semibold" : "border-transparent text-slate-500 hover:text-slate-800"}`}>{T365_POLICY_LABEL[x]}</button>)}
       </div>
       {st.loading ? <div className="py-12 text-center text-slate-400 text-sm"><div className="w-6 h-6 mx-auto mb-2 rounded-full border-2 border-slate-200 animate-spin" style={{ borderTopColor: BRAND.accent }}></div>불러오는 중…</div> : (
-        <div data-testid="policy-body" data-policy={k} data-policy-src={st.data ? "file" : "fallback"}>
-          <div className="flex items-baseline gap-x-3 gap-y-1 flex-wrap mb-4">
-            <h2 className="text-[18px] font-bold text-slate-900 tracking-[-0.01em]">{d.title}</h2>
-            {(d.version || d.effective) && <span className="text-[12px] text-slate-400 tabular-nums">{[d.version, d.effective && `시행일 ${d.effective}`].filter(Boolean).join(" · ")}</span>}
-          </div>
-          <div className="space-y-5">
+        <div data-testid="policy-body" data-policy={k} data-policy-src={st.data ? "file" : "fallback"} className="text-slate-700">
+          {/* 머리 — 제목 · 한 줄 소개 */}
+          <h2 className="text-[24px] md:text-[28px] font-bold text-slate-900 tracking-[-0.03em] leading-tight">{d.title}</h2>
+          {d.intro && <p className="mt-2 text-[14px] text-slate-500 leading-relaxed break-keep">{d.intro}</p>}
+          {/* 요약 카드 — Summary 시트 */}
+          {d.cards && d.cards.length > 0 && (
+            <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3" data-testid="policy-cards">
+              {d.cards.map((c, i) => { const I = T365_POLICY_ICONS[c.icon] || Info; return (
+                <div key={i} className="flex items-start gap-4 rounded-xl bg-[#F6F7F9] px-5 py-5">
+                  <span className="w-11 h-11 rounded-full bg-white flex items-center justify-center shrink-0 shadow-[0_1px_2px_rgba(16,24,40,.06)]"><I size={20} strokeWidth={1.6} className="text-slate-700" /></span>
+                  <div className="min-w-0"><div className="text-[14.5px] font-semibold text-slate-900">{c.title}</div>{c.body && <p className="mt-1 text-[13px] text-slate-500 leading-relaxed whitespace-pre-line break-keep">{c.body}</p>}</div>
+                </div>); })}
+            </div>
+          )}
+          {/* 시행일 · 버전 */}
+          {(d.version || d.effective) && <div className="mt-8 pt-6 border-t border-slate-200 flex justify-end"><span className="text-[12.5px] text-slate-500 tabular-nums border-b border-slate-300 pb-1.5 pr-1">{[d.effective && `${d.effective} 시행일자 기준`, d.version].filter(Boolean).join(" · ")}</span></div>}
+          {/* 목차 */}
+          {d.sections.length > 2 && (
+            <nav className="mt-5 rounded-xl bg-[#F6F7F9] px-6 py-5 grid grid-cols-1 md:grid-cols-2 md:divide-x divide-slate-200" aria-label="목차" data-testid="policy-toc">
+              {[d.sections.slice(0, Math.ceil(d.sections.length / 2)), d.sections.slice(Math.ceil(d.sections.length / 2))].map((col, ci) => (
+                <ol key={ci} className={`space-y-2 ${ci ? "md:pl-8 mt-2 md:mt-0" : "md:pr-8"}`}>
+                  {col.map((x, i) => { const n = ci ? Math.ceil(d.sections.length / 2) + i + 1 : i + 1; return (
+                    <li key={n}><button type="button" onClick={() => { const el = document.getElementById(`pol-${k}-${n}`); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="flex gap-3 text-left text-[13.5px] text-slate-600 hover:text-slate-900 group">
+                      <span className="w-11 shrink-0 font-bold tabular-nums" style={{ color: BRAND.navy }}>{k === "privacy" ? `제${n}조` : String(n).padStart(2, "0")}</span><span className="group-hover:underline underline-offset-2">{x.heading || "-"}</span></button></li>); })}
+                </ol>
+              ))}
+            </nav>
+          )}
+          {/* 본문 — 조마다 */}
+          <div className="mt-2">
             {d.sections.map((x, i) => (
-              <section key={i}>
-                {x.heading && <h3 className="text-[14.5px] font-bold text-slate-800 mb-1.5">{x.heading}</h3>}
+              <section key={i} id={`pol-${k}-${i + 1}`} className="t365-pol-sec pt-9">
+                {x.heading && <h3 className="text-[19px] md:text-[21px] font-bold text-slate-900 tracking-[-0.02em] mb-3"><span className="mr-2" style={{ color: BRAND.accent }}>{k === "privacy" ? `제${i + 1}조` : String(i + 1).padStart(2, "0")}</span>{x.heading}</h3>}
                 {x.body && <div className="t365-body t365-policy"><RichText text={x.body} /></div>}
               </section>
             ))}
           </div>
-          {d.link && <a href={d.link} target="_blank" rel="noopener noreferrer" className="mt-6 inline-flex items-center gap-1.5 text-[13px] font-medium hover:underline" style={{ color: BRAND.accent }} data-testid="policy-link">{d.linkLabel || d.link}<ExternalLink size={13} /></a>}
+          {d.link && <div className="mt-10 pt-5 border-t border-slate-200"><a href={d.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[13px] font-semibold hover:underline" style={{ color: BRAND.accent }} data-testid="policy-link">{d.linkLabel || d.link}<ExternalLink size={13} /></a></div>}
         </div>
       )}
     </Modal>
