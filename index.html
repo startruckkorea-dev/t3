@@ -2807,17 +2807,17 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
           </section>
 
           {/* 첨부 — 상자 없이 본문 아래 옅은 선 + 파일 줄(마우스를 올리면 받기 표시) */}
-          {files.length > 0 && (
-            <section className="px-5 md:px-10 pb-5" data-testid="attachments">
-              <div className="border-t border-slate-100 pt-3">
-                <div className="flex items-center gap-1.5 mb-1 text-[12px] text-slate-400">
-                  <Paperclip size={13} /><span className="font-medium text-slate-500">첨부</span><span className="tabular-nums">{files.length}</span>
-                  <span className="ml-auto tabular-nums">{fmtSize(totalSize)}</span>
-                </div>
-                <FileRows files={files} post={post} />
+          {/* 10-15: 첨부가 없어도 같은 자리에 「첨부 0 · 첨부파일이 없습니다」 를 보여 준다(있는지 없는지 바로 알 수 있게) */}
+          <section className="px-5 md:px-10 pb-5" data-testid="attachments" data-count={files.length}>
+            <div className="border-t border-slate-100 pt-3">
+              <div className="flex items-center gap-1.5 mb-1 text-[12px] text-slate-400">
+                <Paperclip size={13} /><span className="font-medium text-slate-500">첨부</span><span className="tabular-nums">{files.length}</span>
+                {files.length > 0 && <span className="ml-auto tabular-nums">{fmtSize(totalSize)}</span>}
               </div>
-            </section>
-          )}
+              {files.length > 0 ? <FileRows files={files} post={post} />
+                : <div className="flex items-center gap-2 h-9 px-1 text-[12.5px] text-slate-400" data-testid="attachments-empty"><FileText size={14} className="text-slate-300 shrink-0" />첨부파일이 없습니다.</div>}
+            </div>
+          </section>
 
           {post.Category === "qna" && <QnaAnswer ctx={ctx} post={post} />}
 
