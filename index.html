@@ -1411,7 +1411,8 @@ const T365_POLICY_ICONS = { search: Search, users: Users, share: Handshake, shie
 function PolicyModal({ k, onClose, onSwitch }) {
   const [st, setSt] = useState({ loading: true, data: null });
   useEffect(() => {
-    let on = true; setSt({ loading: true, data: null });
+    let on = true; setSt({ loading: k !== "privacy", data: null });
+    if (k === "privacy") return () => { on = false; };
     tLoadPolicies().then((r) => { if (on) setSt({ loading: false, data: r.book[k] || null }); }, () => { if (on) setSt({ loading: false, data: null }); });
     return () => { on = false; };
   }, [k]);
@@ -1419,12 +1420,10 @@ function PolicyModal({ k, onClose, onSwitch }) {
   return (
     <Modal title={T365_POLICY_LABEL[k]} onClose={onClose} xl>
       <div className="flex items-center gap-1 -mt-1 mb-4 border-b border-slate-100" role="tablist" aria-label="정책 안내">
-        {T365_POLICY_KEYS.map((x) => x === "privacy" && k !== "privacy"
-          ? <PolicyLink key={x} className="h-9 px-3 text-[13px] -mb-px border-b-2 border-transparent text-slate-500 hover:text-slate-800" />
-          : <button key={x} role="tab" aria-selected={x === k} onClick={() => onSwitch(x)} data-policy-tab={x}
+        {T365_POLICY_KEYS.map((x) => <button key={x} role="tab" aria-selected={x === k} onClick={() => onSwitch(x)} data-policy-tab={x}
           className={`h-9 px-3 text-[13px] -mb-px border-b-2 transition-colors ${x === k ? "border-[#2F7B7A] text-slate-900 font-semibold" : "border-transparent text-slate-500 hover:text-slate-800"}`}>{T365_POLICY_LABEL[x]}</button>)}
       </div>
-      {st.loading ? <div className="py-12 text-center text-slate-400 text-sm"><div className="w-6 h-6 mx-auto mb-2 rounded-full border-2 border-slate-200 animate-spin" style={{ borderTopColor: BRAND.accent }}></div>불러오는 중…</div> : (
+      {k === "privacy" ? <CompanyPolicyEmbed /> : st.loading ? <div className="py-12 text-center text-slate-400 text-sm"><div className="w-6 h-6 mx-auto mb-2 rounded-full border-2 border-slate-200 animate-spin" style={{ borderTopColor: BRAND.accent }}></div>불러오는 중…</div> : (
         <div data-testid="policy-body" data-policy={k} data-policy-src={st.data ? "file" : "fallback"} className="text-slate-700">
           {/* 머리 — 제목 · 한 줄 소개 */}
           <h2 className="text-[24px] md:text-[28px] font-bold text-slate-900 tracking-[-0.03em] leading-tight">{d.title}</h2>
@@ -1468,17 +1467,27 @@ function PolicyModal({ k, onClose, onSwitch }) {
     </Modal>
   );
 }
-// 개인정보처리방침은 앱 안 창(정책 파일) 대신 회사 개인정보처리방침 페이지로 바로 연다(10-15 · t365-policy-link) — Training365 는 그 방침을 따른다
-function PolicyLink({ className }) {
-  return <a href={T365_COMPANY_POLICY} target="_blank" rel="noopener noreferrer" data-policy-open="privacy" data-testid="policy-company-link"
-    title="스타트럭코리아 개인정보처리방침 — 새 창" className={`inline-flex items-center gap-0.5 hover:underline underline-offset-2 ${className || ""}`}>{T365_POLICY_LABEL.privacy}<ExternalLink size={11} aria-hidden="true" /></a>;
+// 개인정보처리방침 탭 — 정책 파일 대신 회사 개인정보처리방침 페이지를 창 안에 그대로 띄운다(10-15 · t365-policy-embed). Training365 는 그 방침을 따른다.
+// 회사 홈페이지가 다른 화면 안에 띄우는 것을 막으면(X-Frame-Options 등) 빈 칸이 될 수 있어, 「새 창에서 열기」 를 늘 위에 둔다.
+function CompanyPolicyEmbed() {
+  return (
+    <div data-testid="policy-embed">
+      <div className="flex items-center gap-3 flex-wrap mb-3">
+        <p className="text-[13.5px] text-slate-600 break-keep flex-1 min-w-0">Training365 의 개인정보 처리는 <b className="text-slate-800">스타트럭코리아 개인정보처리방침</b>을 따릅니다.</p>
+        <a href={T365_COMPANY_POLICY} target="_blank" rel="noopener noreferrer" data-testid="policy-company-link"
+          className="shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-slate-300 bg-white text-[12.5px] font-medium text-slate-700 hover:bg-slate-50">새 창에서 열기<ExternalLink size={13} /></a>
+      </div>
+      <iframe src={T365_COMPANY_POLICY} title="스타트럭코리아 개인정보처리방침" referrerPolicy="no-referrer" data-testid="policy-iframe"
+        className="w-full rounded-xl border border-slate-200 bg-white" style={{ height: "min(68vh, 760px)" }} />
+      <p className="mt-2 text-[11.5px] text-slate-400 break-keep">화면이 비어 있거나 연결이 거부되었다고 나오면 「새 창에서 열기」 를 눌러 주세요.</p>
+    </div>
+  );
 }
 function PolicyLinks({ onOpen, className }) {
   return (
     <nav className={`flex items-center justify-center flex-wrap gap-x-1 ${className || ""}`} aria-label="정책 안내" data-testid="policy-links">
       {T365_POLICY_KEYS.map((x, i) => <React.Fragment key={x}>{i > 0 && <span className="text-slate-300" aria-hidden="true">|</span>}
-        {x === "privacy" ? <PolicyLink className="px-1.5 font-semibold text-slate-600" />
-          : <button type="button" onClick={() => onOpen(x)} data-policy-open={x} className="px-1.5 hover:underline underline-offset-2 text-slate-500 hover:text-slate-700">{T365_POLICY_LABEL[x]}</button>}</React.Fragment>)}
+        <button type="button" onClick={() => onOpen(x)} data-policy-open={x} className={`px-1.5 hover:underline underline-offset-2 ${x === "privacy" ? "font-semibold text-slate-600" : "text-slate-500 hover:text-slate-700"}`}>{T365_POLICY_LABEL[x]}</button></React.Fragment>)}
     </nav>
   );
 }
