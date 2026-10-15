@@ -38,6 +38,12 @@
   .loading-spinner{width:40px;height:40px;border-radius:50%;border:3px solid rgba(255,255,255,.12);border-top-color:#2F7B7A;animation:t365-spin .85s linear infinite}
   .loading-text{color:rgba(255,255,255,.7);font-size:.85rem}
   @keyframes t365-spin{to{transform:rotate(360deg)}}
+  /* 「로딩 중 . . .」 — 점이 하나씩 통통 튀며 차오른다(10-15 t365-dots) */
+  .t365-dots{display:inline-flex;gap:.18em;margin-left:.2em;vertical-align:baseline}
+  .t365-dots i{font-style:normal;display:inline-block;animation:t365-dot 1.2s ease-in-out infinite both}
+  .t365-dots i:nth-child(2){animation-delay:.16s}.t365-dots i:nth-child(3){animation-delay:.32s}
+  @keyframes t365-dot{0%,80%,100%{opacity:.2;transform:translateY(0)}35%{opacity:1;transform:translateY(-.28em)}}
+  @media (prefers-reduced-motion: reduce){.t365-dots i{animation:none;opacity:.7}}
   .btn-login{background:linear-gradient(135deg,#2F7B7A,#1A2B4C);color:#fff;border:none;border-radius:10px;padding:13px 0;font-size:.92rem;font-weight:600;cursor:pointer;width:100%;font-family:inherit}
   .btn-login:disabled{background:#cbd5e0;cursor:not-allowed}
   #login-err{color:#C1352E;font-size:.78rem;margin-top:10px;display:none}
@@ -219,12 +225,12 @@ html, * { scrollbar-width: thin; scrollbar-color: #CBD5E1 transparent; }
       <div class="login-opt">
         <div class="login-ico staff"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4M8 6h.01M16 6h.01M12 6h.01M12 10h.01M12 14h.01M16 10h.01M16 14h.01M8 10h.01M8 14h.01"/></svg></div>
         <div><div class="login-opt-t">임직원</div><div class="login-opt-d">Hyosung · Star Truck Korea<br />Microsoft 365 회사 계정</div></div>
-        <button class="btn-login" id="btn-login" data-app="staff" disabled>로딩 중...</button>
+        <button class="btn-login" id="btn-login" data-app="staff" disabled>로딩 중<span class="t365-dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span></button>
       </div>
       <div class="login-opt">
         <div class="login-ico agent"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
         <div><div class="login-opt-t">Sales Agent</div><div class="login-opt-d">STK 세일즈 에이전트<br />STK 가 초대한 외부 계정</div></div>
-        <button class="btn-login agent" id="btn-login-agent" data-app="agent" disabled>로딩 중...</button>
+        <button class="btn-login agent" id="btn-login-agent" data-app="agent" disabled>로딩 중<span class="t365-dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span></button>
       </div>
     </div>
     <div id="login-err"></div>
@@ -237,7 +243,7 @@ html, * { scrollbar-width: thin; scrollbar-color: #CBD5E1 transparent; }
 <div id="loading" style="display:none">
   <div class="loading-card">
     <div class="loading-spinner"></div>
-    <div class="loading-text">권한을 확인하고 있습니다...</div>
+    <div class="loading-text">권한을 확인하고 있습니다<span class="t365-dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span></div>
   </div>
 </div>
 <div id="root"></div>
@@ -1547,7 +1553,7 @@ function CompanyPolicyEmbed() {
         {!loaded && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gradient-to-b from-[#FBFCFD] to-[#F2F5F8]" role="status" aria-live="polite" data-testid="policy-loading">
             <div className="w-9 h-9 rounded-full border-[3px] border-slate-200 animate-spin" style={{ borderTopColor: BRAND.accent }}></div>
-            <div className="text-[13px] font-medium text-slate-600">개인정보처리방침을 불러오는 중입니다…</div>
+            <div className="text-[13px] font-medium text-slate-600">개인정보처리방침을 불러오는 중입니다<span className="t365-dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span></div>
             {slow && <div className="text-[12px] text-slate-400 text-center px-6 break-keep">조금 오래 걸리고 있습니다 — 위 「새 창에서 열기」 로 바로 볼 수도 있습니다.</div>}
           </div>
         )}
