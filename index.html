@@ -295,10 +295,12 @@ let _siteId = null;
 // 화면 이름(내부 저장소 이름은 화면에 내지 않는다 — 목록 이름은 관리자 준비 안내에만)
 const T365_NAME = "Training365";
 const T365_IT_MAIL = "stk_it@hyosung.com";
-// 역할 · 권한은 사용자 목록(training365_Users)만 본다 — 설정 파일(system_config_final.xlsx)의 키는 쓰지 않는다.
+// 역할 · 권한은 사용자 목록(training365_Users)만 본다 — 설정 파일(system_config_final.xlsx)은 아래 비상 관리자 명단만 쓴다.
 // 비상 관리자 — 목록을 제대로 읽었는데 「관리자」 역할(사용 중)이 한 명도 없을 때만 들어와 관리자를 지정할 수 있게(첫 설정 · 잠김 방지).
 // 목록에 관리자가 한 명이라도 생기면 이 계정도 목록 기준으로만 판정한다
-const T365_BOOTSTRAP_ADMINS = ["jimmy.lee@hyosung.com"];
+// 10-16 실명 메일을 코드에서 뺐다 — 설정 파일의 TRAINING365_BOOTSTRAP_ADMIN_N(C열 메일)로만 채운다. 설정을 못 읽거나 키가 없으면 빈 명단(비상 관리자 없음 · 닫힌 쪽)
+// (예전 TRAINING365_ADMIN_N 키는 7b88b00 이후 일부러 무시한다 — 남아 있는 옛 행이 비상 관리자가 되지 않게 이름을 따로 둔다)
+const T365_BOOTSTRAP_ADMINS = [];
 
 const T365_LISTS = {
   posts: "training365_Posts",
@@ -915,7 +917,8 @@ async function tDownload(f, post, kind) {
   }
 }
 
-/* ---- system_config_final.xlsx — 문의 메일(TRAINING365_CONTACT · TRAINING365_IT)만 읽는다. 권한 판정에는 쓰지 않는다 ----
+/* ---- system_config_final.xlsx — 문의 메일(TRAINING365_CONTACT · TRAINING365_IT)과 비상 관리자(TRAINING365_BOOTSTRAP_ADMIN_N)만 읽는다 ----
+ * 비상 관리자는 training365_Users 에 사용 중인 「관리자」 가 한 명도 없을 때만 쓴다(그 밖의 권한 판정에는 쓰지 않는다).
  * A열 KEY · B열 이름 · C열 메일(ICS_CONTACT 와 같은 방식). 게스트(Agent)는 파일을 못 읽을 수 있다 → IT 메일로 대신 */
 const T365_ITSM_URL = "https://itsm-ticket.startruckkorea.com";
 // 시작할 때 한 번 채운다 — contact: 권한 없음 화면 문의, it: 문의하기 창의 「로그인 · 시스템 오류」(없으면 T365_IT_MAIL)
@@ -934,7 +937,10 @@ async function loadContactMail() {
     const mail = row ? String(row[2] || "").trim().toLowerCase() : "";
     return safeMail(mail);
   };
-  return { contact: pick("TRAINING365_CONTACT"), it: pick("TRAINING365_IT") };
+  // 비상 관리자 — TRAINING365_BOOTSTRAP_ADMIN_1 · _2 … 의 C열 메일(10-16, 예전 코드 고정값을 옮김)
+  const bootAdmins = [...new Set(rows.filter((r) => /^TRAINING365_BOOTSTRAP_ADMIN_\d+$/.test(String((r || [])[0] || "").trim().toUpperCase()))
+    .map((r) => safeMail(r[2])).filter(Boolean))];
+  return { contact: pick("TRAINING365_CONTACT"), it: pick("TRAINING365_IT"), bootAdmins };
 }
 
 /* ---- 직원 명부(employee_search.xlsx) — MKQR · ICS 와 같은 공용 파일 · 같은 열(Company · Department · Team · EngName · EMail) ----
@@ -4190,7 +4196,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
     t365Log("사용자", "Excel 내보내기", "사용자 · 권한 목록", { info: { 건수: data.length } });
   }
   function downloadTemplate() {
-    const ws = XLSX.utils.aoa_to_sheet([["이메일", "이름", "회사/지점", "역할", "작성 카테고리"], ["agent.kim@example.com", "김영업", "서울모터스 강서지점", "Agent", ""], ["writer.lee@hyosung.com", "이작성", "STK Sales", "작성자", "crm,training"]]);
+    const ws = XLSX.utils.aoa_to_sheet([["이메일", "이름", "회사/지점", "역할", "작성 카테고리"], ["agent.kim@example.com", "김영업", "서울모터스 강서지점", "Agent", ""], ["hong.gildong@hyosung.com", "이작성", "STK Sales", "작성자", "crm,training"]]);
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "사용자");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["역할 값"], ...T365_ROLES.map((r) => [r]), [], ["카테고리 키"], ...T365_DEFAULT_CATEGORIES.map((c) => [`${c.key} = ${c.label}`]), [], ["메뉴별 개별 권한은 등록 후 화면 표에서 지정합니다"]]), "안내");
     try { XLSX.writeFile(wb, "Training365_사용자_일괄등록_양식.xlsx"); }
@@ -6168,7 +6174,8 @@ function AccessDenied({ ident, reason, contact }) {
 /* 시작 — 로그인 → 「권한 확인」 화면 → /me · 사이트 · 설정 · 사용자 목록 → 판정 → 통과한 계정에만 앱    */
 /* 판정 전에는 아무 내용도 보이지 않는다(SSC · MKQR 과 같음). 판정 규칙(fail-closed):                       */
 /*  · training365_Users 에 등록 · 사용 중 · 역할이 4개 중 하나여야만. 목록을 못 읽으면 막는다                */
-/*  · 설정 파일은 문의 메일(TRAINING365_CONTACT)만 읽는다 · 목록에 관리자가 없을 때만 비상 관리자          */
+/*  · 설정 파일은 문의 메일(TRAINING365_CONTACT)과 비상 관리자(TRAINING365_BOOTSTRAP_ADMIN_N)만 읽는다                */
+/*  · 비상 관리자는 목록에 관리자가 없을 때만 · 설정을 못 읽으면 비상 관리자도 없다                          */
 /* ------------------------------------------------------------------ */
 async function t365Boot(account) {
   document.getElementById("login-screen").style.display = "none";
@@ -6189,11 +6196,16 @@ async function t365Boot(account) {
   const wrap = (pr) => pr.then((v) => ({ v }), (e) => ({ e }));
   const [usersR, contactR] = await Promise.all([wrap(tListAll(T365_LISTS.users)), wrap(loadContactMail())]);
   if (contactR.e) console.warn("[Training365] 문의 메일(TRAINING365_CONTACT · TRAINING365_IT) 읽기 실패 — 기본 IT 메일로 대신:", contactR.e.message);
-  else Object.assign(T365_MAILS, contactR.v);
+  else {
+    const { bootAdmins = [], ...mails } = contactR.v;
+    Object.assign(T365_MAILS, mails);
+    T365_BOOTSTRAP_ADMINS.splice(0, T365_BOOTSTRAP_ADMINS.length, ...bootAdmins);
+  }
   const users = usersR.v || [];
   // 비상 관리자 — 목록을 읽었고 사용 중인 「관리자」 가 아무도 없을 때만(목록을 못 읽으면 fail-closed)
   const listHasAdmin = users.some((u) => u.Role === "관리자" && u.Active !== false && normEmail(u.Email));
   const isBootAdmin = !usersR.e && !listHasAdmin && ident.ids.some((id) => T365_BOOTSTRAP_ADMINS.includes(id));
+  if (!usersR.e && !listHasAdmin && !T365_BOOTSTRAP_ADMINS.length) console.warn("[Training365] 사용 중인 관리자가 목록에 없고 설정 파일에 비상 관리자(TRAINING365_BOOTSTRAP_ADMIN_N)도 없습니다 — system_config_final.xlsx 에 TRAINING365_BOOTSTRAP_ADMIN_1 을 추가해 주세요.");
   const mine = users.filter((u) => ident.ids.includes(normEmail(u.Email)));
   const myRow = mine.find((u) => u.Active !== false) || mine[0] || null;
   let role = null, reason = "";
