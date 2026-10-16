@@ -331,6 +331,8 @@ const ROLE_META = {
 // 기본 게시판 8개(7개 — 2026-09-09 · 10-07 회의록, Q&A — 10-12 추가). key 는 저장 값이라 바꾸지 않는다 — 이름 · 설명 · 순서 · 사용은 카테고리 관리에서
 const T365_DEFAULT_CATEGORIES = [
   { key: "crm", label: "CRM", icon: MonitorSmartphone, color: "#2F7B7A", soft: "#E4F1F0", desc: "CRM 사용법 · 권한 신청 · 자주 묻는 질문" },
+  // DMS — 딜러관리시스템(Autofocus DMS) 사용법 · 공지. DMS 쪽에서 보내 주는 자료를 받아 올리는 게시판(인터페이스 정의서 10-16)
+  { key: "dms", label: "DMS", icon: Building2, color: "#4338CA", soft: "#ECEEFB", desc: "DMS(딜러관리시스템) 사용법 · 공지 · 변경 안내", defOrder: 15 },
   { key: "product", label: "제품 & 경쟁사 정보", icon: Package, color: "#3B5B8C", soft: "#E8EEF7", desc: "차종 · 사양 · 가격 정책과 경쟁사 동향" },
   { key: "guide", label: "고객대응 가이드", icon: Headphones, color: "#6D4FB0", soft: "#F0ECF9", desc: "상담 · 견적 · 출고 · 클레임 대응 요령" },
   { key: "training", label: "세일즈 트레이닝", icon: GraduationCap, color: "#0E7490", soft: "#E0F2F7", desc: "영업 스킬 · 사례 · 교육 영상" },
@@ -2355,7 +2357,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
           <div className="min-w-0 flex-1"><BoardIconStrip ctx={ctx} onGo={(k) => setTab("cat:" + k)} /></div>
           <button type="button" onClick={() => setSearching(q.trim())} tabIndex={bbStuck ? 0 : -1} title="게시물 검색" aria-label="게시물 검색" className="t365-bb-sbtn hidden shrink-0 w-9 h-9 rounded-full items-center justify-center text-white shadow-sm hover:brightness-110 active:scale-95 transition" style={{ background: BRAND.navy }} data-testid="bb-search-btn"><Search size={15} /></button>
         </div>
-        <form onSubmit={(e) => { e.preventDefault(); setSearching(q.trim()); }} className="t365-bb-search w-full min-[1600px]:w-[360px] shrink-0 px-1 pt-1.5 pb-1 border-t border-slate-100 min-[1600px]:border-t-0 min-[1600px]:p-0 min-[1600px]:pl-5 min-[1600px]:ml-2 min-[1600px]:border-l min-[1600px]:border-slate-200 min-[1600px]:self-center" role="search" data-testid="home-search">
+        <form onSubmit={(e) => { e.preventDefault(); setSearching(q.trim()); }} className="t365-bb-search w-full min-[1600px]:w-[260px] shrink-0 px-1 pt-1.5 pb-1 border-t border-slate-100 min-[1600px]:border-t-0 min-[1600px]:p-0 min-[1600px]:pl-5 min-[1600px]:ml-2 min-[1600px]:border-l min-[1600px]:border-slate-200 min-[1600px]:self-center" role="search" data-testid="home-search">
           <div className="relative group/s">
             <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within/s:text-[#2F7B7A] transition-colors" />
             <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="게시물 검색" title="모든 게시판의 제목 · 내용 · 첨부 이름 · Q&A 답변에서 찾습니다(글번호도)" aria-label="게시물 검색" className="h-10 w-full rounded-full text-[13.5px] pl-11 pr-[92px] text-slate-900 placeholder:text-slate-400 bg-white border border-slate-200 hover:border-slate-300 focus:bg-white focus:border-[#9CCBC8] focus:outline-none focus:ring-4 focus:ring-[#2F7B7A]/10 transition-all" data-testid="home-search-input" />
@@ -5322,7 +5324,7 @@ function mergeCategories(catRows, includeInactive) {
     const ic = r ? parseCatIcon(r.Icon) : null;
     const pal = r ? T365_PALETTE.find((x) => x.color.toLowerCase() === String(r.Color || "").trim().toLowerCase()) : null;
     return { ...c, label: (r && String(r.Title || "").trim()) || c.label, desc: r && r.Description != null && String(r.Description).trim() ? String(r.Description).trim() : c.desc,
-      order: r && r.SortOrder != null && r.SortOrder !== "" ? Number(r.SortOrder) : (i + 1) * 10, active: r ? r.Active !== false : true,
+      order: r && r.SortOrder != null && r.SortOrder !== "" ? Number(r.SortOrder) : c.defOrder || (i + 1) * 10, active: r ? r.Active !== false : true,
       defIcon: c.icon, defColor: c.color, ...(ic || { iconKey: "" }), ...(pal ? { color: pal.color, soft: pal.soft, colorKey: pal.color } : { colorKey: "" }),
       contacts: r ? parseContacts(r.Contacts) : [] };
   }).sort((a, b) => a.order - b.order);
