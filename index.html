@@ -298,7 +298,7 @@ let _siteId = null;
 
 // 화면 이름(내부 저장소 이름은 화면에 내지 않는다 — 목록 이름은 관리자 준비 안내에만)
 const T365_NAME = "Training365";
-const T365_IT_MAIL = "stk_it@hyosung.com";
+const T365_IT_MAIL = "";   // 메일은 설정 파일 TRAINING365_IT 에서만(10-17). 못 읽으면 메일 없이 「IT팀」 · ITSM 안내
 // 역할 · 권한은 사용자 목록(training365_Users)만 본다 — 설정 파일(system_config_final.xlsx)은 아래 비상 관리자 명단만 쓴다.
 // 비상 관리자 — 목록을 제대로 읽었는데 「관리자」 역할(사용 중)이 한 명도 없을 때만 들어와 관리자를 지정할 수 있게(첫 설정 · 잠김 방지).
 // 목록에 관리자가 한 명이라도 생기면 이 계정도 목록 기준으로만 판정한다
@@ -707,11 +707,11 @@ const T365_POLICY_LABEL = { privacy: "개인정보처리방침", cookie: "쿠키
 const T365_COMPANY_POLICY = "https://startruckkorea.com/policy-present/";
 const T365_POLICY_FALLBACK = {
   privacy: { title: "Training365 개인정보 처리 안내", link: T365_COMPANY_POLICY, linkLabel: "스타트럭코리아 개인정보처리방침 전문 · 개정 이력", sections: [
-    { heading: "안내", body: "Training365 에서 처리하는 개인정보는 [스타트럭코리아 개인정보처리방침](https://startruckkorea.com/policy-present/)에 따라 보호됩니다.\n개인정보 관련 문의: stk_data-protection@hyosung.com · 080-365-8255" }] },
+    { heading: "안내", body: "Training365 에서 처리하는 개인정보는 [스타트럭코리아 개인정보처리방침](https://startruckkorea.com/policy-present/)에 따라 보호됩니다.\n개인정보 관련 문의처(개인정보 보호책임자)는 위 개인정보처리방침에 안내되어 있습니다." }] },
   cookie: { title: "쿠키 및 브라우저 저장소 안내", sections: [
     { heading: "안내", body: "Training365 는 광고 · 분석 · 추적 쿠키를 사용하지 않습니다. 로그인 유지와 임시 저장을 위해 브라우저 저장소(세션 · 로컬)만 사용하며, 저장된 값은 이 기기에만 남습니다." }] },
   accessibility: { title: "접근성 안내", sections: [
-    { heading: "안내", body: "이용하면서 불편한 점이 있으면 STK IT(stk_it@hyosung.com)로 알려 주세요." }] },
+    { heading: "안내", body: "이용하면서 불편한 점이 있으면 화면 오른쪽 아래 「문의하기」의 「로그인 · 시스템 오류」로 알려 주세요." }] },
 };
 function parsePolicyBook(buf) {
   const wb = XLSX.read(buf, { type: "array" });
@@ -4255,7 +4255,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
     t365Log("사용자", "Excel 내보내기", "사용자 · 권한 목록", { info: { 건수: data.length } });
   }
   function downloadTemplate() {
-    const ws = XLSX.utils.aoa_to_sheet([["이메일", "이름", "회사/지점", "역할", "작성 카테고리"], ["agent.kim@example.com", "김영업", "서울모터스 강서지점", "Agent", ""], ["hong.gildong@hyosung.com", "이작성", "STK Sales", "작성자", "crm,training"]]);
+    const ws = XLSX.utils.aoa_to_sheet([["이메일", "이름", "회사/지점", "역할", "작성 카테고리"], ["agent.kim@example.com", "김영업", "서울모터스 강서지점", "Agent", ""], ["user@example.com", "이작성", "STK Sales", "작성자", "crm,training"]]);
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "사용자");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["역할 값"], ...T365_ROLES.map((r) => [r]), [], ["카테고리 키"], ...T365_DEFAULT_CATEGORIES.map((c) => [`${c.key} = ${c.label}`]), [], ["메뉴별 개별 권한은 등록 후 화면 표에서 지정합니다"]]), "안내");
     try { XLSX.writeFile(wb, "Training365_사용자_일괄등록_양식.xlsx"); }
@@ -5818,9 +5818,9 @@ function HelpFab({ ctx }) {
               <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-slate-800">자료 · 권한 · 사용법</span><span className="block text-[11.5px] text-slate-400">게시판별 담당자{withC ? ` · ${withC}개 게시판` : ""}</span></span>
               <ChevronRight size={15} className="text-slate-300" />
             </button>
-            <a href={mailtoOf(t365ItMail())} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50" data-testid="help-it">
+            <a href={mailtoOf(t365ItMail()) || T365_ITSM_URL} target={t365ItMail() ? undefined : "_blank"} rel="noopener noreferrer" className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50" data-testid="help-it">
               <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-slate-100 text-slate-600"><ShieldCheck size={15} /></span>
-              <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-slate-800">로그인 · 시스템 오류</span><span className="block text-[11.5px] text-slate-400 truncate">{t365ItMail()}</span></span>
+              <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-slate-800">로그인 · 시스템 오류</span><span className="block text-[11.5px] text-slate-400 truncate">{t365ItMail() || "IT팀 · ITSM 티켓"}</span></span>
               <ChevronRight size={15} className="text-slate-300" />
             </a>
           </div>
@@ -5857,7 +5857,7 @@ function ContactModal({ ctx, onClose }) {
       </div>
       {!withC.length && <div className="text-[12.5px] text-slate-400 px-3 py-3 rounded-lg border border-dashed border-slate-200 mb-1">게시판별 담당자가 아직 지정되지 않았습니다 — 아래 IT 로 문의해 주세요.</div>}
       <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60">
-        <Person name="STK IT (로그인 · 시스템 오류)" email={t365ItMail()} color="#475569" />
+        {t365ItMail() ? <Person name="STK IT (로그인 · 시스템 오류)" email={t365ItMail()} color="#475569" /> : <Person name="STK IT (로그인 · 시스템 오류)" sub="IT팀 · ITSM 티켓" color="#475569" />}
       </div>
     </Modal>
   );
@@ -6321,7 +6321,7 @@ function AccessDenied({ ident, reason, contact }) {
             </>}
           </div>
         </div>
-        <div style={{ fontSize: ".95rem", color: "#94a3b8", marginBottom: 26 }}>문의: <a href={mailtoOf(mail)} style={{ color: "#0078d4", textDecoration: "none" }} data-testid="denied-contact">{mail}</a></div>
+        <div style={{ fontSize: ".95rem", color: "#94a3b8", marginBottom: 26 }}>문의: {mail ? <a href={mailtoOf(mail)} style={{ color: "#0078d4", textDecoration: "none" }} data-testid="denied-contact">{mail}</a> : <span data-testid="denied-contact">IT팀</span>}</div>
         {retry ? <button onClick={() => window.location.reload()} style={btn}>🔄 다시 시도</button>
           : internal ? <a href="https://aps.startruckkorea.com/" target="_self" style={btn} data-testid="denied-back"><span style={{ fontSize: "1.15rem", lineHeight: 1 }}>📬</span><span>돌아가기</span></a>
           : <button onClick={t365Logout} style={btn} data-testid="denied-back" title="로그아웃하고 처음 화면으로"><span style={{ fontSize: "1.15rem", lineHeight: 1 }}>📬</span><span>돌아가기</span></button>}
@@ -6350,7 +6350,7 @@ async function t365Boot(account) {
   } catch (e) {
     document.getElementById("loading").style.display = "none";
     document.getElementById("login-screen").style.display = "flex";
-    showLoginErr("연결에 실패했습니다 — 권한이 없거나 네트워크 오류입니다. 계속되면 " + T365_IT_MAIL + " 로 문의해 주세요.");
+    showLoginErr("연결에 실패했습니다 — 권한이 없거나 네트워크 오류입니다. 계속되면 IT팀(ITSM 티켓: itsm-ticket.startruckkorea.com)에 문의해 주세요.");
     return;
   }
   const wrap = (pr) => pr.then((v) => ({ v }), (e) => ({ e }));
