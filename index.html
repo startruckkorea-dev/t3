@@ -283,6 +283,10 @@ const LOGO_SRC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAeYAAAA7CAIAAAAh
 // 로그인 앱 — 임직원: APS-MasterData-App(ICS 와 같은 앱), Agent: STK-Sales-Freelancer(외부 Agent 전용 앱 · 같은 STK 테넌트).
 // 둘 다 training365.startruckkorea.com 리디렉션 URI(SPA)가 등록돼 있어야 한다. 고른 앱은 이 탭(sessionStorage)에 기억해 리디렉션 뒤 같은 앱으로 이어받는다
 const T365_APPS = { staff: "432976c2-b43a-492e-8213-ece505fa1f51", agent: "0346d368-7dc6-41a6-a310-7afa10fa5bd7" };
+// Agent 이용 시간 — 한국 시간 06:00 ~ 22:00 (10-18)
+const T365_AGENT_HOURS = { from: 6, to: 22 };
+function t365KstHour(now = Date.now()) { const d = new Date(now + 9 * 3600e3); return d.getUTCHours() + d.getUTCMinutes() / 60; }
+function t365AgentHoursOk(now = Date.now()) { const h = t365KstHour(now); return h >= T365_AGENT_HOURS.from && h < T365_AGENT_HOURS.to; }
 let T365_APP_KIND = (() => { try { return sessionStorage.getItem("t365.app") === "agent" ? "agent" : "staff"; } catch (e) { return "staff"; } })();
 const MSAL_CONFIG = {
   auth: {
@@ -339,7 +343,7 @@ const T365_ROLES = ["Agent", "본사", "작성자", "관리자"];
 const ROLE_META = {
   "Agent": { cls: "bg-blue-50 text-blue-700 border-blue-100", desc: "게시물 열람 · 조회확인" },
   "본사": { cls: "bg-slate-100 text-slate-600 border-slate-200", desc: "열람 · 확인 현황 조회(조회확인 없음)" },
-  "작성자": { cls: "bg-amber-50 text-amber-700 border-amber-100", desc: "지정한 카테고리에 글쓰기" },
+  "작성자": { cls: "bg-amber-50 text-amber-700 border-amber-100", desc: "본사 + 게시판 글쓰기(담당 게시판을 정하면 그 게시판만)" },
   "관리자": { cls: "bg-[#E4F1F0] text-[#2F7B7A] border-[#CFE6E4]", desc: "사용자 · 카테고리 · 게시물 · 접속 기록 관리" },
 };
 
@@ -467,7 +471,8 @@ function rolePreset(role, writerCats) {
     if (role === "관리자") lv = "e";
     else if (role === "Agent") lv = it.group === "home" || it.group === "boards" ? "v" : "n";
     else if (role === "본사") lv = it.group === "admin" ? "n" : "v";
-    else if (role === "작성자") lv = it.group === "admin" ? "n" : it.group === "boards" && wc.has(it.cat) ? "e" : "v";
+    // 작성자 — 본사 + 게시판 글쓰기. 담당 게시판(WriterCategories)을 정하면 그 게시판만, 비워 두면 모든 게시판(10-18 — 본사와 같아 보이던 문제)
+    else if (role === "작성자") lv = it.group === "admin" ? "n" : it.group === "boards" && (!wc.size || wc.has(it.cat)) ? "e" : "v";
     if (it.cat === "qna") lv = "e";   // Q&A — 역할이 있으면 누구나 질문(본인 글만 수정 · 삭제 — canEditPost)
     out[it.key] = capLevel(it, lv);
   });
@@ -1737,8 +1742,23 @@ function Field({ label, children, required, hint }) {
     </div>
   );
 }
-function PageHeader({ icon: Icon, title, subtitle, inline, right, tint }) {
+function PageHeader({ icon: Icon, title, subtitle, inline, right, tint, descSide }) {
   // 10-15 다듬기 — 아이콘 네모 대신 큰 제목 · 옅은 설명(효성 누리집처럼 글자 중심). 게시판 색은 제목 앞 짧은 막대로만
+  // descSide(게시판) — 설명을 제목 오른쪽 한 줄에(세로 공간을 줄여 목록이 위로). 좁은 화면은 아래 줄
+  if (descSide) return (
+    <div className="flex items-center gap-4 mb-4" data-testid="page-header">
+      <div className="min-w-0 flex-1 flex items-center gap-3 flex-wrap">
+        <span className="w-1 h-6 rounded-full shrink-0" style={{ background: (tint && tint.color) || BRAND.accent }} aria-hidden="true"></span>
+        <h1 className="text-[24px] md:text-[26px] leading-tight font-bold text-slate-900 tracking-[-0.03em] shrink-0">{title}</h1>
+        {inline}
+        {subtitle && <span className="min-w-0 inline-flex items-center gap-2 text-[13.5px] text-slate-500 basis-full sm:basis-auto pl-4 sm:pl-0" data-testid="page-desc">
+          <span className="hidden sm:block w-px h-4 bg-slate-300 shrink-0" aria-hidden="true"></span>
+          <span className="truncate" title={subtitle}>{subtitle}</span>
+        </span>}
+      </div>
+      {right && <div className="shrink-0 flex items-center gap-2">{right}</div>}
+    </div>
+  );
   return (
     <div className="flex items-end gap-4 mb-5 pt-1" data-testid="page-header">
       <div className="min-w-0 flex-1">
@@ -6007,6 +6027,12 @@ function App({ boot }) {
   const [loading, setLoading] = useState(true);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [denied, setDenied] = useState(null);
+  // Agent 이용 시간(06~22시) — 쓰는 중에 22시가 되면 1분 안에 막는다
+  useEffect(() => {
+    if (boot.role !== "Agent") return;
+    const t = setInterval(() => { if (!t365AgentHoursOk()) setDenied("hours"); }, 60e3);
+    return () => clearInterval(t);
+  }, []);
   const [contactOpen, setContactOpen] = useState(false);
   const [policyOpen, setPolicyOpen] = useState(null);   // 정책 안내 창(10-15) — privacy | cookie | accessibility
   const [asking, setAsking] = useState(false);   // 도움말 「Q&A 에 질문하기」 — 지금 화면 위에 질문 창(닫으면 그대로)
@@ -6347,7 +6373,7 @@ function App({ boot }) {
         <main className="t365-main-scroll flex-1 p-4 pb-24 md:px-6 md:pt-4 md:pb-24 overflow-y-auto">
           <div className={`${tab === "overview" ? "max-w-[1840px]" : "max-w-[1600px]"} mx-auto`}>
             {tab !== "overview" && (   /* 글은 창으로 떠서 뒤 머리를 숨기지 않는다 — 숨기면 목록이 위로 당겨져 보임 */
-              <PageHeader icon={meta[0]} title={cur.label} subtitle={meta[1]} tint={meta[2]} right={curCat && curCat.contacts && curCat.contacts.length ? (
+              <PageHeader icon={meta[0]} title={cur.label} subtitle={meta[1]} tint={meta[2]} descSide={!!curCat} right={curCat && curCat.contacts && curCat.contacts.length ? (
                 <div className="hidden sm:flex items-center gap-2 h-11 pl-3 pr-1.5 rounded-xl border bg-white shadow-sm" style={{ borderColor: curCat.soft }} data-testid="board-contacts">
                   <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold whitespace-nowrap" style={{ color: curCat.color }}><Mail size={14} />문의 담당자</span>
                   {curCat.contacts.slice(0, 2).map((c) => <a key={c.email} href={mailtoOf(c.email)} title={`${c.email} 로 메일 쓰기`} className="inline-flex items-center gap-2 h-8 pl-1 pr-3 rounded-lg hover:brightness-95 transition" style={{ background: curCat.soft }}><span className="w-6 h-6 rounded-full flex items-center justify-center text-[10.5px] font-bold text-white shrink-0" style={{ background: curCat.color }}>{String(c.name || c.email).slice(0, 1).toUpperCase()}</span><span className="leading-tight min-w-0"><span className="block text-[12.5px] font-semibold text-slate-800 max-w-[140px] truncate">{c.name || c.email}</span><span className="block text-[10.5px] text-slate-500 max-w-[140px] truncate">{c.email}</span></span></a>)}
@@ -6407,33 +6433,44 @@ function App({ boot }) {
 // 권한 없음 — MKQR · SSC 와 같은 카드. 등록되지 않은 계정은 관리자에게 등록 요청, 목록을 못 읽으면 다시 시도
 // 권한 없음 화면 — ICS · MKQR 과 같은 카드(아이콘 · 이름 · 부제 · 「🔒 접근 권한 없음」 상자 · ITSM 안내 · 문의 메일 · 📬 돌아가기)
 function AccessDenied({ ident, reason, contact }) {
-  const retry = reason === "users-error";
   const internal = ident && !ident.isGuest && !isExternalEmail(ident.email);
   const mail = contact || t365ItMail();
-  const btn = { textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 10, background: "#0078d4", color: "#fff", border: "none", borderRadius: 10, padding: "15px 44px", fontSize: "1.05rem", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 4px 14px rgba(0,120,212,.25)" };
-  const lead = reason === "inactive" ? <>이 계정은 <strong>사용 중지</strong> 상태입니다.</>
-    : <>Training365 는 <strong>허가받은 Sales Agent 와 본사 담당자</strong>만 접근 가능합니다.</>;
+  const hh = (h) => `${String(h).padStart(2, "0")}:00`;
+  const nextOpen = t365KstHour() >= T365_AGENT_HOURS.to ? "내일" : "오늘";
+  // 이유별 — 아이콘 · 색 · 제목 · 설명 · 주 단추
+  const V = {
+    "door-agent": { Icon: Users, tone: ["#E1EAFD", "#1D4ED8"], title: "Sales Agent 로그인으로 들어와 주세요", desc: <>이 계정은 <b>Agent</b> 계정입니다.<br />처음 화면에서 <b>「Sales Agent」</b> 로 로그인해 주세요.</>, action: ["Sales Agent 로 다시 로그인", () => t365Login("agent")] },
+    "door-staff": { Icon: Building2, tone: ["#E4F1F0", "#2F7B7A"], title: "임직원 로그인으로 들어와 주세요", desc: <>이 계정은 <b>임직원</b> 계정입니다.<br />처음 화면에서 <b>「임직원」</b> 으로 로그인해 주세요.</>, action: ["임직원으로 다시 로그인", () => t365Login("staff")] },
+    "hours": { Icon: Clock, tone: ["#FDEEE6", "#C2410C"], title: "지금은 이용 시간이 아닙니다", desc: <>Sales Agent 는 매일 <b>{hh(T365_AGENT_HOURS.from)} ~ {hh(T365_AGENT_HOURS.to)}</b>(한국 시간)에 이용할 수 있습니다.<br />{nextOpen} {hh(T365_AGENT_HOURS.from)} 부터 다시 들어와 주세요.</> },
+    "users-error": { Icon: AlertTriangle, tone: ["#FEF3C7", "#B45309"], title: "권한 정보를 불러오지 못했습니다", desc: <>잠시 후 다시 시도해 주세요.<br />계속되면 IT 에 문의해 주세요.</>, action: ["다시 시도", () => window.location.reload()] },
+    "inactive": { Icon: LockKeyhole, tone: ["#F1F5F9", "#475569"], title: "사용 중지된 계정입니다", desc: <>이 계정은 Training365 사용이 중지되었습니다.<br />다시 쓰려면 아래에서 권한을 신청해 주세요.</> },
+  }[reason] || { Icon: LockKeyhole, tone: ["#F1F5F9", "#475569"], title: "접근 권한이 없습니다", desc: <>Training365 는 허가받은 <b>Sales Agent</b> 와 <b>본사 담당자</b>만 이용할 수 있습니다.<br />아래에서 권한을 신청해 주세요.</> };
+  const showItsm = !["door-agent", "door-staff", "users-error", "hours"].includes(reason);
+  const back = internal && !["door-agent", "door-staff"].includes(reason)
+    ? <a href="https://aps.startruckkorea.com/" target="_self" className="text-[12.5px] text-slate-500 hover:text-slate-900" data-testid="denied-back">APS 로 돌아가기</a>
+    : <button onClick={t365Logout} className="text-[12.5px] text-slate-500 hover:text-slate-900" data-testid="denied-back" title="로그아웃하고 처음 화면으로">로그아웃</button>;
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 16, boxSizing: "border-box", background: "linear-gradient(145deg,#0f2744 0%,#0078d4 100%)" }} data-testid="access-denied" data-reason={reason}>
-      <div style={{ background: "#fff", borderRadius: 24, padding: "64px 56px 52px", textAlign: "center", boxShadow: "0 24px 60px rgba(0,0,0,.22)", maxWidth: 500, width: "100%", boxSizing: "border-box" }}>
-        <div style={{ fontSize: "3.6rem", lineHeight: 1, marginBottom: 26 }}>📚</div>
-        <div style={{ fontSize: "1.55rem", fontWeight: 800, color: "#0f2744", marginBottom: 12, letterSpacing: "-.01em" }}>Training365</div>
-        <div style={{ fontSize: "1rem", color: "#0078d4", fontWeight: 600, marginBottom: 28 }}>Sales Training Portal · Star Truck Korea</div>
-        <div style={{ background: "#f8faff", borderRadius: 14, padding: "24px 26px", marginBottom: 30, textAlign: "left", border: "1px solid #e0eaff" }}>
-          <div style={{ fontSize: "1.08rem", fontWeight: 700, color: "#1e3a5f", marginBottom: 12 }}>{retry ? "⚠️ 권한 확인 실패" : "🔒 접근 권한 없음"}</div>
-          <div style={{ fontSize: ".98rem", color: "#374151", lineHeight: 1.85, wordBreak: "keep-all" }}>
-            {retry ? <>권한 정보를 불러오지 못했습니다.<br />잠시 후 다시 시도해 주세요.</> : <>
-              {lead}<br /><br />
-              권한 신청은 아래 시스템을 이용해 주세요.<br />
-              <a href={T365_ITSM_URL} target="_blank" rel="noopener noreferrer" style={{ color: "#0078d4", fontWeight: 600, textDecoration: "none" }} data-testid="denied-itsm">{T365_ITSM_URL.replace(/^https:\/\//, "")}</a>
-            </>}
+    <div className="min-h-screen flex flex-col items-center justify-center px-4 py-10" style={{ background: "radial-gradient(1200px 600px at 50% -10%, #1E3A5F 0%, #0F2744 45%, #0B1A30 100%)" }} data-testid="access-denied" data-reason={reason}>
+      <div className="w-full max-w-[420px] bg-white rounded-2xl shadow-[0_30px_80px_rgba(0,0,0,.35)] overflow-hidden">
+        <div className="px-8 pt-8 pb-6 text-center">
+          <div className="text-[15px] font-extrabold tracking-[0.12em] text-[#0F2744]">STAR TRUCK <span className="font-semibold">KOREA</span></div>
+          <div className="text-[12px] text-slate-400 mt-1">Training365</div>
+          <div className="mx-auto mt-7 w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: V.tone[0] }}><V.Icon size={28} style={{ color: V.tone[1] }} /></div>
+          <h1 className="mt-5 text-[19px] font-bold text-slate-900 tracking-[-0.02em] break-keep" data-testid="denied-title">{V.title}</h1>
+          <p className="mt-2.5 text-[13.5px] leading-[1.75] text-slate-600 break-keep">{V.desc}</p>
+          {ident && ident.email && <div className="mt-5 inline-flex items-center gap-2 max-w-full h-8 px-3 rounded-full bg-slate-100 text-[12px] text-slate-600"><Mail size={13} className="text-slate-400 shrink-0" /><span className="truncate">{ident.email}</span></div>}
+        </div>
+        <div className="px-8 pb-7 space-y-2.5">
+          {V.action && <button onClick={V.action[1]} className="w-full h-11 rounded-xl text-[14px] font-semibold text-white shadow-sm hover:brightness-110 transition" style={{ background: V.tone[1] }} data-testid="denied-action">{V.action[0]}</button>}
+          {showItsm && <a href={T365_ITSM_URL} target="_blank" rel="noopener noreferrer" className="w-full h-11 rounded-xl text-[14px] font-semibold text-white flex items-center justify-center gap-2 hover:brightness-110 transition" style={{ background: "#0F2744" }} data-testid="denied-itsm">권한 신청하기 <ExternalLink size={14} /></a>}
+          <div className="flex items-center justify-center gap-3 pt-1.5">
+            {back}
+            <span className="w-px h-3 bg-slate-200" aria-hidden="true"></span>
+            <span className="text-[12.5px] text-slate-400">문의 {mail ? <a href={mailtoOf(mail)} className="text-slate-600 hover:text-slate-900" data-testid="denied-contact">{mail}</a> : <span data-testid="denied-contact">IT팀</span>}</span>
           </div>
         </div>
-        <div style={{ fontSize: ".95rem", color: "#94a3b8", marginBottom: 26 }}>문의: {mail ? <a href={mailtoOf(mail)} style={{ color: "#0078d4", textDecoration: "none" }} data-testid="denied-contact">{mail}</a> : <span data-testid="denied-contact">IT팀</span>}</div>
-        {retry ? <button onClick={() => window.location.reload()} style={btn}>🔄 다시 시도</button>
-          : internal ? <a href="https://aps.startruckkorea.com/" target="_self" style={btn} data-testid="denied-back"><span style={{ fontSize: "1.15rem", lineHeight: 1 }}>📬</span><span>돌아가기</span></a>
-          : <button onClick={t365Logout} style={btn} data-testid="denied-back" title="로그아웃하고 처음 화면으로"><span style={{ fontSize: "1.15rem", lineHeight: 1 }}>📬</span><span>돌아가기</span></button>}
       </div>
+      <div className="mt-6 text-[11px] text-white/40 text-center">© 2026 Star Truck Korea · Training365</div>
     </div>
   );
 }
@@ -6483,6 +6520,10 @@ async function t365Boot(account) {
   else if (myRow.Active === false) reason = "inactive";
   else if (!T365_ROLES.includes(myRow.Role)) reason = "no-role";
   else role = myRow.Role;
+  // 로그인 문 — Agent 는 「Sales Agent」(STK-Sales-Freelancer) 로만, 본사 · 작성자 · 관리자는 「임직원」 으로만. Agent 는 이용 시간 안에만
+  if (role === "Agent" && T365_APP_KIND !== "agent") { reason = "door-agent"; role = null; }
+  else if (role && role !== "Agent" && T365_APP_KIND === "agent") { reason = "door-staff"; role = null; }
+  else if (role === "Agent" && !t365AgentHoursOk()) { reason = "hours"; role = null; }
   const email = myRow ? normEmail(myRow.Email) : ident.email;
   const company = (myRow && myRow.Company) || "";
   _tLogUser = { email, name: (myRow && myRow.Title) || ident.shortName };
