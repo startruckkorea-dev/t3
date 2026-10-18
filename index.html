@@ -6454,8 +6454,8 @@ function App({ boot }) {
             <div className="text-center mt-10 pt-5 border-t border-slate-200 text-[11px] text-slate-400 leading-relaxed">
               <PolicyLinks onOpen={setPolicyOpen} className="mb-2 text-[12px]" />
               <div>Training365 의 개인정보 처리는 <a href={T365_COMPANY_POLICY} target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:underline underline-offset-2">스타트럭코리아 개인정보처리방침</a>을 따릅니다.</div>
-              <div>© 2026 Star Truck Korea · Training365</div>
-              <div>This system is internally developed by Star Truck Korea IT Dept. Unauthorized access is strictly prohibited.</div>
+              {/* 저작권 · 안내 — 한 줄(좁으면 자연스럽게 줄바꿈) */}
+              <div className="flex items-center justify-center flex-wrap gap-x-2 gap-y-0.5" data-testid="footer-copy"><span>© 2026 Star Truck Korea · Training365</span><span className="text-slate-300" aria-hidden="true">|</span><span>This system is internally developed by Star Truck Korea IT Dept. Unauthorized access is strictly prohibited.</span></div>
             </div>
           </div>
         </main>
