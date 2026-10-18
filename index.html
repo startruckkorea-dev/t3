@@ -3353,22 +3353,21 @@ function QnaAnswer({ ctx, post }) {
     } catch (e) { setUpMsg(""); uiAlert(e.message); }
     setBusy(false);
   }
+  // 질문자 읽음 표시(담당자에게만) · 답변 쓰기 / 수정 단추 — 머리 줄에서 같이 쓴다
+  const seenMark = showSeen ? (askerSeen
+    ? <span className="inline-flex items-center gap-0.5 text-emerald-600" title={`질문자가 ${fmtDate(askerRow.LastViewedAt)} 에 답변을 봤습니다`} data-testid="qna-seen" data-seen="1"><CheckCircle2 size={12} />읽음</span>
+    : <span className="text-slate-400" title={notifyHref ? "질문자가 아직 답변을 보지 않았습니다 — 메일 단추로 알릴 수 있습니다" : "질문자가 아직 답변을 보지 않았습니다"} data-testid="qna-seen" data-seen="0">안 읽음</span>) : null;
+  const answerBtn = <button onClick={() => setEditing(true)} className="h-7 px-2 rounded-md inline-flex items-center gap-1 text-[12px] font-semibold text-[#1D4ED8] hover:bg-white" data-testid="qna-answer-btn"><SquarePen size={13} />{has ? "수정" : "답변 쓰기"}</button>;
   return (
     <section className="px-5 md:px-10 pb-5" data-testid="qna-answer">
       {/* 답변 — 게시판 글처럼: 「답변」 제목 줄 + 작성자 카드(이름 · 시각) + 본문 + 첨부 (10-18 「허전하다」) */}
       <div className="border-t border-slate-200 pt-5">
-        <div className="flex items-center gap-2 flex-wrap min-h-[30px] text-[12px] text-slate-400 mb-3">
+        {!(has && !showEd) && <div className="flex items-center gap-2 flex-wrap min-h-[30px] text-[12px] text-slate-400 mb-3">
           <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: has ? "#1D4ED8" : "#E2E8F0", color: has ? "#fff" : "#64748B" }}><MessageSquareReply size={15} /></span>
           <span className="text-[15px] font-bold text-slate-900">답변</span>
           {!has && <span className="inline-flex items-center gap-1 h-6 px-2 rounded-md bg-slate-100 text-slate-500 font-medium"><Clock size={12} />답변 대기</span>}
-          {showSeen && (askerSeen
-            ? <span className="inline-flex items-center gap-1 text-emerald-600" title={`질문자가 ${fmtDate(askerRow.LastViewedAt)} 에 답변을 봤습니다`} data-testid="qna-seen" data-seen="1"><CheckCircle2 size={12} />질문자 확인</span>
-            : <span className="text-slate-400" title={notifyHref ? "질문자가 아직 답변을 보지 않았습니다 — 「질문자에게 알리기」 로 메일을 보낼 수 있습니다" : "질문자가 아직 답변을 보지 않았습니다"} data-testid="qna-seen" data-seen="0">질문자 아직 안 봄</span>)}
-          {canAnswer && !showEd && <span className="ml-auto flex items-center gap-3">
-            {notifyHref && <a href={notifyHref} target="_blank" rel="noopener noreferrer" onClick={() => t365Log("게시물", "답변 알림 메일", post.Title, { info: { 질문자: asker } })} className="inline-flex items-center gap-1 text-slate-500 hover:text-[#1D4ED8]" data-testid="qna-notify" title={`${asker} 에게 답변 알림 메일 쓰기`}><Mail size={13} />질문자에게 알리기</a>}
-            <button onClick={() => setEditing(true)} className="inline-flex items-center gap-1 font-semibold text-[#1D4ED8] hover:underline underline-offset-2" data-testid="qna-answer-btn"><SquarePen size={13} />{has ? "답변 수정" : "답변 쓰기"}</button>
-          </span>}
-        </div>
+          {canAnswer && !showEd && <span className="ml-auto">{answerBtn}</span>}
+        </div>}
         {showEd ? (
           <div className="mt-2">
             {/* 보이는 대로 편집(글 편집기와 같은 RichEditor) — 굵게 · 목록이 바로 그 모양으로 보이고, 저장은 지금처럼 표기 글자 */}
@@ -3404,16 +3403,20 @@ function QnaAnswer({ ctx, post }) {
             </div>
           </div>
         ) : has ? (
-          <article className="rounded-xl border border-[#D6E2FA] bg-white overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,.04)]" data-testid="qna-answer-card">
-            {/* 작성자 줄 — 글 머리와 같은 꼴(둥근 머리글자 · 이름 · 담당 표시 · 시각) */}
-            <div className="px-4 md:px-5 py-3 flex items-center gap-3 bg-[#F5F8FE] border-b border-[#E3EBFB]">
-              <span className="w-9 h-9 rounded-full flex items-center justify-center text-[14px] font-bold text-white shrink-0" style={{ background: "#1D4ED8" }}>{String(post.AnsweredBy || "담").trim().slice(0, 1).toUpperCase()}</span>
-              <div className="min-w-0 leading-tight">
-                <div className="flex items-center gap-1.5"><span className="text-[13.5px] font-semibold text-slate-800 truncate">{post.AnsweredBy || "담당자"}</span><span className="text-[10.5px] font-semibold px-1.5 rounded leading-[17px] bg-[#E1EAFD] text-[#1D4ED8] shrink-0">답변 담당</span></div>
-                <div className="text-[11.5px] text-slate-500 tabular-nums mt-0.5">{post.AnsweredAt ? fmtDate(post.AnsweredAt) : ""}</div>
-              </div>
+          <article className="rounded-xl bg-[#F7F9FD] border border-[#E3EBFB] overflow-hidden" data-testid="qna-answer-card">
+            {/* 한 줄 머리 — 답변 · 담당자 · 시각 · (질문자 읽음) · 오른쪽 작은 단추 (10-18 「번잡하다」) */}
+            <div className="px-4 md:px-5 pt-3.5 flex items-center gap-2 flex-wrap text-[12px] text-slate-400">
+              <span className="inline-flex items-center gap-1 text-[12.5px] font-bold text-[#1D4ED8]"><MessageSquareReply size={14} />답변</span>
+              <span className="text-slate-300" aria-hidden="true">·</span>
+              <span className="font-medium text-slate-600">{post.AnsweredBy || "담당자"}</span>
+              {post.AnsweredAt && <span className="tabular-nums">{fmtDate(post.AnsweredAt)}</span>}
+              {seenMark}
+              {canAnswer && <span className="ml-auto flex items-center gap-1">
+                {notifyHref && <a href={notifyHref} target="_blank" rel="noopener noreferrer" onClick={() => t365Log("게시물", "답변 알림 메일", post.Title, { info: { 질문자: asker } })} className="w-7 h-7 rounded-md inline-flex items-center justify-center text-slate-400 hover:text-[#1D4ED8] hover:bg-white" data-testid="qna-notify" title={`질문자에게 알리기 — ${asker} 에게 메일 쓰기`} aria-label="질문자에게 알리기"><Mail size={14} /></a>}
+                {answerBtn}
+              </span>}
             </div>
-            <div className="px-4 md:px-5 py-4 min-h-[72px]">
+            <div className="px-4 md:px-5 pt-2 pb-4">
               <div className="max-w-[760px]" data-testid="qna-answer-body"><RichText text={post.Answer} /></div>
             </div>
             {ansFiles.length > 0 && <div className="px-4 md:px-5 pb-3">
