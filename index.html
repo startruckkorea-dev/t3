@@ -3155,10 +3155,8 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
         <article className="min-h-full flex flex-col" data-testid="article">
           {/* 제목 · 정보 */}
           <header className="px-5 md:px-10 pt-6 pb-5 border-b border-slate-200 bg-white">
-            {(pinActive(post) || post.RequireConfirm || post.Category === "qna" || (!ctx.isAgent && post.IsPinned && pinUntilOf(post))) && (
+            {(pinActive(post) || (!ctx.isAgent && (post.IsPinned || post.RequireConfirm) && pinUntilOf(post))) && (
               <div className="flex items-center gap-1 mb-2">
-                {post.Category === "qna" && <QnaPill p={post} />}
-                {post.Category === "qna" && normEmail(post.AuthorEmail) === normEmail(me.email) && <span className="t365-pill bg-slate-100 text-slate-500" data-mine="1">내 질문</span>}
                 {pinActive(post) && <NoticePill />}
                 {!ctx.isAgent && pinUntilOf(post) && (post.IsPinned || post.RequireConfirm) && <span className="text-[11.5px] text-slate-400 tabular-nums" title="홈 「공지 · 필수」 노출 기한 — 게시판 맨 위 고정도 이날까지" data-testid="pin-until">홈 노출 {pinUntilOf(post).slice(5).replace("-", ".")}까지{pinUntilOf(post) < kstToday() ? " (지남)" : ""}</span>}
               </div>
@@ -3173,6 +3171,7 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
               </div>
               {/* 숫자 — 알약 없이 옅은 글자 · 가운뎃점(필수 확인 상태만 색) */}
               <div className="sm:ml-auto flex items-center gap-x-2.5 gap-y-1 flex-wrap text-[12px] text-slate-400 tabular-nums">
+                {post.Category === "qna" && <><span className="inline-flex items-center gap-1" data-testid="post-qna-state"><QnaPill p={post} />{normEmail(post.AuthorEmail) === normEmail(me.email) && <span className="t365-pill bg-slate-100 text-slate-500" data-mine="1">내 질문</span>}</span><span className="text-slate-300">·</span></>}
                 <span title="게시물 고유 번호 — 검색 칸에 번호(예: #12)를 넣어 찾을 수 있습니다" data-testid="post-no">No. <b className="font-medium text-slate-600">{post.id}</b></span>
                 <span className="text-slate-300">·</span>
                 <span className="inline-flex items-center gap-1" title="열어 본 횟수의 합 — 같은 사람이 다시 열어도 1씩 늘어납니다"><Eye size={13} />조회 <b className="font-medium text-slate-600" data-testid="meta-views">{vs.views}</b></span>
