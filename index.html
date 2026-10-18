@@ -84,6 +84,8 @@
   .t365-body a { color: #1D6F8F; text-decoration: underline; text-decoration-color: rgba(29,111,143,.35); text-underline-offset: 3px; }
   .t365-body a:hover { text-decoration-color: currentColor; }
   .t365-body strong { font-weight: 700; color: #0F172A; }
+  .t365-body .t365-big { font-size: 1.2em; font-weight: 600; }
+  .t365-body [data-t365] strong, .t365-editor [data-t365] b { color: inherit; }
   /* 전체 다듬기(10-15) — 글꼴 Pretendard · 상자는 얇은 테두리 · 큰 둥글기 · 옅은 그림자(머리 위 남색 굵은 선 없앰) */
   body { letter-spacing: -0.01em; -webkit-font-smoothing: antialiased; }
   .t365-portlet { border: 1px solid #E6E9EE !important; border-radius: 16px !important; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 12px 32px -24px rgba(16,24,40,.18) !important; }
@@ -1262,28 +1264,62 @@ function youtubeId(u) {
 /* React 요소로만 그린다. HTML 을 해석하지 않으므로 스크립트 태그 · onerror 같은 값은 글자 그대로 보인다. */
 /* 링크는 https 만 — 그 밖의 주소(http · javascript: · data: …)는 링크로 만들지 않는다.            */
 /* ------------------------------------------------------------------ */
-const T365_INLINE_RE = /(\*\*([^*\n]{1,500})\*\*)|(\[([^\]\n]{1,200})\]\(([^()\s]{1,2000})\))|(https:\/\/[^\s<>"'()\[\]]*[^\s<>"'()\[\].,;:!?])/g;
-function renderInline(text, kb) {
+// 강조 표기(10-18) — {{red:글자}} · {{blue:글자}} · {{green:글자}} · {{big:글자}}. 색은 정해 둔 3가지만, 크게는 1.2배
+const T365_STYLE = { red: { color: "#DC2626", label: "빨강" }, blue: { color: "#1D4ED8", label: "파랑" }, green: { color: "#047857", label: "초록" }, big: { label: "크게" } };
+const T365_STYLE_RE = /^\{\{(red|blue|green|big):/;
+const T365_STYLE_CSS = { red: "color:#DC2626", blue: "color:#1D4ED8", green: "color:#047857", big: "font-size:1.2em;font-weight:600" };
+// 글자 한 줄 → 나무(굵게 ** · 강조 {{…:…}} 를 겹쳐 쓸 수 있게). 짝이 맞지 않는 표기는 글자 그대로 남긴다
+function parseInlineTree(t) {
+  const root = { k: "root", c: [], done: true }; const st = [root]; let buf = "";
+  const top = () => st[st.length - 1];
+  const flush = () => { if (buf) { top().c.push(buf); buf = ""; } };
+  for (let i = 0; i < t.length;) {
+    const m = t[i] === "{" ? T365_STYLE_RE.exec(t.slice(i, i + 9)) : null;
+    if (m) { flush(); const n = { k: m[1], c: [], raw: m[0] }; top().c.push(n); st.push(n); i += m[0].length; continue; }
+    if (t[i] === "}" && t[i + 1] === "}" && st.length > 1 && top().k !== "b") { flush(); st.pop().done = true; i += 2; continue; }
+    if (t[i] === "*" && t[i + 1] === "*") {
+      if (top().k === "b") { flush(); st.pop().done = true; i += 2; continue; }
+      if (!st.some((x) => x.k === "b") && t.indexOf("**", i + 2) > i + 2) { flush(); const n = { k: "b", c: [], raw: "**" }; top().c.push(n); st.push(n); i += 2; continue; }
+    }
+    buf += t[i]; i++;
+  }
+  flush();
+  return root;
+}
+// 글자 조각 안의 링크 — [글자](https://…) 와 맨 주소(https 만)
+const T365_LINK_RE = /(\[([^\]\n]{1,200})\]\(([^()\s]{1,2000})\))|(https:\/\/[^\s<>"'()\[\]]*[^\s<>"'()\[\].,;:!?])/g;
+function renderLinks(text, kb) {
   const out = []; let last = 0, m, i = 0;
-  const re = new RegExp(T365_INLINE_RE.source, "g");
+  const re = new RegExp(T365_LINK_RE.source, "g");
   while ((m = re.exec(text))) {
     if (m.index > last) out.push(text.slice(last, m.index));
-    if (m[1]) out.push(<strong key={`${kb}b${i}`}>{m[2]}</strong>);
-    else if (m[3]) {
-      const u = safeHttpsUrl(m[5]);
+    if (m[1]) {
+      const u = safeHttpsUrl(m[3]);
       if (!u) out.push(m[0]);
       else {   // 링크 글자에 적힌 주소와 실제 주소가 다르면(「crm.회사.com」 이라 써 놓고 다른 곳으로) 실제 주소를 빨갛게 붙여 보여 준다
         const host = new URL(u).hostname.toLowerCase();
-        const shown = /((?:[a-z0-9-]+\.)+(?:com|net|org|kr|co|io|biz|info|gov|edu|xyz|top|me|app|site|online|ly|gl))(?![a-z0-9-])/i.exec(m[4]);
+        const shown = /((?:[a-z0-9-]+\.)+(?:com|net|org|kr|co|io|biz|info|gov|edu|xyz|top|me|app|site|online|ly|gl))(?![a-z0-9-])/i.exec(m[2]);
         const differs = !!shown && !host.endsWith(shown[1].toLowerCase().replace(/^www\./, ""));
-        out.push(<a key={`${kb}a${i}`} href={u} target="_blank" rel="noopener noreferrer" title={u}>{m[4]}{differs && <span className="text-red-600 text-[0.85em] font-medium" title="링크 글자와 실제 주소가 다릅니다" data-link-host> ({host})</span>}</a>);
+        out.push(<a key={`${kb}a${i}`} href={u} target="_blank" rel="noopener noreferrer" title={u}>{m[2]}{differs && <span className="text-red-600 text-[0.85em] font-medium" title="링크 글자와 실제 주소가 다릅니다" data-link-host> ({host})</span>}</a>);
       }
     }
-    else if (m[6]) { const u = safeHttpsUrl(m[6]); out.push(u ? <a key={`${kb}u${i}`} href={u} target="_blank" rel="noopener noreferrer" title={u}>{m[6]}</a> : m[6]); }
+    else if (m[4]) { const u = safeHttpsUrl(m[4]); out.push(u ? <a key={`${kb}u${i}`} href={u} target="_blank" rel="noopener noreferrer" title={u}>{m[4]}</a> : m[4]); }
     last = re.lastIndex; i++;
   }
   if (last < text.length) out.push(text.slice(last));
   return out;
+}
+function renderInline(text, kb) {
+  const walk = (node, key) => node.c.flatMap((ch, i) => {
+    const k2 = `${key}.${i}`;
+    if (typeof ch === "string") return renderLinks(ch, k2);
+    const kids = walk(ch, k2);
+    if (!ch.done) return [ch.raw, ...kids];   // 짝이 없으면 표기 그대로
+    if (ch.k === "b") return [<strong key={k2}>{kids}</strong>];
+    if (ch.k === "big") return [<span key={k2} className="t365-big" data-t365="big">{kids}</span>];
+    return [<span key={k2} style={{ color: T365_STYLE[ch.k].color }} data-t365={ch.k}>{kids}</span>];
+  });
+  return walk(parseInlineTree(String(text || "")), String(kb));
 }
 function parseBlocks(src) {
   const lines = String(src || "").replace(/\r\n?/g, "\n").split("\n");
@@ -1320,16 +1356,25 @@ function RichText({ text }) {
  * 저장은 지금처럼 간단한 표기(마크다운) 그대로 — 편집기 내용을 표기로 바꿔 body 에 넣고, 글 보기는 기존 RichText(HTML 해석 없음)로 그린다.
  * 편집기에 넣는 HTML 은 표기에서 직접 만든 것(글자는 모두 이스케이프)뿐이고, 붙여 넣기는 글자만 받는다. */
 const _escH = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-function mdInlineToHtml(t) {
+function mdLinksToHtml(t) {
   let out = "", last = 0, m;
-  const re = /(\*\*([^*\n]{1,500})\*\*)|(\[([^\]\n]{1,200})\]\(([^()\s]{1,2000})\))/g;
+  const re = /\[([^\]\n]{1,200})\]\(([^()\s]{1,2000})\)/g;
   while ((m = re.exec(t))) {
     out += _escH(t.slice(last, m.index));
-    if (m[1]) out += `<b>${_escH(m[2])}</b>`;
-    else { const u = safeHttpsUrl(m[5]); out += u ? `<a href="${_escH(u)}">${_escH(m[4])}</a>` : _escH(m[0]); }
+    const u = safeHttpsUrl(m[2]); out += u ? `<a href="${_escH(u)}">${_escH(m[1])}</a>` : _escH(m[0]);
     last = re.lastIndex;
   }
   return out + _escH(t.slice(last));
+}
+function mdInlineToHtml(t) {
+  const walk = (node) => node.c.map((ch) => {
+    if (typeof ch === "string") return mdLinksToHtml(ch);
+    const kids = walk(ch);
+    if (!ch.done) return _escH(ch.raw) + kids;
+    if (ch.k === "b") return `<b>${kids}</b>`;
+    return `<span data-t365="${ch.k}" style="${T365_STYLE_CSS[ch.k]}">${kids}</span>`;
+  }).join("");
+  return walk(parseInlineTree(String(t || "")));
 }
 function mdToEditorHtml(md) {
   const lines = String(md || "").replace(/\r\n?/g, "\n").split("\n");
@@ -1361,6 +1406,8 @@ function editorInlineToMd(node) {
     const inner = editorInlineToMd(n);
     const bold = tag === "B" || tag === "STRONG" || /^(bold|[6-9]00)$/.test(n.style && n.style.fontWeight || "");
     if (tag === "A") { const u = safeHttpsUrl(n.getAttribute("href")); out += u && inner.trim() ? `[${inner.replace(/[\[\]\n]/g, " ").trim()}](${u})` : inner; return; }
+    const sk = tag === "SPAN" ? n.getAttribute("data-t365") : null;   // 강조(색 · 크게) — 줄마다 따로 표기(줄을 넘는 표기는 문단 해석을 깨므로)
+    if (sk && T365_STYLE[sk] && inner.trim()) { out += inner.split("\n").map((l) => { if (!l.trim()) return l; const lead = l.match(/^\s*/)[0], tail = l.match(/\s*$/)[0]; return `${lead}{{${sk}:${l.trim()}}}${tail}`; }).join("\n"); return; }
     if (bold && inner.trim()) { const lead = inner.match(/^\s*/)[0], tail = inner.match(/\s*$/)[0]; out += `${lead}**${inner.trim().replace(/\*\*/g, "")}**${tail}`; return; }
     if (/^(P|DIV|LI|H[1-6]|BLOCKQUOTE)$/.test(tag)) { out += (out && !out.endsWith("\n") ? "\n" : "") + inner + "\n"; return; }
     out += inner;
@@ -1394,6 +1441,41 @@ function editorToMd(root) {
   walk(root, false);
   while (lines.length && !lines[lines.length - 1].replace(/^>/, "").trim()) lines.pop();
   return lines.map((l) => (l === ">" ? "" : l)).join("\n");
+}
+// 강조 단추 — 고른 글자(여러 줄이어도 줄마다)를 <span data-t365> 로 감싼다. 이미 같은 강조 안이면 풀어 준다
+function t365ApplyStyle(root, key) {
+  const sel = window.getSelection(); if (!root || !sel || !sel.rangeCount) return false;
+  const r = sel.getRangeAt(0);
+  if (!root.contains(r.commonAncestorContainer) || r.collapsed) return false;
+  const nodes = []; const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); let n;
+  while ((n = w.nextNode())) if (n.nodeValue.length && r.intersectsNode(n)) nodes.push(n);
+  const parts = nodes.map((t) => ({ t, s: t === r.startContainer ? r.startOffset : 0, e: t === r.endContainer ? r.endOffset : t.nodeValue.length })).filter((x) => x.e > x.s);
+  if (!parts.length) return false;
+  const anc = (t, k) => { let p = t.parentNode; while (p && p !== root) { if (p.nodeType === 1 && p.getAttribute("data-t365") === k) return p; p = p.parentNode; } return null; };
+  if (parts.every((x) => anc(x.t, key))) { new Set(parts.map((x) => anc(x.t, key))).forEach((sp) => sp.replaceWith(...sp.childNodes)); root.normalize(); return true; }
+  const colors = ["red", "blue", "green"];
+  let first = null, last = null;
+  parts.forEach(({ t, s, e }) => {
+    let mid = t; if (s > 0) mid = t.splitText(s); if (e - s < mid.nodeValue.length) mid.splitText(e - s);
+    if (colors.includes(key)) colors.filter((c) => c !== key).forEach((c) => { const o = anc(mid, c); if (o && o.textContent === mid.nodeValue) o.replaceWith(...o.childNodes); });   // 다른 색은 바꿔 칠함
+    const sp = document.createElement("span"); sp.setAttribute("data-t365", key); sp.setAttribute("style", T365_STYLE_CSS[key]);
+    mid.parentNode.insertBefore(sp, mid); sp.appendChild(mid); first = first || sp; last = sp;
+  });
+  const nr = document.createRange(); nr.setStartBefore(first); nr.setEndAfter(last); sel.removeAllRanges(); sel.addRange(nr);
+  return true;
+}
+// 강조 단추 묶음(색 3 · 크게) — 글쓰기 · 답변 서식 줄에 같이 쓴다
+function StyleButtons({ onApply, size = "md" }) {
+  const h = size === "sm" ? "h-7" : "h-8";
+  return (
+    <span className="inline-flex items-center gap-0.5" data-testid="style-buttons">
+      <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => onApply("big")} title="크게 — 글자를 고른 뒤 누르세요(다시 누르면 원래대로)" aria-label="크게" data-style-cmd="big" className={`${h} px-1.5 rounded-md text-[12.5px] font-bold text-slate-600 hover:bg-slate-100 hover:text-slate-900`}>가<sup className="text-[9px] font-bold">+</sup></button>
+      {["red", "blue", "green"].map((k) => (
+        <button key={k} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => onApply(k)} title={`${T365_STYLE[k].label} 글자 — 글자를 고른 뒤 누르세요(다시 누르면 원래대로)`} aria-label={`${T365_STYLE[k].label} 글자`} data-style-cmd={k}
+          className={`${h} w-7 rounded-md flex items-center justify-center hover:bg-slate-100`}><span className="text-[13px] font-extrabold leading-none" style={{ color: T365_STYLE[k].color, borderBottom: `2.5px solid ${T365_STYLE[k].color}` }}>가</span></button>
+      ))}
+    </span>
+  );
 }
 // 보이는 대로 편집기 — value(표기) ↔ 화면. 바깥에서 value 가 바뀌었을 때(임시 저장 되살리기 등)만 화면을 다시 그린다(입력 중 커서 유지)
 const RichEditor = React.forwardRef(function RichEditor({ value, onChange, placeholder, onFiles, className, testid }, ref) {
@@ -1433,7 +1515,7 @@ const RichEditor = React.forwardRef(function RichEditor({ value, onChange, place
 
 // 목록 미리보기용 — 표기만 걷어낸 한 줄
 function plainPreview(src, n = 140) {
-  return String(src || "").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1").replace(/^\s*(#{1,3}|[-*•]|\d{1,3}[.)]|>)\s*/gm, "").replace(/\s+/g, " ").trim().slice(0, n);
+  return String(src || "").replace(/\{\{(red|blue|green|big):/g, "").replace(/\}\}/g, "").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1").replace(/^\s*(#{1,3}|[-*•]|\d{1,3}[.)]|>)\s*/gm, "").replace(/\s+/g, " ").trim().slice(0, n);
 }
 
 /* ------------------------------------------------------------------ */
@@ -3230,6 +3312,8 @@ function QnaAnswer({ ctx, post }) {
                 {[["bold", Bold, "굵게 (Ctrl+B)"], ["insertUnorderedList", List, "글머리 목록"], ["insertOrderedList", ListOrdered, "번호 목록"]].map(([k, I, t]) => (
                   <button key={k} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => fmt(k)} title={t} aria-label={t} data-ans-cmd={k} className="w-8 h-7 rounded-md flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-900"><I size={15} /></button>
                 ))}
+                <span className="w-px h-4 bg-slate-200 mx-1" aria-hidden="true"></span>
+                <StyleButtons size="sm" onApply={(k) => { const el = taRef.current; if (!el) return; if (!t365ApplyStyle(el, k)) { toast("꾸밀 글자를 먼저 고른 뒤 누르세요"); return; } el.dispatchEvent(new Event("input", { bubbles: true })); }} />
               </div>
               <RichEditor ref={taRef} value={text} onChange={setText} onFiles={addAnsFiles} placeholder="답변을 입력하세요" className="t365-answer-ed max-h-[360px]" testid="qna-answer-input" />
               {/* 첨부 — 편집 칸 아래 한 줄(끌어 놓기도 됨) */}
@@ -3522,6 +3606,14 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
     return true;
   }
   const curBlock = () => { const sel = window.getSelection(); let n = sel && sel.anchorNode; while (n && n !== ta.current) { if (n.nodeType === 1 && /^(H[1-6]|BLOCKQUOTE)$/.test(n.tagName)) return n.tagName; n = n.parentNode; } return ""; };
+  // 강조(색 · 크게) — 고른 글자에만. 고른 글자가 없으면 안내
+  function styleCmd(k) {
+    if (mode === "preview") { setMode("write"); return; }
+    if (!edFocus()) return;
+    if (!t365ApplyStyle(ta.current, k)) { toast("꾸밀 글자를 먼저 고른 뒤 누르세요"); return; }
+    saveSel();
+    ta.current.dispatchEvent(new Event("input", { bubbles: true }));
+  }
   function cmd(name, arg) {
     if (mode === "preview") { setMode("write"); setTimeout(() => cmd(name, arg), 30); return; }
     if (!edFocus()) return;
@@ -3768,6 +3860,8 @@ const Tip = ({ icon: I, children }) => <li className="flex items-center gap-2 mi
               <button type="button" className={tb} title="번호 목록" onMouseDown={(e) => e.preventDefault()} onClick={() => cmd("insertOrderedList")} data-ed-cmd="ol"><ListOrdered size={15} /></button>
               <button type="button" className={tb} title="안내 상자 — 한 번 더 누르면 보통 글" onMouseDown={(e) => e.preventDefault()} onClick={() => cmd("quote")} data-ed-cmd="quote"><Quote size={15} /></button>
               <button type="button" className={tb} title="링크(https) — 글자를 고른 뒤 누르면 그 글자에 링크" onMouseDown={(e) => e.preventDefault()} onClick={addLink} data-ed-cmd="link"><Link2 size={15} /></button>
+              <span className="w-px h-4 bg-slate-200 mx-1" aria-hidden="true"></span>
+              <StyleButtons size="sm" onApply={styleCmd} />
               <div className="ml-auto flex items-center rounded-lg border border-slate-200 overflow-hidden h-7 text-[12px] bg-white">
                 {[["write", "쓰기"], ["split", "나란히"], ["preview", "미리 보기"]].map(([k, l], i) => <button key={k} onClick={() => setMode(k)} data-mode={k} className={`px-2.5 h-full ${i ? "border-l border-slate-200" : ""} ${k === "split" ? "hidden lg:block" : ""} ${mode === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{l}</button>)}
               </div>
