@@ -6421,7 +6421,7 @@ function App({ boot }) {
         <main className="t365-main-scroll flex-1 p-4 pb-24 md:px-6 md:pt-4 md:pb-24 overflow-y-auto">
           <div className={`${tab === "overview" ? "max-w-[1840px]" : "max-w-[1600px]"} mx-auto`}>
             {tab !== "overview" && (   /* 글은 창으로 떠서 뒤 머리를 숨기지 않는다 — 숨기면 목록이 위로 당겨져 보임 */
-              <PageHeader icon={meta[0]} title={cur.label} subtitle={meta[1]} tint={meta[2]} descSide={!!curCat} right={curCat && curCat.contacts && curCat.contacts.length ? (
+              <PageHeader icon={meta[0]} title={cur.label} subtitle={meta[1]} tint={meta[2]} descSide right={curCat && curCat.contacts && curCat.contacts.length ? (
                 <div className="hidden sm:flex items-center gap-2 h-11 pl-3 pr-1.5 rounded-xl border bg-white shadow-sm" style={{ borderColor: curCat.soft }} data-testid="board-contacts">
                   <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold whitespace-nowrap" style={{ color: curCat.color }}><Mail size={14} />문의 담당자</span>
                   {curCat.contacts.slice(0, 2).map((c) => <a key={c.email} href={mailtoOf(c.email)} title={`${c.email} 로 메일 쓰기`} className="inline-flex items-center gap-2 h-8 pl-1 pr-3 rounded-lg hover:brightness-95 transition" style={{ background: curCat.soft }}><span className="w-6 h-6 rounded-full flex items-center justify-center text-[10.5px] font-bold text-white shrink-0" style={{ background: curCat.color }}>{String(c.name || c.email).slice(0, 1).toUpperCase()}</span><span className="leading-tight min-w-0"><span className="block text-[12.5px] font-semibold text-slate-800 max-w-[140px] truncate">{c.name || c.email}</span><span className="block text-[10.5px] text-slate-500 max-w-[140px] truncate">{c.email}</span></span></a>)}
