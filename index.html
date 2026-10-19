@@ -2116,6 +2116,56 @@ function MiniRate({ s, w = 64 }) {
     </span>
   );
 }
+// 내 확인 대기 목록 창(10-19) — 홈 「내 확인 대기」 를 누르면: 진행 막대 + 전체 · 미확인 · 확인 완료 탭 + 필수 자료 목록. 줄을 누르면 그 글이 열린다
+function TodoListModal({ ctx, list, myRow, onClose, onOpen }) {
+  const { catMap } = ctx;
+  const done = (p) => !!(myRow(p) && myRow(p).ConfirmedAt);
+  const rows = [...list].sort((a, b) => (done(a) ? 1 : 0) - (done(b) ? 1 : 0) || byNewest(a, b));
+  const nDone = rows.filter(done).length, nAll = rows.length, pct = nAll ? Math.round((nDone / nAll) * 100) : 100;
+  const [tab, setTab] = useState(nAll - nDone ? "todo" : "all");
+  const shown = rows.filter((p) => (tab === "todo" ? !done(p) : tab === "done" ? done(p) : true));
+  const tabs = [["all", "전체", nAll], ["todo", "미확인", nAll - nDone], ["done", "확인 완료", nDone]];
+  return (
+    <Modal title="내 확인 대기" onClose={onClose} wide>
+      <div data-testid="todo-modal">
+        {/* 요약 — 숫자 · 막대 */}
+        <div className="rounded-2xl px-5 py-4 bg-[#F6F7F9]">
+          <div className="flex items-end justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-[13px] text-slate-500">필수 자료 확인</div>
+              <div className="mt-1 text-[13px] font-medium" style={{ color: nAll - nDone ? "#9A3412" : "#047857" }}>{nAll - nDone ? `아직 확인하지 않은 자료 ${nAll - nDone}건` : "모두 확인했습니다"}</div>
+            </div>
+            <div className="tabular-nums font-bold leading-none whitespace-nowrap" style={{ color: nAll - nDone ? "#C2410C" : "#047857" }}><span className="text-[30px] tracking-[-0.03em]">{nDone}</span><span className="text-[15px] text-slate-400 font-semibold"> / {nAll}</span></div>
+          </div>
+          <div className="mt-3 h-2 rounded-full bg-white overflow-hidden"><div className="h-full rounded-full transition-[width] duration-700" style={{ width: `${pct}%`, background: nAll - nDone ? "linear-gradient(90deg,#FB923C,#EA580C)" : "linear-gradient(90deg,#34D399,#10B981)" }}></div></div>
+        </div>
+        {/* 탭 */}
+        <div className="mt-4 flex items-center gap-5 border-b border-slate-200" role="tablist" aria-label="보기">
+          {tabs.map(([k, l, n]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} data-todo-tab={k}
+            className={`relative h-10 text-[13px] inline-flex items-center gap-1.5 transition-colors ${tab === k ? "text-slate-900 font-semibold" : "text-slate-500 hover:text-slate-800"}`}>
+            {l}<span className="text-[11.5px] tabular-nums font-semibold" style={{ color: k === "todo" && n ? "#C2410C" : tab === k ? BRAND.accent : "#94A3B8" }}>{n}</span>
+            {tab === k && <span className="absolute left-0 right-0 -bottom-px h-[2px] rounded-full" style={{ background: BRAND.accent }}></span>}</button>)}
+        </div>
+        {/* 목록 */}
+        <div className="max-h-[52vh] overflow-y-auto -mx-1 px-1" data-testid="todo-modal-list">
+          {shown.length ? shown.map((p) => { const c = catMap[p.Category]; const I = (c && c.icon) || FileText; const r = myRow(p); const ok = done(p); return (
+            <button key={p.id} onClick={() => onOpen(p)} title={p.Title} data-todo-item={p.id} data-done={ok ? "1" : undefined}
+              className="group w-full text-left flex items-center gap-3 py-3.5 px-2 border-b border-slate-100 last:border-b-0 hover:bg-[#F6FAF9] rounded-lg transition-colors min-w-0">
+              <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 bg-[#F4F5F7]"><I size={16} strokeWidth={1.7} style={{ color: c && c.color }} /></span>
+              <span className="min-w-0 flex-1">
+                <span className={`block truncate text-[14px] ${ok ? "text-slate-600" : "font-semibold text-slate-900"} group-hover:underline underline-offset-2`}>{p.Title}</span>
+                <span className="mt-0.5 flex items-center gap-2 text-[11.5px] text-slate-400 tabular-nums"><span style={{ color: c && c.color }} className="font-medium">{c ? c.label : "-"}</span><span>No. {p.id}</span><span>{shortDate(p.PublishedAt || p._created)}</span></span>
+              </span>
+              <span className="shrink-0">{ok ? <SeenMark r={r} confirm /> : <UnconfirmedPill />}</span>
+              <ChevronRight size={15} className="shrink-0 text-slate-300 group-hover:text-slate-600 transition-colors" aria-hidden="true" />
+            </button>); })
+            : <div className="py-10 text-center text-[13px] text-slate-400">{tab === "todo" ? "확인하지 않은 필수 자료가 없습니다." : "표시할 자료가 없습니다."}</div>}
+        </div>
+        <p className="mt-3 text-[11.5px] text-slate-400">필수 자료는 열어 보면 자동으로 조회확인됩니다.</p>
+      </div>
+    </Modal>
+  );
+}
 function WidgetCard({ icon: Icon, title, tint, right, children, testid, tone }) {
   return (
     <section className="bg-white rounded-xl border border-slate-200 overflow-hidden t365-portlet" data-testid={testid} data-tone={tone || undefined}>
@@ -2542,6 +2592,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
     : [...qnaAll].sort(byNewest);
   const qnaUrgent = ctx.isAgent ? myNew.length > 0 : duty && qWait.length > 0;   // 할 일이 있으면 많이 본 글보다 위로
   const [q, setQ] = useState("");
+  const [todoOpen, setTodoOpen] = useState(false);   // 내 확인 대기 목록 창(10-19)
   const [editing, setEditing] = useState(null);
   const [searching, setSearching] = useState(null);   // 검색 창(문자열) — 전체 게시물로 옮겨 가지 않고 홈 위에서 결과를 보여 준다
   const [searchList, setSearchList] = useState(null);   // 검색 결과에서 연 글의 위 · 아래 단추는 검색 결과 순서로
@@ -2637,7 +2688,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
               right={todo.length ? <span className="t365-todo-badge text-[11px] font-bold px-1.5 min-w-[18px] text-center rounded-full leading-[18px] text-white tabular-nums" style={{ background: "#C2410C" }} title={`확인할 필수 자료 ${todo.length}건`}>{todo.length}</span>
                 : reqAll.length ? <span className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-emerald-600 whitespace-nowrap" data-testid="todo-allok"><CheckCircle2 size={13} />완료</span> : null}>
               {reqAll.length > 0 && (
-                <div className="px-4 pt-3 pb-3.5 border-b border-slate-100" data-testid="todo-progress" data-state={todo.length ? "pending" : "done"}>
+                <button type="button" onClick={() => setTodoOpen(true)} title="필수 자료 목록 보기" className="group/p block w-full text-left px-4 pt-3 pb-3.5 border-b border-slate-100 hover:bg-slate-50/70 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#2F7B7A]/40" data-testid="todo-progress" data-state={todo.length ? "pending" : "done"}>
                   <div className="flex items-end justify-between gap-3">
                     <span className="min-w-0 leading-tight">
                       <span className="block text-[12px] text-slate-500">필수 자료 확인</span>
@@ -2646,7 +2697,8 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                     <span className="tabular-nums font-bold leading-none whitespace-nowrap" style={{ color: todo.length ? "#C2410C" : "#047857" }} title={`${reqDone} / ${reqAll.length}`}><span className="text-[22px] tracking-[-0.03em]">{reqDoneShown}</span><span className="text-[13px] font-semibold text-slate-400"> / {reqAll.length}</span></span>
                   </div>
                   <div className="mt-2.5 h-2 rounded-full bg-slate-100 overflow-hidden"><div className="t365-fill h-full rounded-full transition-[width] duration-700" style={{ width: `${reqPct}%`, background: todo.length ? "linear-gradient(90deg,#FB923C,#EA580C)" : "linear-gradient(90deg,#34D399,#10B981)" }}></div></div>
-                </div>
+                  <span className="mt-2 flex items-center justify-end gap-0.5 text-[11.5px] font-medium text-slate-400 group-hover/p:text-slate-700 transition-colors" data-testid="todo-open">목록 보기<ChevronRight size={13} /></span>
+                </button>
               )}
               {todo.length ? todo.slice(0, 5).map((p, i) => { const c = catMap[p.Category]; const I = (c && c.icon) || FileText; return (
                 <button key={p.id} onClick={() => openPost(p)} title={p.Title} data-todo={p.id} className="t365-todo-row group/t w-full text-left px-4 h-11 flex items-center gap-2.5 border-t border-slate-100 first:border-t-0 hover:bg-orange-50/50 transition-colors min-w-0 t365-rise" style={{ animationDelay: `${120 + i * 60}ms` }}>
@@ -2724,6 +2776,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
         </aside>
       </div>
       {/* 검색 결과 — 글을 열면 그 위에 글 창(검색 창은 숨겨 두었다가 글을 닫으면 그대로 다시) */}
+      {todoOpen && <TodoListModal ctx={ctx} list={reqAll} myRow={myRow} onClose={() => setTodoOpen(false)} onOpen={(p) => { setTodoOpen(false); openPost(p); }} />}
       {searching !== null && <SearchPopup ctx={ctx} initialQ={searching} hidden={!!openId} suspended={!!openId || !!editing}
         onClose={(last) => { setSearching(null); setSearchList(null); setQ(last || ""); }} onOpen={(p, l) => { setSearchList(l || null); openPost(p); }}
         onAsk={ctx.isAgent && ctx.canWrite("qna") ? () => setEditing({ cat: "qna" }) : null}
