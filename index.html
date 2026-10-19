@@ -1669,7 +1669,7 @@ function UiDialog({ d, onDone }) {
 function Modal({ title, onClose, children, wide, xl }) {
   useEffect(() => { const k = (e) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-3 md:p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-3 md:p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div role="dialog" aria-label={title} className={`bg-white rounded-xl shadow-xl ${xl ? "max-w-4xl" : wide ? "max-w-2xl" : "max-w-md"} w-full max-h-[92vh] overflow-y-auto`} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b sticky top-0 bg-white z-10">
           <h3 className="font-semibold text-slate-800">{title}</h3>
@@ -1690,7 +1690,7 @@ function PolicyModal({ k, onClose, onSwitch }) {
     tLoadPolicies().then((r) => { if (on) setSt({ loading: false, data: r.book[k] || null }); }, () => { if (on) setSt({ loading: false, data: null }); });
     return () => { on = false; };
   }, [k]);
-  const d = st.data || T365_POLICY_FALLBACK[k];
+  const d = st.data && st.data.sections.length ? st.data : T365_POLICY_FALLBACK[k];   // 10-19 리뷰 — Info 만 있고 항목이 없으면 빈 화면 대신 기본 안내
   return (
     <Modal title={T365_POLICY_LABEL[k]} onClose={onClose} xl>
       <div className="flex items-center gap-1 -mt-1 mb-4 border-b border-slate-100" role="tablist" aria-label="정책 안내">
@@ -2601,7 +2601,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
   const searchRef = useRef(null);
   const bbSentinel = useRef(null), bbRef = useRef(null);
   const [bbStuck, bbH, bbSeen] = useStickyBar(bbSentinel, bbRef);
-  const overlayOpen = searching !== null || !!openId || !!editing;   // 검색 창 · 글 · 글쓰기 창이 떠 있으면 「/」 로 뒤의 배너 검색 칸을 잡지 않는다
+  const overlayOpen = searching !== null || !!openId || !!editing || todoOpen;   // 검색 창 · 글 · 글쓰기 창이 떠 있으면 「/」 로 뒤의 배너 검색 칸을 잡지 않는다
   useEffect(() => {
     if (overlayOpen) return;
     const k = (e) => {
@@ -3329,7 +3329,7 @@ function QnaAnswer({ ctx, post }) {
   const has = qnaAnswered(post);
   const [editing, setEditing] = useState(false);
   // 질문자에게 알리기 — 답변을 단 담당자가 메일 앱으로(자동 메일은 Power Automate 로 — 리뷰 안내)
-  const asker = normEmail(post.AuthorEmail);
+  const asker = safeMail(post.AuthorEmail);   // 10-19 리뷰 — 메일 형식이 아닌 값(「a@x.com;b@y.com」 등)은 받는 사람에 넣지 않는다
   const notifyHref = has && asker && asker !== normEmail(ctx.me.email) ? mailtoHref({ to: [asker], link: postLink(post), subject: `[Training365] 질문에 답변이 등록되었습니다 — ${post.Title}`,
     body: `${post.AuthorName || ""}님, 안녕하세요.\n\nTraining365 Q&A 에 올리신 질문에 답변이 등록되었습니다.\n아래 링크에서 확인해 주세요.\n\n■ ${post.Title}\n${postLink(post)}\n\n${ctx.me.name || ""}` }) : null;
   // 질문자가 답변을 봤는지(답변 뒤에 그 글을 열었는지) — 담당자가 알림 메일이 필요한지 판단
@@ -3348,7 +3348,18 @@ function QnaAnswer({ ctx, post }) {
   const [adds, setAdds] = useState([]);
   const [upMsg, setUpMsg] = useState("");
   const fileIn = useRef(null);
-  useEffect(() => { setText(post.Answer || ""); setEditing(false); setKeep(parseFiles(post.AnswerFilesJson)); setAdds([]); }, [post.id, post.Answer, post.AnswerFilesJson]);
+  // 10-19 리뷰 — 다른 글로 옮기면 초기화. 같은 글에서 답변이 바뀌었을 때(자동 새로고침 · 다른 담당자)는 내가 쓰는 중이 아닐 때만 새 답변으로 — 쓰던 답변이 말없이 사라지지 않게
+  const lastAns = useRef({ id: post.id, a: post.Answer || "", f: post.AnswerFilesJson || "" });
+  const [ansChanged, setAnsChanged] = useState(false);
+  useEffect(() => {
+    const L = lastAns.current, a = post.Answer || "", f = post.AnswerFilesJson || "";
+    const same = L.id === post.id;
+    if (same && L.a === a && L.f === f) return;
+    const typing = same && (editing || (canAnswer && !L.a)) && (text !== L.a || adds.length > 0 || JSON.stringify(keep) !== JSON.stringify(parseFiles(L.f)));
+    lastAns.current = { id: post.id, a, f };
+    if (typing) { setAnsChanged(true); return; }
+    setAnsChanged(false); setText(a); setEditing(false); setKeep(parseFiles(f)); setAdds([]);
+  }, [post.id, post.Answer, post.AnswerFilesJson]);
   function addAnsFiles(list) {
     list = Array.from(list || []);
     const bad = list.filter((f) => T365_BLOCKED_EXT.includes(fileExt(f.name)));
@@ -3422,6 +3433,7 @@ function QnaAnswer({ ctx, post }) {
         </div>}
         {showEd ? (
           <div className="mt-2">
+            {ansChanged && <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900" data-testid="ans-changed">쓰는 동안 다른 담당자가 답변을 저장했습니다. 지금 쓰신 내용은 그대로 두었습니다 — 저장하면 덮어쓸지 한 번 더 묻습니다.</div>}
             {/* 보이는 대로 편집(글 편집기와 같은 RichEditor) — 굵게 · 목록이 바로 그 모양으로 보이고, 저장은 지금처럼 표기 글자 */}
             <div className="rounded-lg border border-slate-300 focus-within:border-[#93B4F0] focus-within:ring-2 focus-within:ring-[#1D4ED8]/20 overflow-hidden bg-white">
               <div className="flex items-center gap-0.5 px-1.5 h-9 border-b border-slate-100" data-testid="qna-answer-tools">
@@ -3509,7 +3521,7 @@ function ConfirmPanel({ ctx, post }) {
     .sort((a, b) => (a.confirmedAt ? 0 : 1) - (b.confirmedAt ? 0 : 1) || String(a.confirmedAt).localeCompare(String(b.confirmedAt)) || String(a.user.Company || "").localeCompare(String(b.user.Company || "")) || String(a.user.Title || "").localeCompare(String(b.user.Title || "")));
   // 미확인 Agent 에게 확인 요청 — 메일 앱(숨은 참조)으로, 인원이 많아 주소가 너무 길면 주소 복사로
   const pendingEmails = req ? s.rows.filter((x) => !x.confirmedAt).map((x) => normEmail(x.user.Email)).filter(Boolean) : [];
-  const remindHref = pendingEmails.length ? mailtoHref({ bcc: pendingEmails, link: postLink(post), subject: `[Training365] 필수 자료 확인 요청 — ${post.Title}`,
+  const remindHref = pendingEmails.length ? mailtoHref({ bcc: pendingEmails.map(safeMail).filter(Boolean), link: postLink(post), subject: `[Training365] 필수 자료 확인 요청 — ${post.Title}`,
     body: `안녕하세요.\n\nTraining365 에 올라온 필수 자료를 아직 확인하지 않으셨습니다.\n아래 링크로 들어가 내용을 확인해 주세요 — 글을 열면 조회확인이 자동으로 기록됩니다.\n\n■ ${post.Title}\n${postLink(post)}\n\n감사합니다.\n${ctx.me.name || ""}` }) : null;
   async function copyPending() {
     const ok = await copyText(pendingEmails.join("; "));
@@ -3518,7 +3530,7 @@ function ConfirmPanel({ ctx, post }) {
   }
   // 필수가 아닌 글(공지 등) — 아직 안 본 Agent 에게 알림 메일(숨은 참조). Q&A 질문은 대상 아님
   const unseenAgents = !req && post.Category !== "qna" ? s.rows.filter((x) => !x.viewedAt).map((x) => normEmail(x.user.Email)).filter(Boolean) : [];
-  const nudgeHref = unseenAgents.length ? mailtoHref({ bcc: unseenAgents, link: postLink(post), subject: `[Training365] ${post.Title}`,
+  const nudgeHref = unseenAgents.length ? mailtoHref({ bcc: unseenAgents.map(safeMail).filter(Boolean), link: postLink(post), subject: `[Training365] ${post.Title}`,
     body: `안녕하세요.\n\nTraining365 에 확인하실 글이 있습니다. 아래 링크에서 확인해 주세요.\n\n■ ${post.Title}\n${postLink(post)}\n\n감사합니다.\n${ctx.me.name || ""}` }) : null;
   async function copyUnseen() {
     const ok = await copyText(unseenAgents.join("; "));
@@ -3725,6 +3737,8 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
     else if (!sel.rangeCount || !el.contains(sel.anchorNode)) { const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); sel.removeAllRanges(); sel.addRange(r); }
     return true;
   }
+  const pendingCmd = useRef(null);   // 미리 보기에서 누른 도구 — 쓰기 화면이 그려진 뒤 한 번만 실행
+  useEffect(() => { if (mode !== "preview" && pendingCmd.current) { const c = pendingCmd.current; pendingCmd.current = null; const t = setTimeout(() => cmd(c[0], c[1]), 30); return () => clearTimeout(t); } }, [mode]);
   const curBlock = () => { const sel = window.getSelection(); let n = sel && sel.anchorNode; while (n && n !== ta.current) { if (n.nodeType === 1 && /^(H[1-6]|BLOCKQUOTE)$/.test(n.tagName)) return n.tagName; n = n.parentNode; } return ""; };
   // 강조(색 · 크게) — 고른 글자에만. 고른 글자가 없으면 안내
   function styleCmd(k) {
@@ -3735,7 +3749,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
     ta.current.dispatchEvent(new Event("input", { bubbles: true }));
   }
   function cmd(name, arg) {
-    if (mode === "preview") { setMode("write"); setTimeout(() => cmd(name, arg), 30); return; }
+    if (mode === "preview") { pendingCmd.current = [name, arg]; setMode("write"); return; }   // 10-19 리뷰 — 예전엔 30ms 마다 자기 자신을 다시 불러 끝없이 돌았다(닫힌 mode 값)
     if (!edFocus()) return;
     if (name === "h") document.execCommand("formatBlock", false, /^H/.test(curBlock()) ? "p" : "h3");
     else if (name === "quote") document.execCommand("formatBlock", false, curBlock() === "BLOCKQUOTE" ? "p" : "blockquote");
@@ -3795,7 +3809,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
     if (!body.trim() && !files.length && !newFiles.length && !playFiles.length && !newPlay.length) { uiAlert("본문을 입력하거나 파일을 첨부해 주세요."); return; }
     if (body.length > T365_BODY_MAX) { uiAlert("본문이 너무 깁니다(6만 자까지). 긴 자료는 파일로 첨부해 주세요."); return; }
     savingRef.current = true;
-    const failed = [];
+    const failed = []; let heldFlags = false;
     let createdId = null;
     const fields0 = { IsPinned: canFlag && !!pinned, RequireConfirm: canFlag && !!reqConfirm };
     const upAll = async (postId) => {
@@ -3856,11 +3870,13 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
         setSaving("저장하고 있습니다...");
         // APS 와 같은 순서 — 글(번호)을 먼저 만들고, 그 번호 폴더에 첨부를 올린 뒤 첨부 정보를 붙인다.
         // 첨부가 있으면 공지 · 필수는 첨부까지 붙인 뒤에 켠다 — 큰 파일을 올리는 동안 Agent 가 첨부 없는 필수 글을 열어 조회확인되는 일이 없게
-        const defer = (newFiles.length > 0 || newPlay.length > 0) && (fields.IsPinned || fields.RequireConfirm);
+        let defer = (newFiles.length > 0 || newPlay.length > 0) && (fields.IsPinned || fields.RequireConfirm);
         const row = await tCreate(T365_LISTS.posts, { ...fields, ...(defer ? { IsPinned: false, RequireConfirm: false } : {}), AttachmentsJson: "[]", AuthorEmail: ctx.me.email, AuthorName: ctx.me.name, PublishedAt: now });
         id = row.id; createdId = id;   // 여기부터 실패해도 글은 이미 있다 — 다시 「게시」 해서 같은 글이 둘 생기지 않게 아래 catch 에서 창을 닫는다
         const uploaded = await upAll(id);
         const uploadedPlay = await upPlay(id);
+        // 10-19 리뷰 — 첨부를 하나라도 못 올렸으면 공지 · 필수는 켜지 않는다(첨부 없는 필수 글이 열려 조회확인이 쌓이지 않게) — 「수정」에서 다시 첨부한 뒤 켠다
+        if (defer && failed.length) { heldFlags = true; defer = false; }
         if (uploaded.length || uploadedPlay.length || defer) {
           setSaving("첨부 정보를 저장하고 있습니다...");
           await tUpdate(T365_LISTS.posts, id, { ...(uploaded.length ? { AttachmentsJson: JSON.stringify(uploaded) } : {}), ...(uploadedPlay.length ? { VideoFileJson: JSON.stringify(uploadedPlay) } : {}), ...(defer ? { IsPinned: fields.IsPinned, RequireConfirm: fields.RequireConfirm } : {}), Category: cat });
@@ -3869,7 +3885,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
       }
       setSaving(""); savingRef.current = false;
       if (!isEdit && !draft) clearDraft();   // 묻던 예전 임시 글(불러오기 · 버리기 전)은 남겨 둔다
-      if (failed.length) uiAlert(`게시물은 저장됐지만 첨부 ${failed.length}개를 올리지 못했습니다 — 「수정」에서 다시 첨부해 주세요.\n\n${failed.join("\n")}`);
+      if (failed.length) uiAlert(`게시물은 저장됐지만 첨부 ${failed.length}개를 올리지 못했습니다 — 「수정」에서 다시 첨부해 주세요.${heldFlags ? "\n첨부가 빠진 채 공지 · 필수로 보이지 않도록 「중요 · 상단 고정」 · 「조회확인 필수」 는 꺼 두었습니다 — 다시 첨부할 때 함께 켜 주세요." : ""}\n\n${failed.join("\n")}`);
       onSaved(id, cat);   // 고른 게시판(cat)을 함께 — 다른 게시판에 올렸으면 그 게시판으로 가서 연다
     } catch (e) {
       setSaving(""); savingRef.current = false;
@@ -5181,7 +5197,14 @@ function CategoriesTab({ ctx, catRows, bannerRows, listStatus, reload }) {
   const [draft, setDraft] = useState(() => base.map(catDraftOf));
   const [saving, setSaving] = useState(false);
   const [styling, setStyling] = useState(null);
-  useEffect(() => { setDraft(mergeCategories(catRows, true).map(catDraftOf)); }, [catRows]);
+  // 10-19 리뷰 — 자동 새로고침(약 1분)마다 같은 내용의 새 배열이 들어와 「반영」 전 변경이 말없이 지워지던 문제: 내용이 실제로 바뀌었고, 고치는 중이 아닐 때만 다시 맞춘다
+  const catSig = JSON.stringify(mergeCategories(catRows, true).map(catDraftOf));
+  const catSigRef = useRef(catSig);
+  useEffect(() => {
+    if (catSig === catSigRef.current) return;
+    const oldSig = catSigRef.current; catSigRef.current = catSig;
+    setDraft((prev) => (JSON.stringify(prev) === oldSig ? JSON.parse(catSig) : prev));   // 고친 게 없으면(예전 기준과 같으면) 새 값으로, 고치는 중이면 그대로
+  }, [catSig]);
   const counts = Object.create(null); ctx.posts.forEach((p) => { counts[p.Category] = (counts[p.Category] || 0) + 1; });
   const sameC = (a, b) => JSON.stringify(a || []) === JSON.stringify(b || []);
   const dirty = draft.filter((d) => { const b = base.find((x) => x.key === d.key); return b && (b.label !== d.label || b.desc !== d.desc || Number(b.order) !== Number(d.order) || b.active !== d.active || (b.iconKey || "") !== d.icon || (b.colorKey || "") !== d.color || !sameC(b.contacts, d.contacts)); });
@@ -6608,7 +6631,8 @@ async function t365Boot(account) {
   }
   const users = usersR.v || [];
   // 비상 관리자 — 목록을 읽었고 사용 중인 「관리자」 가 아무도 없을 때만(목록을 못 읽으면 fail-closed)
-  const listHasAdmin = users.some((u) => u.Role === "관리자" && u.Active !== false && normEmail(u.Email));
+  // 10-19 리뷰 — 「관리자」 역할이 있어도 Permissions 가 깨지거나 사용자 편집이 꺼져 있으면 아무도 사용자 관리를 못 한다 → 마지막 관리자 보호와 같은 기준(실제 사용자 편집 권한)으로 판정
+  const listHasAdmin = users.some((u) => u.Active !== false && normEmail(u.Email) && permsOf(u).perms.users === "e");
   const isBootAdmin = !usersR.e && !listHasAdmin && ident.ids.some((id) => T365_BOOTSTRAP_ADMINS.includes(id));
   if (!usersR.e && !listHasAdmin && !T365_BOOTSTRAP_ADMINS.length) console.warn("[Training365] 사용 중인 관리자가 목록에 없고 설정 파일에 비상 관리자(TRAINING365_BOOTSTRAP_ADMIN_N)도 없습니다 — system_config_final.xlsx 에 TRAINING365_BOOTSTRAP_ADMIN_1 을 추가해 주세요.");
   const mine = users.filter((u) => ident.ids.includes(normEmail(u.Email)));
