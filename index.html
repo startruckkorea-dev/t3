@@ -1097,14 +1097,18 @@ function t365Log(category, verb, target, detail) {
       const user = _tLogUser.email || "unknown";
       const tag = user.split("@")[0].replace(/[^a-zA-Z0-9._-]/g, "_");
       const folder = `${T365_LOG_ROOT}/${day}`;
-      if (!(await tEnsureFolder(driveId, folder, token))) return;
       const body = JSON.stringify({
         timestampKST: `${day} ${p(now.getUTCHours())}:${p(now.getUTCMinutes())}:${p(now.getUTCSeconds())}`,
         user, userName: _tLogUser.name || "", system: "Training365", category, verb, action: `${category} ${verb}`, target: target || "", detail: detail || {},
       });
-      const res = await fetch(`${GRAPH}/drives/${driveId}/root:/${folder}/${hms}_${tag}_${Math.random().toString(36).slice(2, 6)}.json:/content`, {
+      // 10-21 새 파일로만 쓴다(conflictBehavior=fail — 같은 이름이 있어도 덮어쓰지 않음, 올리기만 권한에서도 됨).
+      // 날짜 폴더는 PUT 이 만들어 준다 — 없다고 나오면(404) 그때만 폴더를 만들고 다시. 이름이 겹치면(409) 새 이름으로 한 번 더
+      const put = () => fetch(`${GRAPH}/drives/${driveId}/root:/${folder}/${hms}_${tag}_${Math.random().toString(36).slice(2, 10)}.json:/content?@microsoft.graph.conflictBehavior=fail`, {
         method: "PUT", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body,
       });
+      let res = await put();
+      if (res.status === 404 && (await tEnsureFolder(driveId, folder, token))) res = await put();
+      if (res.status === 409 || res.status === 429 || res.status >= 500) { await new Promise((ok) => setTimeout(ok, 800)); res = await put(); }
       if (!res.ok) console.warn("[Training365 이력] 기록 실패:", res.status);
     } catch (e) { console.warn("[Training365 이력] 기록 실패(원래 기능에는 영향 없음):", e.message); }
   })();
@@ -1125,7 +1129,8 @@ const T365Session = {
     // 같은 탭의 새로고침 — 같은 사람이고 아직 세션이 살아 있으면(idleEndMs 이내) 그 행을 이어 쓴다
     let resumed = false;
     try {
-      if (sid && itemId && sessionStorage.getItem("t365.sessUser") === info.email && prevAct && now - prevAct < T365_TIMING.idleEndMs) {
+      // 10-21 역할까지 같을 때만 — 「접근 차단」 행을 다음 정상 로그인이 이어 쓰거나(문을 바꿔 다시 로그인), 그 반대가 되지 않게
+      if (sid && itemId && info.role && sessionStorage.getItem("t365.sessUser") === info.email && sessionStorage.getItem("t365.sessRole") === info.role && prevAct && now - prevAct < T365_TIMING.idleEndMs) {
         await tUpdate(T365_LISTS.access, itemId, { LastActivityAt: new Date(now).toISOString() });
         resumed = true;
       }
@@ -1155,7 +1160,7 @@ const T365Session = {
   persist() {
     try {
       sessionStorage.setItem("t365.sid", this.sid); sessionStorage.setItem("t365.sessItem", this.itemId || "");
-      sessionStorage.setItem("t365.sessUser", (this.info && this.info.email) || ""); sessionStorage.setItem("t365.lastAct", String(this.lastActivity));
+      sessionStorage.setItem("t365.sessUser", (this.info && this.info.email) || ""); sessionStorage.setItem("t365.sessRole", (this.info && this.info.role) || ""); sessionStorage.setItem("t365.lastAct", String(this.lastActivity));
     } catch (e) {}
   },
   touch() { this.lastActivity = Date.now(); try { sessionStorage.setItem("t365.lastAct", String(this.lastActivity)); } catch (e) {} },
@@ -1197,12 +1202,13 @@ const T365Session = {
     if (this.itemId) {
       try {
         await Promise.race([
-          tUpdate(T365_LISTS.access, this.itemId, { LogoutAt: now, LastActivityAt: now, EndType: "로그아웃" }),
+          // 10-21 차단된 접속(역할 없음)은 「접근 차단」 그대로 두고 활동 시각만
+          tUpdate(T365_LISTS.access, this.itemId, this.info && this.info.role ? { LogoutAt: now, LastActivityAt: now, EndType: "로그아웃" } : { LastActivityAt: now }),
           new Promise((ok) => setTimeout(ok, 3000)),
         ]);
       } catch (e) { console.warn("[Training365] 로그아웃 기록 실패:", e.message); }
     }
-    try { ["t365.sid", "t365.sessItem", "t365.sessUser", "t365.lastAct"].forEach((k) => sessionStorage.removeItem(k)); } catch (e) {}
+    try { ["t365.sid", "t365.sessItem", "t365.sessUser", "t365.sessRole", "t365.lastAct"].forEach((k) => sessionStorage.removeItem(k)); } catch (e) {}
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
     this.itemId = null;
   },
@@ -1300,7 +1306,8 @@ function parseInlineTree(t) {
   const flush = () => { if (buf) { top().c.push(buf); buf = ""; } };
   for (let i = 0; i < t.length;) {
     const m = t[i] === "{" ? T365_STYLE_RE.exec(t.slice(i, i + 9)) : null;
-    if (m) { flush(); const n = { k: m[1], c: [], raw: m[0] }; top().c.push(n); st.push(n); i += m[0].length; continue; }
+    // 10-21 겹침은 8단계까지 — 짝 없는 {{red: 를 수천 번 이어 쓰면 화면이 통째로 멈췄다(재귀 한도). 넘치는 표기는 글자 그대로
+    if (m && st.length <= 8) { flush(); const n = { k: m[1], c: [], raw: m[0] }; top().c.push(n); st.push(n); i += m[0].length; continue; }
     if (t[i] === "}" && t[i + 1] === "}" && st.length > 1 && top().k !== "b") { flush(); st.pop().done = true; i += 2; continue; }
     if (t[i] === "*" && t[i + 1] === "*") {
       if (top().k === "b") { flush(); st.pop().done = true; i += 2; continue; }
@@ -1324,7 +1331,8 @@ function renderLinks(text, kb) {
       else {   // 링크 글자에 적힌 주소와 실제 주소가 다르면(「crm.회사.com」 이라 써 놓고 다른 곳으로) 실제 주소를 빨갛게 붙여 보여 준다
         const host = new URL(u).hostname.toLowerCase();
         const shown = /((?:[a-z0-9-]+\.)+(?:com|net|org|kr|co|io|biz|info|gov|edu|xyz|top|me|app|site|online|ly|gl))(?![a-z0-9-])/i.exec(m[2]);
-        const differs = !!shown && !host.endsWith(shown[1].toLowerCase().replace(/^www\./, ""));
+        const sh = shown ? shown[1].toLowerCase().replace(/^www\./, "") : "";
+        const differs = !!shown && host !== sh && !host.endsWith("." + sh);   // 10-21 evilcrm.com 이 crm.com 과 같다고 보던 것 고침
         out.push(<a key={`${kb}a${i}`} href={u} target="_blank" rel="noopener noreferrer" title={u}>{m[2]}{differs && <span className="text-red-600 text-[0.85em] font-medium" title="링크 글자와 실제 주소가 다릅니다" data-link-host> ({host})</span>}</a>);
       }
     }
@@ -3979,22 +3987,25 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
         const defer = (newFiles.length > 0 || newPlay.length > 0) && (fields.IsPinned || fields.RequireConfirm);
         const row = await tCreate(T365_LISTS.posts, { ...fields, ...(defer ? { IsPinned: false, RequireConfirm: false } : {}), AttachmentsJson: "[]", AuthorEmail: ctx.me.email, AuthorName: ctx.me.name, PublishedAt: now });
         id = row.id; createdId = id;   // 여기부터 실패해도 글은 이미 있다 — 다시 「게시」 해서 같은 글이 둘 생기지 않게 아래 catch 에서 창을 닫는다
+        // 10-21 게시 전 확인 기록은 글이 생기자마자 남긴다 — 첨부 · 마무리에서 실패해도 기록이 빠지지 않게
+        t365Log("게시물", "게시 전 확인", t, { info: { 게시물ID: id, 구분: check.kind, 확인자: `${check.by} (${check.email})`, 확인시각: fmtDate(check.at), 확인항목: check.labels.join(" · "), "게시물에 기록": checkCol ? "예" : "아니요(PublishCheckJson 열 없음)" } });
         const uploaded = await upAll(id);
         const uploadedPlay = await upPlay(id);
         if (uploaded.length || uploadedPlay.length || defer) {
           setSaving("첨부 정보를 저장하고 있습니다...");
-          await tUpdate(T365_LISTS.posts, id, { ...(uploaded.length ? { AttachmentsJson: JSON.stringify(uploaded) } : {}), ...(uploadedPlay.length ? { VideoFileJson: JSON.stringify(uploadedPlay) } : {}), ...(defer ? { IsPinned: fields.IsPinned, RequireConfirm: fields.RequireConfirm } : {}), Category: cat });
+          await tUpdate(T365_LISTS.posts, id, { ...(uploaded.length ? { AttachmentsJson: JSON.stringify(uploaded) } : {}), ...(uploadedPlay.length ? { VideoFileJson: JSON.stringify(uploadedPlay) } : {}), ...(defer && !failed.length ? { IsPinned: fields.IsPinned, RequireConfirm: fields.RequireConfirm } : {}), Category: cat });
         }
         t365Log("게시물", "등록", t, { info: { 카테고리: (ctx.catMap[cat] || {}).label || cat, 게시물ID: id, 첨부: `${uploaded.length}개`, ...(uploaded.length ? { "첨부 위치": `${T365_ATTACH_LIB}/${attachFolderOf(id, cat)}` } : {}), 중요: !!fields.IsPinned, "조회확인 필수": !!fields.RequireConfirm, ...(pinVal && "PinUntil" in fields ? { "홈 노출 기한": pinVal } : {}) } });
-        t365Log("게시물", "게시 전 확인", t, { info: { 게시물ID: id, 구분: check.kind, 확인자: `${check.by} (${check.email})`, 확인시각: fmtDate(check.at), 확인항목: check.labels.join(" · "), "게시물에 기록": checkCol ? "예" : "아니요(PublishCheckJson 열 없음)" } });
       }
       setSaving(""); savingRef.current = false;
       if (!isEdit && !draft) clearDraft();   // 묻던 예전 임시 글(불러오기 · 버리기 전)은 남겨 둔다
-      if (failed.length) uiAlert(`게시물은 저장됐지만 첨부 ${failed.length}개를 올리지 못했습니다 — 「수정」에서 다시 첨부해 주세요.\n\n${failed.join("\n")}`);
+      // 10-21 첨부가 빠졌으면 공지 · 필수는 켜지 않는다(첨부 없는 필수 글을 Agent 가 열어 확인 처리되지 않게)
+      if (failed.length) uiAlert(`게시물은 저장됐지만 첨부 ${failed.length}개를 올리지 못했습니다 — 「수정」에서 다시 첨부해 주세요.${!isEdit && (fields0.IsPinned || fields0.RequireConfirm) && (newFiles.length || newPlay.length) ? "\n공지 · 조회확인 필수 설정은 첨부를 다 올린 뒤 「수정」에서 다시 켜 주세요." : ""}\n\n${failed.join("\n")}`);
       onSaved(id, cat);   // 고른 게시판(cat)을 함께 — 다른 게시판에 올렸으면 그 게시판으로 가서 연다
     } catch (e) {
       setSaving(""); savingRef.current = false;
       if (createdId) {   // 글은 올라갔는데 첨부 · 설정 마무리에서 실패 — 창을 닫고 그 글을 연다(다시 「게시」 하면 같은 글이 또 생긴다)
+        t365Log("게시물", "등록", t, { info: { 카테고리: (ctx.catMap[cat] || {}).label || cat, 게시물ID: createdId, 마무리: `실패 — ${e.message}` } });
         if (!draft) clearDraft();
         await uiAlert(`게시물은 올라갔지만 마무리하지 못했습니다${fields0.IsPinned || fields0.RequireConfirm ? " — 공지 · 필수 설정과 첨부가 빠졌을 수 있습니다" : " — 첨부가 빠졌을 수 있습니다"}.\n게시물을 열어 「수정」에서 확인해 주세요.\n\n(${e.message})`);
         onSaved(createdId, cat); return;
@@ -4623,20 +4634,24 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
         const name = pick(r, ["이름", "name", "성명"]);
         const company = pick(r, ["회사/지점", "회사", "지점", "company"]);
         const roleRaw = pick(r, ["역할", "role"]); const role = T365_ROLES.find((x) => x.toLowerCase() === roleRaw.toLowerCase()) || "";
-        const wc = catKeysOf(pick(r, ["작성 카테고리", "작성카테고리", "writercategories"])).join(",");
+        // 10-21 작성 카테고리 칸이 비어 있으면 기존 값을 그대로 둔다 — 예전엔 비운 채 덮어써 작성자가 모든 게시판 편집이 됐다(내보내기 파일엔 이 칸이 없음)
+        const wcRaw = String(pick(r, ["작성 카테고리", "작성카테고리", "writercategories"]) || "").trim();
+        const wcBad = wcRaw.split(/[,;\s]+/).map((x) => x.trim().toLowerCase()).filter((x) => x && !T365_DEFAULT_CATEGORIES.some((c) => c.key === x));
+        const wc = catKeysOf(wcRaw.toLowerCase()).join(",");
         const exist = merged.find((p) => p.email === email);
         let status = "신규", reason = "";
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || /#ext#/i.test(email)) { status = "오류"; reason = "이메일 형식"; }
         else if (seen.has(email)) { status = "오류"; reason = "파일 안에서 중복"; }
         else if (!role) { status = "오류"; reason = `역할 값(${roleRaw || "빈 값"}) — ${T365_ROLES.join(" / ")}`; }
         else if (!name && !exist) { status = "오류"; reason = "이름 없음"; }
+        else if (wcBad.length) { status = "오류"; reason = `작성 카테고리 값(${wcBad.join(", ")}) — 키로 적어 주세요: ${T365_DEFAULT_CATEGORIES.filter((c) => !c.band).map((c) => c.key).join(", ")}`; }
         else if (exist) {
-          const same = (exist.row.Role || "") === role && (exist.row.Company || "") === company && (!name || (exist.row.Title || "") === name) && catKeysOf(exist.row.WriterCategories).join(",") === wc;
+          const same = (exist.row.Role || "") === role && (exist.row.Company || "") === company && (!name || (exist.row.Title || "") === name) && (!wcRaw || catKeysOf(exist.row.WriterCategories).join(",") === wc);
           status = same ? "동일" : "변경";
           if (!same && (exist.row.Role || "") !== role && stored(exist).source === "custom") reason = "역할이 바뀌어 개별 권한은 기본값으로";
         }
         seen.add(email);
-        return { line: i + 2, email, name, company, role, wc, status, reason, exist };
+        return { line: i + 2, email, name, company, role, wc, wcSet: !!wcRaw, status, reason, exist };
       }).filter((x) => x.email || x.name);
       if (!out.length) { uiAlert("읽을 행이 없습니다 — 양식의 머리글(이메일 · 이름 · 회사/지점 · 역할)을 확인해 주세요."); return; }
       setImportRows(out);
@@ -4651,12 +4666,19 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
       const ch = {};
       const plan = list.map((x) => {
         const row = fresh.find((r) => normEmail(r.Email) === x.email);
-        const f = { Role: x.role, Company: x.company, WriterCategories: x.wc }; if (x.name) f.Title = x.name;
+        const f = { Role: x.role, Company: x.company, ...(x.wcSet || !row ? { WriterCategories: x.wc } : {}) }; if (x.name) f.Title = x.name;
         if (row && (row.Role || "") !== x.role && hasPermCol) f.Permissions = "";   // 역할이 바뀌면 개별 권한은 새 역할 기본값으로
         if (row) ch[x.email] = f;
         return { x, row, f };
       });
       if (permAdminsAfter(fresh, {}, new Set()) > 0 && permAdminsAfter(fresh, ch, new Set()) === 0) { uiAlert(LAST_ADMIN_MSG); setSaving(""); return; }
+      // 10-21 본인 역할이 바뀌어 사용자 · 권한 편집이 빠지면 묻는다(「반영」 과 같게)
+      const meP = plan.find((pl) => pl.x.email === me && pl.row && (pl.row.Role || "") !== pl.x.role);
+      if (meP && rolePreset(meP.x.role, catKeysOf(meP.x.wcSet ? meP.x.wc : meP.row.WriterCategories)).users !== "e") {
+        setSaving("");
+        if (!(await uiConfirm(`파일에 본인 계정이 「${meP.x.role}」 로 들어 있습니다 — 반영하면 사용자 · 권한 편집이 빠져 이 화면을 더 바꿀 수 없습니다. 계속할까요?`, { title: "본인 권한 변경", okText: "계속", danger: true }))) return;
+        setSaving("일괄 등록하고 있습니다...");
+      }
       for (const { x, row, f } of plan) {
         if (row) {
           await tUpdate(T365_LISTS.users, row.id, f);
@@ -5303,7 +5325,9 @@ function CategoriesTab({ ctx, catRows, bannerRows, listStatus, reload }) {
   const [draft, setDraft] = useState(() => base.map(catDraftOf));
   const [saving, setSaving] = useState(false);
   const [styling, setStyling] = useState(null);
-  useEffect(() => { setDraft(mergeCategories(catRows, true).map(catDraftOf)); }, [catRows]);
+  // 10-21 내용이 바뀌었을 때만 다시 채운다 — 60초 자동 새로 읽기가 같은 내용으로 와도 고치던 값이 지워지던 문제
+  const catSig = JSON.stringify(catRows || []);
+  useEffect(() => { setDraft(mergeCategories(catRows, true).map(catDraftOf)); }, [catSig]);
   const counts = Object.create(null); ctx.posts.forEach((p) => { counts[p.Category] = (counts[p.Category] || 0) + 1; });
   const sameC = (a, b) => JSON.stringify(a || []) === JSON.stringify(b || []);
   const dirty = draft.filter((d) => { const b = base.find((x) => x.key === d.key); return b && (b.label !== d.label || b.desc !== d.desc || Number(b.order) !== Number(d.order) || b.active !== d.active || (b.iconKey || "") !== d.icon || (b.colorKey || "") !== d.color || !sameC(b.contacts, d.contacts)); });
@@ -6248,7 +6272,9 @@ function App({ boot }) {
   const [listStatus, setListStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
-  const [denied, setDenied] = useState(null);
+  const [denied, setDenied0] = useState(null);
+  // 막히면 접속 기록 활동 신호도 멈춘다(차단된 사람이 「접속 중」 으로 남지 않게)
+  const setDenied = (r) => { if (T365Session.timer) { clearInterval(T365Session.timer); T365Session.timer = null; } setDenied0(r); };
   // Agent 이용 시간(06~22시) — 쓰는 중에 22시가 되면 1분 안에 막는다
   useEffect(() => {
     if (boot.role !== "Agent") return;
@@ -6326,7 +6352,11 @@ function App({ boot }) {
       // 다시 읽은 목록에서 내 행이 사라졌거나 사용 중지 · 역할 없음이면(비상 관리자 제외) 바로 막는다
       if (!boot.isBootAdmin) {
         const mine = u.v.find((x) => boot.me.ids.includes(normEmail(x.Email)) && x.Active !== false);
-        if (!mine || !T365_ROLES.includes(mine.Role)) setDenied(!mine ? "not-registered" : "no-role");
+        const anyMine = u.v.some((x) => boot.me.ids.includes(normEmail(x.Email)));
+        if (!mine || !T365_ROLES.includes(mine.Role)) setDenied(!mine ? (anyMine ? "inactive" : "not-registered") : "no-role");
+        // 10-21 쓰는 중에 역할이 바뀌어 로그인 문이 맞지 않게 되면(Agent ↔ 그 밖) 처음 로그인과 같게 막는다
+        else if (mine.Role === "Agent" && T365_APP_KIND !== "agent") setDenied("door-agent");
+        else if (mine.Role !== "Agent" && T365_APP_KIND === "agent") setDenied("door-staff");
       }
     }
     setSoftErr(soft.join(" · "));   // 알림(토스트)은 곧 다른 알림에 덮이므로 화면 위 띠로 — 다음에 제대로 읽으면 사라진다
