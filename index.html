@@ -342,9 +342,12 @@ const T365_LOG_ROOT = "Logging_data/Training365"; // 관리 행위 이력 — AP
 // 접속 기록 — 활동 신호(heartbeat) 간격 · 활동이 없으면 세션이 끝난 것으로 보는 시간. 테스트에서만 window.T365_TIMING 으로 줄인다
 const T365_TIMING = Object.assign({ heartbeatMs: 5 * 60e3, idleEndMs: 30 * 60e3, tickMs: 30e3 }, (typeof window !== "undefined" && window.T365_TIMING) || {});
 
-const T365_ROLES = ["Agent", "본사", "작성자", "관리자"];
+const T365_ROLES = ["Agent", "Agent-내부", "본사", "작성자", "관리자"];
+// Agent-내부(10-21) — 권한 · 화면은 Agent 와 같고(조회확인 대상 포함), 로그인은 「임직원」 문으로. 이용 시간 제한은 외부 Agent 만
+function isAgentRole(r) { return r === "Agent" || r === "Agent-내부"; }
 const ROLE_META = {
   "Agent": { cls: "bg-blue-50 text-blue-700 border-blue-100", desc: "게시물 열람 · 조회확인" },
+  "Agent-내부": { cls: "bg-sky-50 text-sky-700 border-sky-100", desc: "Agent 와 같은 권한 · 임직원 로그인(내부 직원)" },
   "본사": { cls: "bg-slate-100 text-slate-600 border-slate-200", desc: "열람 · 확인 현황 조회(조회확인 없음)" },
   "작성자": { cls: "bg-amber-50 text-amber-700 border-amber-100", desc: "본사 + 게시판 글쓰기(담당 게시판을 정하면 그 게시판만)" },
   "관리자": { cls: "bg-[#E4F1F0] text-[#2F7B7A] border-[#CFE6E4]", desc: "사용자 · 카테고리 · 게시물 · 접속 기록 관리" },
@@ -472,7 +475,7 @@ function rolePreset(role, writerCats) {
   T365_PERM_ITEMS.forEach((it) => {
     let lv = "n";
     if (role === "관리자") lv = "e";
-    else if (role === "Agent") lv = it.group === "home" || it.group === "boards" ? "v" : "n";
+    else if (isAgentRole(role)) lv = it.group === "home" || it.group === "boards" ? "v" : "n";
     else if (role === "본사") lv = it.group === "admin" ? "n" : "v";
     // 작성자 — 본사 + 게시판 글쓰기. 담당 게시판(WriterCategories)을 정하면 그 게시판만, 비워 두면 모든 게시판(10-18 — 본사와 같아 보이던 문제)
     else if (role === "작성자") lv = it.group === "admin" ? "n" : it.group === "boards" && (!wc.size || wc.has(it.cat)) ? "e" : "v";
@@ -1925,7 +1928,7 @@ async function tFindRead(key) {
 // opts.confirm — Agent 가 조회확인 필수 글을 열면 열람과 같은 쓰기로 ConfirmedAt 도 채운다(이미 있으면 처음 시각 유지)
 function t365RecordView(post, me, opts) {
   const key = readKey(post.id, me.email);
-  const confirm = !!(opts && opts.confirm) && me.role === "Agent";
+  const confirm = !!(opts && opts.confirm) && isAgentRole(me.role);
   return serialRead(key, async () => {
     const now = new Date().toISOString();
     // 답변이 달린 질문을 봤으면 마지막 열람은 답변 시각보다 뒤로 — 답변한 PC 의 시계가 빨라도 「새 답변」 이 남지 않게(하루 넘게 앞선 값은 무시)
@@ -1947,7 +1950,7 @@ function t365RecordView(post, me, opts) {
   });
 }
 function t365Confirm(post, me) {
-  if (me.role !== "Agent") return Promise.reject(new Error("조회확인은 Agent 만 할 수 있습니다."));
+  if (!isAgentRole(me.role)) return Promise.reject(new Error("조회확인은 Agent 만 할 수 있습니다."));
   const key = readKey(post.id, me.email);
   return serialRead(key, async () => {
     const now = new Date().toISOString();
@@ -3549,7 +3552,7 @@ function ConfirmPanel({ ctx, post }) {
               <td className="px-4 h-9 text-slate-500 tabular-nums whitespace-nowrap">{fmtDate(v.FirstViewedAt)}</td>
               <td className="px-4 h-9 text-slate-500 tabular-nums whitespace-nowrap">{fmtDate(v.LastViewedAt)}</td>
               <td className="px-4 h-9 text-slate-500 tabular-nums">{Number(v.ViewCount) || 1}</td>
-              {req && <td className="px-4 h-9">{v.ConfirmedAt ? <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 size={12} />{fmtDate(v.ConfirmedAt).slice(5)}</span> : <span className="text-slate-300">{v.role === "Agent" ? "미확인" : "대상 아님"}</span>}</td>}
+              {req && <td className="px-4 h-9">{v.ConfirmedAt ? <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 size={12} />{fmtDate(v.ConfirmedAt).slice(5)}</span> : <span className="text-slate-300">{isAgentRole(v.role) ? "미확인" : "대상 아님"}</span>}</td>}
             </tr>
           )) : <tr><td colSpan={req ? 6 : 5} className="text-center text-slate-400 py-6">아직 열람한 사람이 없습니다.</td></tr>}
         </tbody>
@@ -4258,7 +4261,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
     .filter((p) => view === "all" || (view === "registered" ? hasAccess(p) : view === "dirOnly" ? p.dirOnly : (p.dirStatus === "missing" || p.dirStatus === "alt")))
     .filter((p) => !roleF || eff(p, "Role") === roleF)
     .filter((p) => !qq || [p.email, p.row.Title, eff(p, "Company"), eff(p, "Role"), p.dir && p.dir.dept, p.dir && p.dir.team, p.dir && p.dir.name].some((v) => String(v || "").toLowerCase().includes(qq)));
-  const roleRank = { "관리자": 0, "작성자": 1, "본사": 2, "Agent": 3 };
+  const roleRank = { "관리자": 0, "작성자": 1, "본사": 2, "Agent-내부": 3, "Agent": 4 };
   // 권한 있는 사람 먼저 — 설정 파일 관리자(명부에만 있어도) → 등록 사용자 → 명부 직원(이름순)
   const permRank = (p) => (hasAccess(p) ? (p.row.Role === "관리자" ? 0 : 1) : !p.dirOnly ? 2 : 3);
   const ordered = [...filtered].sort((a, b) => (justAdded.has(b.email) ? 1 : 0) - (justAdded.has(a.email) ? 1 : 0) || permRank(a) - permRank(b) || (a.dirOnly && b.dirOnly ? String(a.row.Title || "").localeCompare(String(b.row.Title || "")) : 0) || (roleRank[a.row.Role] ?? 9) - (roleRank[b.row.Role] ?? 9) || String(a.row.Company || "").localeCompare(String(b.row.Company || "")) || String(a.row.Title || "").localeCompare(String(b.row.Title || "")));
@@ -5081,7 +5084,7 @@ function CatStyleModal({ ctx, d, onApply, onClose }) {
   const ic = parseCatIcon(icon);
   const pal = T365_PALETTE.find((x) => x.color === color) || { color: def.color, soft: def.soft };
   const preview = { icon: ic ? ic.icon : def.icon, color: pal.color, soft: pal.soft, label: d.label };
-  const staff = ctx.users.filter((u) => u.Active !== false && u.Role !== "Agent" && T365_MAIL_RE.test(normEmail(u.Email)) && !contacts.some((c) => c.email === normEmail(u.Email)))
+  const staff = ctx.users.filter((u) => u.Active !== false && !isAgentRole(u.Role) && T365_MAIL_RE.test(normEmail(u.Email)) && !contacts.some((c) => c.email === normEmail(u.Email)))
     .sort((a, b) => String(a.Title || "").localeCompare(String(b.Title || "")));
   async function upload(e) {
     const f = (e.target.files || [])[0]; e.target.value = "";
@@ -6143,7 +6146,7 @@ function App({ boot }) {
   const myRow = users.find((u) => boot.me.ids.includes(normEmail(u.Email)) && u.Active !== false) || null;
   const role = boot.isBootAdmin ? "관리자" : usersLoaded ? (myRow && T365_ROLES.includes(myRow.Role) ? myRow.Role : null) : boot.role;
   const isAdmin = role === "관리자" && (boot.isBootAdmin || usersLoaded);   // 역할이 관리자(남의 게시물도 수정 · 삭제) — 메뉴 권한과 별개
-  const isAgent = role === "Agent";
+  const isAgent = isAgentRole(role);
   // 메뉴 권한(보기 · 편집) — 역할 기본값 + 사용자별 예외. 사용자 목록을 못 읽은 동안은 로그인 때 읽은 내 행으로(그것도 없으면 Overview 만)
   const permInfo = permsOf(usersLoaded ? myRow : boot.myRow, { bootAdmin: boot.isBootAdmin });
   const P = role ? permInfo.perms : noPerms();
@@ -6156,14 +6159,14 @@ function App({ boot }) {
   const cats = allCats.filter((c) => c.active && canView("cat:" + c.key));   // 보기 권한이 있는 게시판만
   const catMap = Object.assign(Object.create(null), Object.fromEntries(cats.map((c) => [c.key, c])));   // 기본 속성 없는 표 — 게시물 Category 가 「constructor」 같은 값이어도 게시판으로 잘못 잡히지 않게
   // 조회확인 대상 Agent — 사용 중인 Agent 행(메일 중복 제외). _perms: 그 사람의 메뉴 권한(게시판을 볼 수 없는 Agent 는 그 게시판 글의 대상에서 뺀다)
-  const agents = useMemo(() => users.filter((u) => u.Role === "Agent" && u.Active !== false && normEmail(u.Email))
+  const agents = useMemo(() => users.filter((u) => isAgentRole(u.Role) && u.Active !== false && normEmail(u.Email))
     .filter((u, i, a) => a.findIndex((x) => normEmail(x.Email) === normEmail(u.Email)) === i)
     .map((u) => ({ ...u, _perms: permsOf(u).perms })), [users]);
   // 화면에 쓰는 게시물 — Q&A 질문과 Agent 가 쓴 글은 공지 · 필수가 될 수 없다. 목록을 직접 고쳐(IsPinned · RequireConfirm) 넣어도
   // 홈 「공지 · 필수」 · 확인 대기 · 확인율에 끼지 않게 여기서 한 번 거른다. Agent 판단은 글의 AuthorEmail 과 SharePoint 작성 계정 둘 다
   const agentEmails = useMemo(() => {
     const ag = new Set(), staff = new Set();
-    users.forEach((u) => { const e = normEmail(u.Email); if (!e) return; if (u.Role === "Agent") ag.add(e); else if (u.Active !== false && T365_ROLES.includes(u.Role)) staff.add(e); });
+    users.forEach((u) => { const e = normEmail(u.Email); if (!e) return; if (isAgentRole(u.Role)) ag.add(e); else if (u.Active !== false && T365_ROLES.includes(u.Role)) staff.add(e); });
     staff.forEach((e) => ag.delete(e)); return ag;
   }, [users]);
   const posts = useMemo(() => rawPosts.map((p) => ((p.IsPinned || p.RequireConfirm) && (p.Category === "qna" || agentEmails.has(normEmail(p.AuthorEmail)) || (p._createdBy && agentEmails.has(p._createdBy)))
@@ -6333,7 +6336,7 @@ function App({ boot }) {
   const roleLabel = [role || "권한 확인 중", me.company].filter(Boolean).join(" · ");
   const showSetup = boot.isBootAdmin || isAdmin || canView("users");   // 목록 준비 안내 — 관리 쪽 사람에게만
   // APS 「돌아가기」 — 임직원만. Agent 역할 · Agent 로그인(STK-Sales-Freelancer) · 역할 확인 전에는 숨김
-  const showAps = !me.isGuest && !isExternalEmail(me.email) && !!role && role !== "Agent" && T365_APP_KIND !== "agent";
+  const showAps = !me.isGuest && !isExternalEmail(me.email) && !!role && !isAgentRole(role) && T365_APP_KIND !== "agent";
   const curCat = tab.startsWith("cat:") ? catMap[tab.slice(4)] : null;
   const meta = curCat ? [curCat.icon, curCat.desc, curCat] : ({
     overview: [LayoutDashboard, isAgent ? "게시판 홈 — 공지 · 확인이 필요한 필수 자료와 게시판별 새 글을 한눈에 봅니다" : "게시판 홈 — 공지 · 필수 자료와 게시판별 새 글, Agent 조회확인 현황을 한눈에 봅니다"],
