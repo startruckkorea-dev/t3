@@ -3288,7 +3288,8 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
             </div>
           </section>
 
-          <PublishCheckRecord post={post} />
+          {/* 게시 전 확인 기록 — 글쓴이 본인과 활동 이력을 볼 수 있는 사람(관리)에게만(10-21) */}
+          {(normEmail(post.AuthorEmail) === normEmail(ctx.me.email) || ctx.canView("activity")) && <PublishCheckRecord post={post} />}
 
           {post.Category === "qna" && <QnaAnswer ctx={ctx} post={post} />}
 
