@@ -274,7 +274,7 @@ import {
   Bold, List, ListOrdered, Heading2, Link2, Clock, BarChart3, Tags, HelpCircle, ListChecks, UserPlus, FileSpreadsheet, PlayCircle,
   Circle, Quote, BookOpen, LogOut, SquarePen, Truck, Container, Bus, Car, Gauge, Fuel, Wrench, Cog, HardHat, ClipboardList, Newspaper, Bell, Calendar, Gift, Star, Trophy, Award, Lightbulb, Target, Rocket, Zap, CircleDollarSign, Handshake, Briefcase, Building2, Phone, MapPin, Globe, Leaf, Flag, Camera, Sparkles, ImagePlus, Palette, GalleryHorizontal, ArrowRight, Pause, Play, AlignLeft, Rows3, ChevronRight, ChevronDown, ChevronUp, ChevronsLeft, ChevronsRight, TrendingUp, FileArchive, FileImage, FileVideo, Info, Inbox,
   BellRing, MessageCircleQuestion, MessageSquareReply, Copy,
-  ALargeSmall, Baseline, Highlighter,
+  ALargeSmall, Baseline, Highlighter, Check, ContactRound, Fingerprint, UserRound,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -335,7 +335,7 @@ const T365_COLUMNS = {
   links: ["Title", "Url", "Description", "Icon", "Color", "Audience", "SortOrder", "Active"],
 };
 // 선택 열 — 없어도 게시판은 동작하고 그 기능만 저장되지 않는다(관리자 안내)
-const T365_OPT_COLUMNS = { posts: ["Answer", "AnsweredBy", "AnsweredAt", "PinUntil", "AnswerFilesJson"] };   // AnswerFilesJson — 답변 첨부(여러 줄 텍스트)   // Q&A 답변 · 공지 · 필수 노출 기한(PinUntil — 한 줄 텍스트 YYYY-MM-DD 또는 날짜 열)
+const T365_OPT_COLUMNS = { posts: ["Answer", "AnsweredBy", "AnsweredAt", "PinUntil", "AnswerFilesJson", "PublishCheckJson"] };   // AnswerFilesJson — 답변 첨부(여러 줄 텍스트)   // Q&A 답변 · 공지 · 필수 노출 기한(PinUntil — 한 줄 텍스트 YYYY-MM-DD 또는 날짜 열)
 const T365_FILE_ROOT = "training365";          // (10-12 이전 첨부 위치 — 문서 라이브러리 training365/YYYY-MM/. 새 첨부는 AttachedFiles/Training365_Media-Files/{번호}/)
 const T365_LOG_ROOT = "Logging_data/Training365"; // 관리 행위 이력 — APS 와 같은 파일 방식
 
@@ -352,6 +352,19 @@ const ROLE_META = {
   "작성자": { cls: "bg-amber-50 text-amber-700 border-amber-100", desc: "본사 + 게시판 글쓰기(담당 게시판을 정하면 그 게시판만)" },
   "관리자": { cls: "bg-[#E4F1F0] text-[#2F7B7A] border-[#CFE6E4]", desc: "사용자 · 카테고리 · 게시물 · 접속 기록 관리" },
 };
+
+// 게시 전 확인(10-21) — 글 · 질문을 올릴 때 작성자가 하나씩 체크해야 게시된다. 기록은 게시물(PublishCheckJson, 선택 열)과 활동 이력에 남는다.
+// key 는 저장 값이라 바꾸지 않는다(문구 · 순서는 바꿔도 됨). 항목을 늘리면 새 글부터 적용
+const T365_PUBLISH_CHECKS = [
+  { key: "personal", label: "개인정보", icon: UserRound, desc: "주민등록번호 · 휴대전화 · 주소 · 개인 메일 등 개인을 알아볼 수 있는 정보가 없습니다" },
+  { key: "customer", label: "고객정보", icon: ContactRound, desc: "고객명 · 차량번호 · 차대번호 · 계약 · 견적 · 거래 내역이 없거나 가렸습니다" },
+  { key: "sensitive", label: "민감정보", icon: Fingerprint, desc: "계좌 · 카드 · 신분증 사본 · 건강 정보 · 비밀번호 등이 없습니다" },
+  { key: "files", label: "첨부 · 캡처", icon: Paperclip, desc: "첨부파일 · 화면 캡처 · 동영상에도 위 정보가 보이지 않습니다" },
+  { key: "scope", label: "공개 범위", icon: Globe, desc: "이 게시판을 볼 수 있는 모든 사람(외부 Agent 포함)에게 공개해도 되는 내용입니다" },
+];
+function parsePublishCheck(s) {
+  try { const v = JSON.parse(String(s || "")); return v && Array.isArray(v.items) && v.at ? v : null; } catch (e) { return null; }
+}
 
 // 기본 게시판 8개(7개 — 2026-09-09 · 10-07 회의록, Q&A — 10-12 추가). key 는 저장 값이라 바꾸지 않는다 — 이름 · 설명 · 순서 · 사용은 카테고리 관리에서
 const T365_DEFAULT_CATEGORIES = [
@@ -1869,7 +1882,8 @@ function SetupNotice({ status, infoToo = true }) {
   const ansMissing = postOpt.filter((c) => c.startsWith("Answer") && c !== "AnswerFilesJson");
   const pinMissing = postOpt.includes("PinUntil");
   const ansFilesMissing = postOpt.includes("AnswerFilesJson");
-  if (!warn && !((optionalMissing || bannerMissing || linksMissing || optCols.length || ansMissing.length || pinMissing || ansFilesMissing) && infoToo)) return null;   // 선택 목록 안내만 남았으면 게시판 화면에서는 숨긴다(Overview · 관리 화면에서만)
+  const checkColMissing = postOpt.includes("PublishCheckJson");
+  if (!warn && !((optionalMissing || bannerMissing || linksMissing || optCols.length || ansMissing.length || pinMissing || ansFilesMissing || checkColMissing) && infoToo)) return null;   // 선택 목록 안내만 남았으면 게시판 화면에서는 숨긴다(Overview · 관리 화면에서만)
   return (
     <div className={`rounded-xl border px-4 py-3 mb-5 text-xs leading-relaxed ${warn ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-blue-50 border-blue-100 text-blue-900"}`} data-testid="setup-notice">
       <div className="flex items-start gap-2.5">
@@ -1883,6 +1897,7 @@ function SetupNotice({ status, infoToo = true }) {
             {infoToo && optCols.map((c) => <li key={c}>선택 목록에 없는 열 — {c} (카테고리 아이콘 · 색 · 문의 담당자 / 배너 값이 저장되지 않습니다 — IT 에 열 추가 요청)</li>)}
             {infoToo && ansMissing.length > 0 && <li data-testid="qna-cols-missing">{T365_LISTS.posts} 에 Q&A 답변 열이 없습니다 — {ansMissing.join(", ")} (Answer: 여러 줄 텍스트 · AnsweredBy: 한 줄 텍스트 · AnsweredAt: 한 줄 텍스트) 를 만들어야 답변이 저장됩니다</li>}
             {infoToo && ansFilesMissing && <li data-testid="ans-files-col-missing">{T365_LISTS.posts} 에 AnswerFilesJson 열(여러 줄 텍스트)을 만들면 Q&A 답변에 파일을 붙일 수 있습니다</li>}
+            {infoToo && checkColMissing && <li data-testid="check-col-missing">{T365_LISTS.posts} 에 PublishCheckJson 열(여러 줄 텍스트)을 만들면 「게시 전 확인」 기록이 게시물에도 남습니다 — 없으면 활동 이력에만 남습니다</li>}
             {infoToo && pinMissing && <li data-testid="pin-col-missing">{T365_LISTS.posts} 에 PinUntil 열(한 줄 텍스트)을 만들면 글쓰기에서 공지 · 필수의 홈 노출 기한을 정할 수 있습니다 — 없으면 게시 후 7일 동안 보입니다</li>}
             {infoToo && linksMissing && <li data-testid="links-list-missing">{T365_LISTS.links} 목록이 없어 사이드바 「바로가기」 를 쓸 수 없습니다 — 만드는 방법(열 구조)은 관리자 전용 「바로가기 관리」 화면에 있습니다</li>}
             {infoToo && bannerMissing && <li>{T365_LISTS.banners} 목록이 없어 게시판 홈에 기본 배너(그림 없음)를 보여 줍니다 — 그림 배너를 쓰려면 목록을 만드세요</li>}
@@ -3273,6 +3288,8 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
             </div>
           </section>
 
+          <PublishCheckRecord post={post} />
+
           {post.Category === "qna" && <QnaAnswer ctx={ctx} post={post} />}
 
           {/* 조회확인 현황(본사 · 관리) — 한 줄, 누르면 명단 */}
@@ -3665,6 +3682,94 @@ function ConfirmPanel({ ctx, post }) {
 const T365_TITLE_MAX = 200, T365_BODY_MAX = 60000, T365_FILES_MAX = 10;
 // 저장 뒤 알림 — Q&A 는 어디서 올려도 「질문」 으로
 const savedToast = (wasEdit, cat) => (cat === "qna" ? (wasEdit ? "질문을 수정했습니다" : "질문을 올렸습니다") : wasEdit ? "게시물을 수정했습니다" : "게시물을 올렸습니다");
+/* 게시 전 확인 창(10-21) — 「게시」 를 누르면 뜬다. 모든 항목을 체크해야 「확인하고 게시」 가 켜진다 */
+function PublishCheckDialog({ me, isEdit, isQna, accent, onDone }) {
+  const [on, setOn] = useState(() => new Set());
+  const all = on.size === T365_PUBLISH_CHECKS.length;
+  const [now] = useState(() => new Date());
+  const boxRef = useRef(null);
+  const toggle = (k) => setOn((prev) => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const finish = (ok) => onDone(ok ? { v: 1, items: T365_PUBLISH_CHECKS.map((c) => c.key), labels: T365_PUBLISH_CHECKS.map((c) => c.label), by: me.name, email: normEmail(me.email), at: new Date().toISOString(), kind: isEdit ? "수정" : "등록" } : null);
+  useEffect(() => { const t = setTimeout(() => { const el = boxRef.current && boxRef.current.querySelector("input"); if (el) el.focus(); }, 30); return () => clearTimeout(t); }, []);
+  useEffect(() => {
+    // 위에서 키를 먼저 받는다 — 밑의 글쓰기 창 Esc 닫기 · Ctrl+Enter 게시가 함께 돌지 않게
+    const k = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(false); }
+      else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); e.stopPropagation(); if (all) finish(true); }
+    };
+    window.addEventListener("keydown", k, true); return () => window.removeEventListener("keydown", k, true);
+  });
+  const verb = isQna ? (isEdit ? "질문 저장" : "질문 올리기") : isEdit ? "저장" : "게시";
+  return (
+    <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center bg-slate-900/45 p-3 sm:p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) finish(false); }}>
+      <div ref={boxRef} role="dialog" aria-modal="true" aria-labelledby="pc-title" className="bg-white rounded-2xl shadow-2xl w-full max-w-[520px] max-h-[90vh] overflow-y-auto t365-dlg-in" data-testid="publish-check">
+        <div className="px-6 pt-5 pb-4 border-b border-slate-100 flex items-start gap-3">
+          <span className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#E7F5EE" }}><ShieldCheck size={19} style={{ color: "#047857" }} /></span>
+          <div className="min-w-0 flex-1">
+            <h3 id="pc-title" className="text-[15.5px] font-semibold text-slate-800 tracking-[-0.01em]">게시 전 확인</h3>
+            <p className="text-[12px] text-slate-500 leading-snug mt-0.5">아래 항목을 모두 확인해야 {verb}할 수 있습니다. 확인 기록은 게시물과 활동 이력에 남습니다.</p>
+          </div>
+          <button onClick={() => finish(false)} aria-label="닫기" tabIndex={-1} className="text-slate-400 hover:text-slate-600 shrink-0"><X size={19} /></button>
+        </div>
+        <div className="px-6 py-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11.5px] text-slate-400 tabular-nums" data-testid="pc-count"><b className={all ? "text-emerald-700" : "text-slate-600"}>{on.size}</b> / {T365_PUBLISH_CHECKS.length} 확인</span>
+            <button onClick={() => setOn(all ? new Set() : new Set(T365_PUBLISH_CHECKS.map((c) => c.key)))} className="text-[11.5px] font-medium text-slate-500 hover:text-slate-800" data-testid="pc-all">{all ? "모두 해제" : "모두 확인"}</button>
+          </div>
+          <ul className="space-y-2">
+            {T365_PUBLISH_CHECKS.map((c) => { const ck = on.has(c.key); const I = c.icon; return (
+              <li key={c.key}>
+                <label className={`flex items-start gap-3 px-3.5 py-3 rounded-xl border cursor-pointer select-none transition-colors ${ck ? "border-emerald-300 bg-emerald-50/60" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"}`} data-pc-item={c.key} data-on={ck ? "1" : "0"}>
+                  <input type="checkbox" checked={ck} onChange={() => toggle(c.key)} className="sr-only peer" />
+                  <span className={`mt-0.5 w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-500/40 ${ck ? "bg-emerald-600 border-emerald-600" : "bg-white border-slate-300"}`}>{ck && <Check size={13} className="text-white" strokeWidth={3} />}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-1.5 text-[13.5px] font-semibold text-slate-800"><I size={14} className={ck ? "text-emerald-700" : "text-slate-400"} />{c.label}</span>
+                    <span className="block text-[12px] text-slate-500 leading-snug mt-0.5">{c.desc}</span>
+                  </span>
+                </label>
+              </li>
+            ); })}
+          </ul>
+        </div>
+        <div className="px-6 py-3.5 border-t border-slate-100 bg-slate-50/70 rounded-b-2xl flex flex-col-reverse sm:flex-row sm:items-center gap-2">
+          <span className="text-[11.5px] text-slate-400 min-w-0 truncate sm:mr-auto" data-testid="pc-who">확인자 <b className="font-medium text-slate-600">{me.name}</b> · {fmtDate(now.toISOString())}</span>
+          <button onClick={() => finish(false)} className="h-10 px-4 text-sm rounded-lg border border-slate-300 text-slate-600 bg-white hover:bg-slate-50" data-testid="pc-cancel">돌아가기</button>
+          <button onClick={() => finish(true)} disabled={!all} className="h-10 px-5 text-sm rounded-lg text-white font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed hover:brightness-110" style={{ background: accent || BRAND.accent }} data-testid="pc-ok"><ShieldCheck size={15} />확인하고 {verb}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+// 게시물 안의 확인 기록 — 본문 · 첨부 아래 한 줄(누르면 항목 펼침)
+function PublishCheckRecord({ post }) {
+  const rec = parsePublishCheck(post.PublishCheckJson);
+  const [open, setOpen] = useState(false);
+  if (!rec) return null;
+  const labels = rec.items.map((k) => (T365_PUBLISH_CHECKS.find((c) => c.key === k) || {}).label || k);
+  return (
+    <section className="px-5 md:px-10 pb-5" data-testid="post-check">
+      <div className="rounded-xl border border-emerald-100 bg-gradient-to-r from-emerald-50/80 to-white">
+        <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className="w-full flex items-center gap-2.5 px-3.5 h-10 text-left" data-testid="post-check-toggle">
+          <span className="w-6 h-6 rounded-md bg-white border border-emerald-100 flex items-center justify-center shrink-0"><ShieldCheck size={13} className="text-emerald-700" /></span>
+          <span className="text-[12.5px] font-semibold text-emerald-800 whitespace-nowrap">게시 전 확인 완료</span>
+          <span className="hidden sm:inline text-[11.5px] text-emerald-700/70 truncate min-w-0">{labels.join(" · ")}</span>
+          <span className="ml-auto text-[11.5px] text-slate-500 whitespace-nowrap tabular-nums">{rec.by} · {fmtDate(rec.at)}</span>
+          <ChevronDown size={14} className={`text-slate-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+        {open && (
+          <div className="px-3.5 pb-3 pt-0.5 border-t border-emerald-100/70" data-testid="post-check-detail">
+            <ul className="grid sm:grid-cols-2 gap-x-6 gap-y-1.5 mt-2.5">
+              {rec.items.map((k) => { const c = T365_PUBLISH_CHECKS.find((x) => x.key === k) || { label: k, desc: "" }; return (
+                <li key={k} className="flex items-start gap-2 text-[12px]"><CheckCircle2 size={13} className="text-emerald-600 shrink-0 mt-0.5" /><span className="min-w-0"><b className="font-medium text-slate-700">{c.label}</b><span className="text-slate-400"> — {c.desc}</span></span></li>
+              ); })}
+            </ul>
+            <div className="mt-2.5 text-[11px] text-slate-400">{rec.kind === "수정" ? "마지막 수정 때" : "게시할 때"} {rec.by}{rec.email ? ` (${rec.email})` : ""} 님이 {fmtDate(rec.at)} 에 확인했습니다 · 활동 이력에도 같은 기록이 있습니다</div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
 function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
   const writable = ctx.cats.filter((c) => ctx.canWrite(c.key));
   const isEdit = !!(post && post.id);
@@ -3677,6 +3782,11 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
   const [pinUntil, setPinUntil] = useState(isEdit ? pinUntilOf(post) : "");
   const [pinCol, setPinCol] = useState(null);   // null 확인 중 · "" 열 없음 · "text" | "dateTime"
   useEffect(() => { if (ctx.isAgent) return; let alive = true; tColumnTypes(T365_LISTS.posts).then((m) => { if (alive) setPinCol(m.get("PinUntil") || ""); }, () => { if (alive) setPinCol(""); }); return () => { alive = false; }; }, []);
+  // 게시 전 확인 — 창(checkReq) · 게시물 열(PublishCheckJson) 있는지
+  const [checkReq, setCheckReq] = useState(null);
+  const [checkCol, setCheckCol] = useState(null);
+  useEffect(() => { let alive = true; tColumnTypes(T365_LISTS.posts).then((m) => { if (alive) setCheckCol(m.has("PublishCheckJson")); }, () => { if (alive) setCheckCol(false); }); return () => { alive = false; }; }, []);
+  const askPublishCheck = () => new Promise((resolve) => setCheckReq({ resolve }));
   const [reqConfirm, setReqConfirm] = useState(isEdit ? !!post.RequireConfirm : !!(ctx.catMap[init] && ctx.catMap[init].required));
   const [files, setFiles] = useState(isEdit ? parseFiles(post.AttachmentsJson) : []);
   const [newFiles, setNewFiles] = useState([]);
@@ -3798,6 +3908,9 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
     if (t.length > T365_TITLE_MAX) { uiAlert(`제목은 ${T365_TITLE_MAX}자까지 입력할 수 있습니다.`); return; }
     if (!body.trim() && !files.length && !newFiles.length && !playFiles.length && !newPlay.length) { uiAlert("본문을 입력하거나 파일을 첨부해 주세요."); return; }
     if (body.length > T365_BODY_MAX) { uiAlert("본문이 너무 깁니다(6만 자까지). 긴 자료는 파일로 첨부해 주세요."); return; }
+    if (checkReq) return;
+    const check = await askPublishCheck();   // 게시 전 확인 — 모두 체크해야 진행
+    if (!check || savingRef.current) return;
     savingRef.current = true;
     const failed = [];
     let createdId = null;
@@ -3823,6 +3936,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
     try {
       const now = new Date().toISOString();
       const fields = { Title: t, Category: cat, Body: body, IsPinned: canFlag && !!pinned, RequireConfirm: canFlag && !!reqConfirm };   // Agent 글 · Q&A 질문은 공지 · 필수가 될 수 없다
+      if (checkCol) fields.PublishCheckJson = JSON.stringify(check);   // 열이 없으면 활동 이력에만
       const pinVal = fields.IsPinned || fields.RequireConfirm ? pinUntil : "";   // 공지 · 필수가 아니면 기한도 비운다
       // 기한은 값이 있을 때, 또는 수정에서 예전 기한을 지울 때만 보낸다. 날짜 열은 한국 정오(UTC 03:00)로 — 「날짜만」 형식이어도 날짜가 밀리지 않게, 지우기는 null
       if (!ctx.isAgent && pinCol && (pinVal || (isEdit && pinUntilOf(post)))) fields.PinUntil = pinCol === "dateTime" ? (pinVal ? `${pinVal}T03:00:00Z` : null) : pinVal;
@@ -3854,6 +3968,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
         const before = parseFiles(post.AttachmentsJson).length;
         if (before !== allFiles.length || uploaded.length) changes["첨부"] = [`${before}개`, `${allFiles.length}개`];
         t365Log("게시물", "수정", t, { changes, info: { 게시물ID: id, ...(uploaded.length ? { "첨부 위치": `${T365_ATTACH_LIB}/${attachFolderOf(id, cat)}` } : {}) } });
+        t365Log("게시물", "게시 전 확인", t, { info: { 게시물ID: id, 구분: check.kind, 확인자: `${check.by} (${check.email})`, 확인시각: fmtDate(check.at), 확인항목: check.labels.join(" · "), "게시물에 기록": checkCol ? "예" : "아니요(PublishCheckJson 열 없음)" } });
         const removed = [...parseFiles(post.AttachmentsJson).filter((f) => !allFiles.some((x) => x.itemId === f.itemId)), ...parseFiles(post.VideoFileJson).filter((f) => !allPlay.some((x) => x.itemId === f.itemId))];
         if (removed.length) tDeleteRemovedFiles(id, removed);   // 뺀 첨부는 휴지통으로(이 글 폴더 안의 것만 · 실패해도 저장은 그대로)
       } else {
@@ -3870,6 +3985,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
           await tUpdate(T365_LISTS.posts, id, { ...(uploaded.length ? { AttachmentsJson: JSON.stringify(uploaded) } : {}), ...(uploadedPlay.length ? { VideoFileJson: JSON.stringify(uploadedPlay) } : {}), ...(defer ? { IsPinned: fields.IsPinned, RequireConfirm: fields.RequireConfirm } : {}), Category: cat });
         }
         t365Log("게시물", "등록", t, { info: { 카테고리: (ctx.catMap[cat] || {}).label || cat, 게시물ID: id, 첨부: `${uploaded.length}개`, ...(uploaded.length ? { "첨부 위치": `${T365_ATTACH_LIB}/${attachFolderOf(id, cat)}` } : {}), 중요: !!fields.IsPinned, "조회확인 필수": !!fields.RequireConfirm, ...(pinVal && "PinUntil" in fields ? { "홈 노출 기한": pinVal } : {}) } });
+        t365Log("게시물", "게시 전 확인", t, { info: { 게시물ID: id, 구분: check.kind, 확인자: `${check.by} (${check.email})`, 확인시각: fmtDate(check.at), 확인항목: check.labels.join(" · "), "게시물에 기록": checkCol ? "예" : "아니요(PublishCheckJson 열 없음)" } });
       }
       setSaving(""); savingRef.current = false;
       if (!isEdit && !draft) clearDraft();   // 묻던 예전 임시 글(불러오기 · 버리기 전)은 남겨 둔다
@@ -4097,6 +4213,7 @@ const Tip = ({ icon: I, children }) => <li className="flex items-center gap-2 mi
         <button onClick={requestClose} disabled={!!saving} className="h-10 px-4 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 ml-auto lg:ml-0">취소</button>
         <button onClick={save} disabled={!!saving} className="h-10 px-6 text-sm rounded-lg text-white font-semibold disabled:opacity-50 inline-flex items-center gap-1.5 shadow-sm transition-colors duration-300 hover:brightness-110" style={{ background: curCat ? curCat.color : BRAND.accent }} data-testid="ed-save"><CheckCircle2 size={15} />{isEdit ? "수정 저장" : isQna ? "질문 올리기" : "게시"}</button>
       </div>
+      {checkReq && <PublishCheckDialog me={ctx.me} isEdit={isEdit} isQna={isQna} accent={curCat ? curCat.color : BRAND.accent} onDone={(v) => { const r = checkReq.resolve; setCheckReq(null); r(v); }} />}
       {saving && <BlockingOverlay message={saving} />}
     </PostModalShell>
   );
@@ -5895,7 +6012,7 @@ function AccessLogTab({ ctx }) {
 /* ------------------------------------------------------------------ */
 const T365_LOG_CATS = ["게시물", "사용자", "카테고리", "배너", "바로가기", "조회확인", "접속 기록", "활동 이력"];   // 10-15 배너 · 바로가기 · 활동 이력
 function logCatStyle(c) { return { "게시물": "bg-teal-50 text-teal-700", "사용자": "bg-violet-50 text-violet-700", "카테고리": "bg-blue-50 text-blue-700", "조회확인": "bg-orange-50 text-orange-700", "접속 기록": "bg-slate-100 text-slate-600" }[c] || "bg-slate-100 text-slate-600"; }
-function logVerbStyle(v) { return /삭제|중지/.test(v) ? "text-red-600" : /등록|추가|사용$/.test(v) ? "text-emerald-700" : "text-slate-700"; }
+function logVerbStyle(v) { return /삭제|중지/.test(v) ? "text-red-600" : /게시 전 확인/.test(v) ? "text-sky-700" : /등록|추가|사용$/.test(v) ? "text-emerald-700" : "text-slate-700"; }
 function fmtVal(v) { return v === true ? "예" : v === false ? "아니요" : v === "" || v == null ? "(빈 값)" : String(v); }
 function logSummary(l) {
   const d = l.detail || {};
