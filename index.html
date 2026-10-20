@@ -6663,7 +6663,12 @@ function readyLogin() {
   if (a) { a.disabled = false; a.textContent = "임직원 로그인"; }
   if (b) { b.disabled = false; b.textContent = "Agent 로그인"; }
 }
-async function t365Login(kind) {
+// 10-21 MSAL 이 남긴 「진행 중」 표시 지우기 — Agent 앱에서 로그아웃하고 돌아오면 임직원 앱으로 열려 그 표시가 안 지워지고,
+// 바로 Agent 로그인을 누르면 interaction_in_progress 로 막혔다
+function t365ClearMsalInteraction() {
+  try { Object.keys(sessionStorage).filter((k) => /interaction\.status/i.test(k)).forEach((k) => sessionStorage.removeItem(k)); } catch (e) {}
+}
+async function t365Login(kind, retried) {
   try {
     if (window !== window.top) { window.open(window.location.href, "_blank"); return; }
     if (kind !== T365_APP_KIND) {   // 다른 앱으로 — 그 앱으로 새로 만들어 로그인
@@ -6671,9 +6676,13 @@ async function t365Login(kind) {
       T365_APP_KIND = kind;
       msalApp = new msal.PublicClientApplication({ ...MSAL_CONFIG, auth: { ...MSAL_CONFIG.auth, clientId: T365_APPS[kind] } });
       await msalApp.initialize();
+      try { await msalApp.handleRedirectPromise(); } catch (e) {}   // 이 앱이 남긴 이전 리디렉션(로그아웃 등) 정리
     } else { try { sessionStorage.setItem("t365.app", kind); } catch (e) {} }
     await msalApp.loginRedirect({ scopes: MSAL_SCOPES, prompt: "select_account" });
-  } catch (e) { showLoginErr(e.message); }
+  } catch (e) {
+    if (!retried && /interaction_in_progress/i.test((e && (e.errorCode || e.message)) || "")) { t365ClearMsalInteraction(); return t365Login(kind, true); }
+    showLoginErr(e.message);
+  }
 }
 document.getElementById("btn-login").onclick = () => t365Login("staff");
 document.getElementById("btn-login-agent").onclick = () => t365Login("agent");
