@@ -286,9 +286,10 @@ const LOGO_SRC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAeYAAAA7CAIAAAAh
 // 둘 다 training365.startruckkorea.com 리디렉션 URI(SPA)가 등록돼 있어야 한다. 고른 앱은 이 탭(sessionStorage)에 기억해 리디렉션 뒤 같은 앱으로 이어받는다
 const T365_APPS = { staff: "432976c2-b43a-492e-8213-ece505fa1f51", agent: "0346d368-7dc6-41a6-a310-7afa10fa5bd7" };
 // Agent 이용 시간 — 한국 시간 06:00 ~ 22:00 (10-18)
-const T365_AGENT_HOURS = { from: 6, to: 22 };
+// on: false 면 시간 제한을 끈다(10-21 요청으로 잠시 해제 — 다시 걸려면 true)
+const T365_AGENT_HOURS = { on: false, from: 6, to: 22 };
 function t365KstHour(now = Date.now()) { const d = new Date(now + 9 * 3600e3); return d.getUTCHours() + d.getUTCMinutes() / 60; }
-function t365AgentHoursOk(now = Date.now()) { const h = t365KstHour(now); return h >= T365_AGENT_HOURS.from && h < T365_AGENT_HOURS.to; }
+function t365AgentHoursOk(now = Date.now()) { if (!T365_AGENT_HOURS.on) return true; const h = t365KstHour(now); return h >= T365_AGENT_HOURS.from && h < T365_AGENT_HOURS.to; }
 let T365_APP_KIND = (() => { try { return sessionStorage.getItem("t365.app") === "agent" ? "agent" : "staff"; } catch (e) { return "staff"; } })();
 const MSAL_CONFIG = {
   auth: {
