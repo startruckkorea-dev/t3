@@ -8,7 +8,9 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://esm.sh https://unpkg.com https://cdn.jsdelivr.net https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: blob: https://*.sharepoint.com; media-src 'self' blob: https://*.sharepoint.com https://*.svc.ms; connect-src 'self' https://graph.microsoft.com https://login.microsoftonline.com https://*.sharepoint.com https://esm.sh; frame-src 'self' https://login.microsoftonline.com https://login.live.com https://www.youtube-nocookie.com https://startruckkorea.com https://www.startruckkorea.com; object-src 'none'; base-uri 'self'; form-action 'self' https://login.microsoftonline.com" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Training365</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23101B34'/%3E%3Cpath d='M18 20h28v6H35v22h-6V26H18z' fill='%23fff'/%3E%3Ccircle cx='47' cy='45' r='6' fill='%232F7B7A'/%3E%3C/svg%3E" />
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
 <script src="https://cdn.tailwindcss.com"></script>
 <script type="importmap">
@@ -91,10 +93,10 @@
   body { letter-spacing: -0.01em; -webkit-font-smoothing: antialiased; }
   .t365-portlet { border: 1px solid #E6E9EE !important; border-radius: 16px !important; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 12px 32px -24px rgba(16,24,40,.18) !important; }
   .t365-portlet-head { height: 3.5rem !important; padding: 0 1.25rem !important; border-bottom-color: #EEF0F3 !important; }
-  .t365-portlet-head h2 { font-size: 16px !important; letter-spacing: -0.02em; }
+  .t365-portlet-head h2 { font-size: 17px !important; letter-spacing: -0.02em; }
   /* 상자 머리의 작은 색 아이콘 네모는 숨기고 제목만(10-15 다듬기) */
   .t365-portlet-head > span.w-6.h-6:first-child { display: none; }
-  .t365-portlet-head h3 { font-size: 16px !important; letter-spacing: -0.02em; }
+  .t365-portlet-head h3 { font-size: 17px !important; letter-spacing: -0.02em; }
   /* 게시판 목록 — 효성 게시판처럼: 표 위 굵은 선 · 얇은 줄 선 · 넉넉한 줄 높이 · 옅은 머리 */
   [data-testid=board] { border-radius: 16px !important; }
   [data-testid=board] select, [data-testid=board] input[data-testid=board-search] { border-color: #E5E7EB !important; border-radius: 8px !important; }
@@ -2248,18 +2250,18 @@ function BoardCell({ cat, bare }) {
 function HomePostRow({ p, cat, onOpen, seen, fresh, views, confirm, tags, attr, className }) {
   const pin = pinActive(p);
   return (
-    <button onClick={() => onOpen(p)} title={p.Title} {...attr} className={`group block w-full text-left px-5 py-2.5 border-t border-[#E9EEF3] first:border-t-0 hover:bg-[#F6FAF9] transition-colors min-w-0 ${className || ""}`}>
+    <button onClick={() => onOpen(p)} title={p.Title} {...attr} className={`group block w-full text-left px-5 py-3 border-t border-[#E9EEF3] first:border-t-0 hover:bg-[#F6FAF9] transition-colors min-w-0 ${className || ""}`}>
       <span className="flex items-center gap-1.5 min-w-0">
         {tags && pin && <span data-kind="pin"><NoticePill /></span>}
-        <span className={`min-w-0 truncate text-[14.5px] leading-6 tracking-[-0.01em] group-hover:underline underline-offset-2 ${seen ? "font-medium text-slate-700" : "font-bold text-slate-900"}`}>{p.Title}</span>
+        <span className={`min-w-0 truncate text-[15.5px] leading-6 tracking-[-0.015em] group-hover:underline underline-offset-2 ${seen ? "font-medium text-slate-700" : "font-bold text-slate-900"}`}>{p.Title}</span>
         {fresh && <NewDot />}
         <PostMarks p={p} compact />
       </span>
-      <span className="mt-1 flex items-center flex-wrap gap-y-0.5 text-[12px] text-slate-500 tabular-nums t365-meta">
-        <span className="t365-mc inline-flex items-center gap-1 font-semibold max-w-[160px] sm:max-w-none sm:w-[132px]" style={{ color: cat ? cat.color : "#64748B" }} data-row-cat title={cat ? cat.label : ""}>{cat && cat.icon ? <cat.icon size={12} className="shrink-0" /> : null}<span className="truncate">{cat ? cat.label : "-"}</span></span>
-        <span className="t365-mc sm:w-[78px]" data-postno={p.id} title="게시물 등록 번호(SharePoint ID) — 게시물 주소 · 검색에 쓰는 고유 번호">No. {p.id}</span>
-        <span className="t365-mc max-w-[160px] sm:max-w-none sm:w-[124px]" title={p.AuthorName || ""}>{p.AuthorName || "-"}</span>
-        <span className="t365-mc sm:w-[104px]" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
+      <span className="mt-1 flex items-center flex-wrap gap-y-0.5 text-[13px] text-slate-500 tabular-nums t365-meta">
+        <span className="t365-mc inline-flex items-center gap-1 font-semibold max-w-[160px] sm:max-w-none sm:w-[146px]" style={{ color: cat ? cat.color : "#64748B" }} data-row-cat title={cat ? cat.label : ""}>{cat && cat.icon ? <cat.icon size={13} className="shrink-0" /> : null}<span className="truncate">{cat ? cat.label : "-"}</span></span>
+        <span className="t365-mc sm:w-[84px]" data-postno={p.id} title="게시물 등록 번호(SharePoint ID) — 게시물 주소 · 검색에 쓰는 고유 번호">No. {p.id}</span>
+        <span className="t365-mc max-w-[160px] sm:max-w-none sm:w-[132px]" title={p.AuthorName || ""}>{p.AuthorName || "-"}</span>
+        <span className="t365-mc sm:w-[112px]" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
         <span className="t365-mc sm:w-[90px]">조회 {views || 0}</span>
         {confirm && <span className="inline-flex items-center">{confirm}</span>}
       </span>
@@ -2730,8 +2732,8 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
               {todo.length ? todo.slice(0, 5).map((p, i) => { const c = catMap[p.Category]; const I = (c && c.icon) || FileText; return (
                 <button key={p.id} onClick={() => openPost(p)} title={p.Title} data-todo={p.id} className="t365-todo-row group/t w-full text-left px-4 h-11 flex items-center gap-2.5 border-t border-slate-100 first:border-t-0 hover:bg-orange-50/50 transition-colors min-w-0 t365-rise" style={{ animationDelay: `${120 + i * 60}ms` }}>
                   <span className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: c && c.soft }} title={c && c.label}><I size={12} style={{ color: c && c.color }} /></span>
-                  <span className="min-w-0 flex-1 flex items-center gap-1.5">{fresh(p) && <NewDot />}<span className="truncate text-[13px] text-slate-800 font-medium">{p.Title}</span></span>
-                  <span className="text-[11px] text-slate-400 tabular-nums shrink-0" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
+                  <span className="min-w-0 flex-1 flex items-center gap-1.5">{fresh(p) && <NewDot />}<span className="truncate text-[14px] text-slate-800 font-medium">{p.Title}</span></span>
+                  <span className="text-[12px] text-slate-400 tabular-nums shrink-0" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
                   <ChevronRight size={14} className="t365-todo-go shrink-0 -mr-1 text-orange-600" aria-hidden="true" />
                 </button>
               ); }) : reqAll.length ? (
@@ -2759,13 +2761,13 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                   <button key={p.id} onClick={() => openPost(p)} title={p.Title} data-qna-row={p.id} className={`w-full text-left px-4 py-2.5 block border-t border-[#E9EEF3] first:border-t-0 min-w-0 ${isNew ? "bg-[#F3F7FE] hover:bg-[#EAF1FD]" : "hover:bg-[#F3F7FE]"}`}>
                     <span className="flex items-center gap-1.5 min-w-0">
                       {fresh(p) && <NewDot />}
-                      <span className={`truncate text-[13px] ${seen(p) && !isNew ? "text-slate-700" : "font-semibold text-slate-900"}`}>{p.Title}</span>
+                      <span className={`truncate text-[14.5px] tracking-[-0.01em] ${seen(p) && !isNew ? "text-slate-700 font-medium" : "font-semibold text-slate-900"}`}>{p.Title}</span>
                     </span>
-                    <span className="mt-1 flex items-center gap-1.5 text-[11.5px] text-slate-400 min-w-0">
-                      <span className="t365-mc w-[64px] inline-flex">{isNew ? <span className="t365-pill text-white" style={{ background: "#1D4ED8" }} data-qna="new"><Sparkles size={10} />새 답변</span> : <QnaPill p={p} age={duty} />}</span>
-                      <span className="t365-mc w-[44px] tabular-nums" data-postno={p.id}>No. {p.id}</span>
+                    <span className="mt-1 flex items-center gap-1.5 text-[12.5px] text-slate-400 min-w-0">
+                      <span className="t365-mc w-[70px] inline-flex">{isNew ? <span className="t365-pill text-white" style={{ background: "#1D4ED8" }} data-qna="new"><Sparkles size={10} />새 답변</span> : <QnaPill p={p} age={duty} />}</span>
+                      <span className="t365-mc w-[50px] tabular-nums" data-postno={p.id}>No. {p.id}</span>
                       <span className="text-slate-300">·</span>
-                      <span className="t365-mc w-[84px] inline-flex">{mineQ(p) ? <span className="t365-pill bg-slate-100 text-slate-500" data-mine="1">내 질문</span> : <span className="truncate" title={p.AuthorName || ""}>{p.AuthorName || ""}</span>}</span>
+                      <span className="t365-mc w-[92px] inline-flex">{mineQ(p) ? <span className="t365-pill bg-slate-100 text-slate-500" data-mine="1">내 질문</span> : <span className="truncate" title={p.AuthorName || ""}>{p.AuthorName || ""}</span>}</span>
                       <span className="text-slate-300">·</span>
                       <span className="tabular-nums shrink-0" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
                     </span>
@@ -2785,12 +2787,12 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                   {popular.map(({ p, v }, i) => { const c = catMap[p.Category]; const I = (c && c.icon) || FileText; return (
                     <li key={p.id}>
                       <button onClick={() => openPost(p)} title={p.Title} data-popular={p.id} className="w-full text-left px-4 py-2.5 flex items-start gap-3 hover:bg-[#EEF6F5] border-t border-[#E9EEF3] min-w-0">
-                        <span className={`mt-0.5 w-5 h-5 rounded-md flex items-center justify-center text-[11.5px] font-bold tabular-nums shrink-0 ${i < 3 ? "text-white" : "text-slate-500 bg-white border border-slate-200"}`} style={i < 3 ? { background: BRAND.accent } : undefined}>{i + 1}</span>
+                        <span className={`mt-0.5 w-[22px] h-[22px] rounded-md flex items-center justify-center text-[12px] font-bold tabular-nums shrink-0 ${i < 3 ? "text-white" : "text-slate-500 bg-white border border-slate-200"}`} style={i < 3 ? { background: BRAND.accent } : undefined}>{i + 1}</span>
                         <span className="min-w-0 flex-1">
-                          <span className="flex items-center gap-1.5 min-w-0">{fresh(p) && <NewDot />}<span className={`truncate text-[13px] ${seen(p) ? "text-slate-700" : "font-semibold text-slate-900"}`}>{p.Title}</span></span>
-                          <span className="mt-1 flex items-center gap-1.5 text-[11.5px] text-slate-400 min-w-0">
-                            <span className="t365-mc w-[132px] inline-flex items-center gap-1 font-medium" style={{ color: c && c.color }} title={c ? c.label : ""}><span className="w-4 h-4 rounded flex items-center justify-center shrink-0" style={{ background: c && c.soft }}><I size={10} style={{ color: c && c.color }} /></span><span className="truncate">{c ? c.label : "-"}</span></span>
-                            <span className="text-slate-300">·</span><span className="inline-flex items-center gap-0.5 tabular-nums shrink-0"><Eye size={11} />조회 {v}</span>
+                          <span className="flex items-center gap-1.5 min-w-0">{fresh(p) && <NewDot />}<span className={`truncate text-[14.5px] tracking-[-0.01em] ${seen(p) ? "text-slate-700 font-medium" : "font-semibold text-slate-900"}`}>{p.Title}</span></span>
+                          <span className="mt-1 flex items-center gap-1.5 text-[12.5px] text-slate-400 min-w-0">
+                            <span className="t365-mc w-[140px] inline-flex items-center gap-1 font-medium" style={{ color: c && c.color }} title={c ? c.label : ""}><span className="w-4 h-4 rounded flex items-center justify-center shrink-0" style={{ background: c && c.soft }}><I size={10} style={{ color: c && c.color }} /></span><span className="truncate">{c ? c.label : "-"}</span></span>
+                            <span className="text-slate-300">·</span><span className="inline-flex items-center gap-0.5 tabular-nums shrink-0"><Eye size={12} />조회 {v}</span>
                           </span>
                         </span>
                       </button>
