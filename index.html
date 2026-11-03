@@ -2285,7 +2285,8 @@ async function copyText(text) {
 // 메일 쓰기 주소(Outlook 웹 새 메일) — 주소 길이 한계를 넘으면 본문을 링크만으로 · 제목을 줄여 다시 만들고,
 // 그래도 길면(받는 사람이 많을 때) null → 부르는 쪽에서 주소 복사로 대신
 // 알림 메일 — Outlook 웹 「새 메일」 창 주소(10-15). 예전 mailto: 는 Windows Outlook(데스크톱)이 한글 제목 · 본문을 받으면서
-// 글자가 겹치거나(「안녕하세요하세요」) 빠지고 띄어지는 문제가 있었다 — 웹 창은 UTF-8 을 그대로 받는다. 받는 사람 · 숨은 참조 · 제목 · 본문은 모두 인코딩
+// 글자가 겹치거나(「안녕하세요하세요」) 빠지고 띄어지는 문제가 있었다 — 웹 창은 UTF-8 을 그대로 받는다. 받는 사람 · 제목 · 본문은 모두 인코딩
+// 11-03 Outlook 웹 새 메일 주소는 숨은 참조(bcc)를 받지 않는다(빈 창으로 열림) — 받는 사람이 여럿이면 to 에 「;」 로 넣는다
 const T365_OWA_COMPOSE = "https://outlook.office.com/mail/deeplink/compose";
 function mailtoHref({ to = [], bcc = [], subject = "", body = "", link = "" }) {
   const q = (k, v) => `${k}=${encodeURIComponent(v)}`;
@@ -3539,22 +3540,22 @@ function ConfirmPanel({ ctx, post }) {
     .filter((x) => view === "all" ? true : view === "done" ? !!x.confirmedAt : !x.confirmedAt)
     .filter((x) => !qq || [x.user.Title, x.user.Email, x.user.Company].some((v) => String(v || "").toLowerCase().includes(qq)))
     .sort((a, b) => (a.confirmedAt ? 0 : 1) - (b.confirmedAt ? 0 : 1) || String(a.confirmedAt).localeCompare(String(b.confirmedAt)) || String(a.user.Company || "").localeCompare(String(b.user.Company || "")) || String(a.user.Title || "").localeCompare(String(b.user.Title || "")));
-  // 미확인 Agent 에게 확인 요청 — 메일 앱(숨은 참조)으로, 인원이 많아 주소가 너무 길면 주소 복사로
+  // 미확인 Agent 에게 확인 요청 — Outlook 웹 새 메일의 받는 사람(To)으로(11-03 숨은 참조 → 받는 사람), 인원이 많아 주소가 너무 길면 주소 복사로
   const pendingEmails = req ? s.rows.filter((x) => !x.confirmedAt).map((x) => normEmail(x.user.Email)).filter(Boolean) : [];
-  const remindHref = pendingEmails.length ? mailtoHref({ bcc: pendingEmails, link: postLink(post), subject: `[Training365] 필수 자료 확인 요청 — ${post.Title}`,
+  const remindHref = pendingEmails.length ? mailtoHref({ to: pendingEmails, link: postLink(post), subject: `[Training365] 필수 자료 확인 요청 — ${post.Title}`,
     body: `안녕하세요.\n\nTraining365 에 올라온 필수 자료를 아직 확인하지 않으셨습니다.\n아래 링크로 들어가 내용을 확인해 주세요 — 글을 열면 조회확인이 자동으로 기록됩니다.\n\n■ ${post.Title}\n${postLink(post)}\n\n감사합니다.\n${ctx.me.name || ""}` }) : null;
   async function copyPending() {
     const ok = await copyText(pendingEmails.join("; "));
-    toast(ok ? `미확인 ${pendingEmails.length}명의 메일 주소를 복사했습니다 — 메일의 숨은 참조(BCC)에 붙여 넣으세요` : "주소를 복사하지 못했습니다");
+    toast(ok ? `미확인 ${pendingEmails.length}명의 메일 주소를 복사했습니다 — 메일의 받는 사람(To) 칸에 붙여 넣으세요` : "주소를 복사하지 못했습니다");
     if (ok) t365Log("조회확인", "미확인 주소 복사", post.Title, { info: { 인원: pendingEmails.length } });
   }
-  // 필수가 아닌 글(공지 등) — 아직 안 본 Agent 에게 알림 메일(숨은 참조). Q&A 질문은 대상 아님
+  // 필수가 아닌 글(공지 등) — 아직 안 본 Agent 에게 알림 메일(받는 사람). Q&A 질문은 대상 아님
   const unseenAgents = !req && post.Category !== "qna" ? s.rows.filter((x) => !x.viewedAt).map((x) => normEmail(x.user.Email)).filter(Boolean) : [];
-  const nudgeHref = unseenAgents.length ? mailtoHref({ bcc: unseenAgents, link: postLink(post), subject: `[Training365] ${post.Title}`,
+  const nudgeHref = unseenAgents.length ? mailtoHref({ to: unseenAgents, link: postLink(post), subject: `[Training365] ${post.Title}`,
     body: `안녕하세요.\n\nTraining365 에 확인하실 글이 있습니다. 아래 링크에서 확인해 주세요.\n\n■ ${post.Title}\n${postLink(post)}\n\n감사합니다.\n${ctx.me.name || ""}` }) : null;
   async function copyUnseen() {
     const ok = await copyText(unseenAgents.join("; "));
-    toast(ok ? `아직 안 본 Agent ${unseenAgents.length}명의 메일 주소를 복사했습니다 — 메일의 숨은 참조(BCC)에 붙여 넣으세요` : "주소를 복사하지 못했습니다");
+    toast(ok ? `아직 안 본 Agent ${unseenAgents.length}명의 메일 주소를 복사했습니다 — 메일의 받는 사람(To) 칸에 붙여 넣으세요` : "주소를 복사하지 못했습니다");
     if (ok) t365Log("게시물", "안 본 Agent 주소 복사", post.Title, { info: { 인원: unseenAgents.length } });
   }
   function exportExcel() {
@@ -3603,7 +3604,7 @@ function ConfirmPanel({ ctx, post }) {
           <span className="text-[12px] text-slate-500">역할과 관계없이 열어 본 모든 사람 · 최근 열람 순</span>
           <span className="ml-auto flex items-center gap-1.5">
             {unseenAgents.length > 0 && (nudgeHref
-              ? <a href={nudgeHref} target="_blank" rel="noopener noreferrer" onClick={() => t365Log("게시물", "안 본 Agent 메일", post.Title, { info: { 인원: unseenAgents.length } })} className={`${btnCls} h-8`} data-testid="nudge-mail" title="Outlook 웹 새 메일 창이 열리고 아직 이 글을 열지 않은 Agent 가 숨은 참조(BCC)로 들어갑니다"><Mail size={13} />안 본 Agent {unseenAgents.length}명에게 메일</a>
+              ? <a href={nudgeHref} target="_blank" rel="noopener noreferrer" onClick={() => t365Log("게시물", "안 본 Agent 메일", post.Title, { info: { 인원: unseenAgents.length } })} className={`${btnCls} h-8`} data-testid="nudge-mail" title="Outlook 웹 새 메일 창이 열리고 아직 이 글을 열지 않은 Agent 가 받는 사람(To)으로 들어갑니다"><Mail size={13} />안 본 Agent {unseenAgents.length}명에게 메일</a>
               : <button onClick={copyUnseen} className={`${btnCls} h-8`} data-testid="nudge-mail" title="인원이 많아 메일 창으로 바로 넘길 수 없습니다 — 주소를 복사합니다"><Copy size={13} />안 본 Agent {unseenAgents.length}명 주소 복사</button>)}
             <button onClick={exportExcel} className={`${btnCls} h-8`}><Download size={13} /> Excel</button>
           </span>
@@ -3641,7 +3642,7 @@ function ConfirmPanel({ ctx, post }) {
                 </div>
                 <div className="ml-auto flex items-center gap-1.5">
                   {pendingEmails.length > 0 && (remindHref
-                    ? <a href={remindHref} target="_blank" rel="noopener noreferrer" onClick={() => t365Log("조회확인", "미확인 메일", post.Title, { info: { 인원: pendingEmails.length } })} className="h-8 px-3 rounded-lg text-[12.5px] font-semibold text-white inline-flex items-center gap-1.5 hover:brightness-110" style={{ background: "#C2410C" }} data-testid="remind-mail" title="Outlook 웹 새 메일 창이 열리고 미확인 Agent 가 숨은 참조(BCC)로 들어갑니다"><Mail size={13} />미확인 {pendingEmails.length}명에게 메일</a>
+                    ? <a href={remindHref} target="_blank" rel="noopener noreferrer" onClick={() => t365Log("조회확인", "미확인 메일", post.Title, { info: { 인원: pendingEmails.length } })} className="h-8 px-3 rounded-lg text-[12.5px] font-semibold text-white inline-flex items-center gap-1.5 hover:brightness-110" style={{ background: "#C2410C" }} data-testid="remind-mail" title="Outlook 웹 새 메일 창이 열리고 미확인 Agent 가 받는 사람(To)으로 들어갑니다"><Mail size={13} />미확인 {pendingEmails.length}명에게 메일</a>
                     : <button onClick={copyPending} className="h-8 px-3 rounded-lg text-[12.5px] font-semibold text-white inline-flex items-center gap-1.5" style={{ background: "#C2410C" }} data-testid="remind-mail" title="인원이 많아 메일 창으로 바로 넘길 수 없습니다 — 주소를 복사합니다"><Copy size={13} />미확인 {pendingEmails.length}명 주소 복사</button>)}
                   {pendingEmails.length > 0 && remindHref && <button onClick={copyPending} className={`${btnCls} h-8 px-2.5`} title="미확인 Agent 메일 주소만 복사" aria-label="미확인 주소 복사" data-testid="remind-copy"><Copy size={13} /></button>}
                   <button onClick={exportExcel} className={`${btnCls} h-8`}><Download size={13} /> Excel</button>
