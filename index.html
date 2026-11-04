@@ -1929,7 +1929,7 @@ function SetupNotice({ status, infoToo = true }) {
             {infoToo && checkColMissing && <li data-testid="check-col-missing">{T365_LISTS.posts} 에 PublishCheckJson 열(여러 줄 텍스트)을 만들면 「게시 전 확인」 기록이 게시물에도 남습니다 — 없으면 활동 이력에만 남습니다</li>}
             {infoToo && pinMissing && <li data-testid="pin-col-missing">{T365_LISTS.posts} 에 PinUntil 열(한 줄 텍스트)을 만들면 글쓰기에서 공지 · 필수의 홈 노출 기한을 정할 수 있습니다 — 없으면 게시 후 7일 동안 보입니다</li>}
             {infoToo && commentsMissing && <li data-testid="comments-list-missing">{T365_LISTS.comments} 목록이 없어 게시물 댓글을 쓸 수 없습니다 — IT 의 준비 스크립트(STK-T365-Comments-Setup)로 목록 · 열 · 인덱스 · 권한을 만드세요</li>}
-            {infoToo && commentCols.length > 0 && <li data-testid="comments-cols-missing">{T365_LISTS.comments} 에 없는 열 — {commentCols.join(", ")} (댓글 칸을 숨겼습니다 — 준비 스크립트를 다시 실행하세요)</li>}
+            {infoToo && commentCols.length > 0 && <li data-testid="comments-cols-missing">{T365_LISTS.comments} 에 없는 열 — {commentCols.join(", ")} ({commentCols.some((c) => T365_COMMENT_NEED.includes(c)) ? "댓글 칸을 숨겼습니다" : "그 값만 저장되지 않습니다"} — 준비 스크립트를 다시 실행하세요)</li>}
             {infoToo && linksMissing && <li data-testid="links-list-missing">{T365_LISTS.links} 목록이 없어 사이드바 「바로가기」 를 쓸 수 없습니다 — 만드는 방법(열 구조)은 관리자 전용 「바로가기 관리」 화면에 있습니다</li>}
             {infoToo && bannerMissing && <li>{T365_LISTS.banners} 목록이 없어 게시판 홈에 기본 배너(그림 없음)를 보여 줍니다 — 그림 배너를 쓰려면 목록을 만드세요</li>}
             {optionalMissing && <li>{T365_LISTS.categories} 목록이 없어 기본 카테고리 {T365_DEFAULT_CATEGORIES.length}개(이름 · 설명 · 순서 고정)를 씁니다 — 카테고리 이름 · 설명을 바꾸려면 목록을 만드세요</li>}
@@ -3231,12 +3231,19 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
         const others = cmts.filter((c) => !cmtIsMine(c, me));
         if (others.length && !canModerateComments(ctx, post.Category)) { setDeleting(false); uiAlert(`이 글에 다른 사람의 댓글이 ${others.length}개 있어 지울 수 없습니다 — 관리자에게 삭제를 요청해 주세요.`); return; }
       }
+      // 댓글을 먼저(휴지통) — 하나라도 못 지우면(권한 · 네트워크) 글은 지우지 않고 알린다(지운 글에 댓글만 남아 찾을 길이 없어지지 않게)
+      if (cmts.length) {
+        const rs = await Promise.allSettled(cmts.map((c) => tDelete(T365_LISTS.comments, c.id, { cat: post.Category })));
+        let bad = 0; rs.forEach((r, i) => { if (r.status === "fulfilled") cmtLocalNote("gone", cmts[i]); else bad++; });
+        ctx.setPostCommentCount(post.id, bad);
+        if (bad) {
+          t365Log("게시물", "삭제 중단", post.Title, { info: { 카테고리: cat ? cat.label : post.Category, 게시물ID: post.id, 이유: `댓글 ${bad}개를 지우지 못함`, "지운 댓글": `${cmts.length - bad}개` } });
+          setDeleting(false); uiAlert(`댓글 ${bad}개를 지우지 못해 게시물은 지우지 않았습니다.\n잠시 후 다시 시도하고, 계속되면 IT팀(ITSM 티켓: itsm-ticket.startruckkorea.com)에 문의해 주세요.`); return;
+        }
+      }
       await tDelete(T365_LISTS.posts, post.id, { cat: post.Category });
       tDeletePostFolder(post.id);   // 첨부 폴더도 휴지통으로(지운 글의 파일이 라이브러리에 남아 계속 받을 수 있던 문제) — 실패해도 삭제는 그대로
-      // 댓글도 함께(휴지통) — 하나가 실패해도 글 삭제는 그대로. 남은 댓글은 글이 없어 어디에도 보이지 않는다
-      let cmtBad = 0;
-      if (cmts.length) { const rs = await Promise.allSettled(cmts.map((c) => tDelete(T365_LISTS.comments, c.id, { cat: post.Category }))); rs.forEach((r, i) => { if (r.status === "fulfilled") cmtLocalNote("gone", cmts[i]); else cmtBad++; }); ctx.setPostCommentCount(post.id, 0); }
-      t365Log("게시물", "삭제", post.Title, { info: { 카테고리: cat ? cat.label : post.Category, 게시물ID: post.id, 작성자: post.AuthorName || post.AuthorEmail || "", ...(parseFiles(post.AttachmentsJson).length ? { 첨부: `${parseFiles(post.AttachmentsJson).length}개 함께 삭제(휴지통)` } : {}), ...(cmts.length ? { 댓글: `${cmts.length - cmtBad}개 함께 삭제${cmtBad ? ` · ${cmtBad}개 실패` : ""}` } : {}) } });
+      t365Log("게시물", "삭제", post.Title, { info: { 카테고리: cat ? cat.label : post.Category, 게시물ID: post.id, 작성자: post.AuthorName || post.AuthorEmail || "", ...(parseFiles(post.AttachmentsJson).length ? { 첨부: `${parseFiles(post.AttachmentsJson).length}개 함께 삭제(휴지통)` } : {}), ...(cmts.length ? { 댓글: `${cmts.length}개 함께 삭제` } : {}) } });
       onBack();
       await ctx.reload();
     } catch (e) { uiAlert(e.message); }
@@ -3398,14 +3405,19 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
  * SharePoint 쪽도 같은 기준 — training365_Comments 「항목 수준 권한 › 편집 = 본인이 만든 항목만」, Training365 관리자 · 게시 담당 그룹만
  * 「본인 항목 설정 무시」(남의 댓글 지우기). 목록 · 열 · 인덱스 · 권한은 IT 준비 스크립트 STK-T365-Comments-Setup.ps1 로 만든다.
  * 저장 열: PostId(숫자 · 인덱스) · Category(인덱스) · Body(일반 텍스트, 1,000자) · AuthorEmail · AuthorName · AuthorRole · EditedAt.
- * 화면의 「STK」 표시는 댓글에 적힌 값이 아니라 사용자 목록의 역할로 정한다(댓글 쓴 사람이 꾸밀 수 없게). 본문은 글자 그대로(https 링크만 링크로) */
+ * 쓴 사람(이름 · 「STK」 · 내 댓글)은 적힌 AuthorEmail 이 아니라 SharePoint 실제 계정(_createdBy)과 사용자 목록으로 정한다(남을 흉내 낼 수 없게).
+ * 본문은 글자 그대로 — 맨 https 주소만 그 주소 그대로 링크(글자로 다른 곳을 숨기는 링크는 만들지 않음) */
 const T365_COMMENT_MAX = 1000;
 const T365_COMMENT_NEED = ["PostId", "Category", "Body", "AuthorEmail"];   // 하나라도 없으면 댓글을 끈다(없는 열은 저장에서 빠져 빈 댓글이 생기므로)
 const cmtPostKey = (v) => { const s = String(v == null ? "" : v).trim(); return /^\d+(\.0+)?$/.test(s) ? String(parseInt(s, 10)) : ""; };
 const cmtPostFilter = (postId) => `&$filter=${encodeURIComponent(`fields/PostId eq ${parseInt(postId, 10) || 0}`)}`;
+// 댓글 쓴 사람 — 적힌 AuthorEmail 이 아니라 SharePoint 가 남긴 실제 계정(_createdBy)을 먼저 믿는다(Graph 로 직접 남의 메일을 적어도 흉내 낼 수 없게)
+const cmtSameMail = (a, b) => !!a && !!b && (normEmail(a) === normEmail(b) || mailKey(a) === mailKey(b));
+const cmtRealMail = (c) => normEmail(c._createdBy || "") || normEmail(c.AuthorEmail);
 const cmtIsMine = (c, me) => {
   const ids = ((me && me.ids && me.ids.length) ? me.ids : [me && me.email]).map(normEmail).filter(Boolean);
-  return ids.includes(normEmail(c.AuthorEmail)) || (!!c._createdBy && ids.includes(c._createdBy));
+  const real = cmtRealMail(c);
+  return !!real && ids.some((x) => cmtSameMail(x, real));
 };
 const canModerateComments = (ctx, cat) => !!ctx.isAdmin || (cat !== "qna" && ctx.canWrite(cat));
 // 방금 쓴 · 고친 · 지운 댓글 — SharePoint 목록 읽기가 몇 초 늦게 따라오는 동안(게시물과 같은 3분) 이 브라우저 값을 덧씌운다
@@ -3435,7 +3447,7 @@ function commentPii(text) {
   const t = String(text || "");
   // 「6자리-뒷자리」 꼴은 가렸어도(910001-1******) 막는다. 붙여 쓴 13자리는 앞 6자리가 날짜일 때만(견적 · 주문 번호를 잘못 막지 않게)
   if (/(^|[^\d])\d{6}\s*[-–—]\s*[1-8][\d*xX●•]{4,7}(?![\d*xX●•])/.test(t)) return { block: "주민등록번호(외국인등록번호)" };
-  const rrn = /(^|[^\d])(\d{2})(\d{2})(\d{2})[1-8]\d{6}(?!\d)/g; let m;
+  const rrn = /(^|[^\d])(\d{2})(\d{2})(\d{2})\s*[1-8]\d{6}(?!\d)/g; let m;
   while ((m = rrn.exec(t))) { const mm = +m[3], dd = +m[4]; if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) return { block: "주민등록번호(외국인등록번호)" }; }
   const card = /(^|[^\d])(\d{4})[- ]?(\d{4})[- ]?(\d{4})[- ]?(\d{4})(?!\d)/g;
   while ((m = card.exec(t))) { if (cmtLuhn(m[2] + m[3] + m[4] + m[5])) return { block: "카드 번호" }; }
@@ -3448,9 +3460,22 @@ function cmtErrMsg(e, verb) {
   if (e && e.status === 404) return "이미 지워진 댓글입니다 — 창을 닫았다 다시 열어 주세요.";
   return `댓글을 ${verb}하지 못했습니다${e && e.status ? ` (상태 ${e.status})` : ""} — 잠시 후 다시 시도해 주세요.`;
 }
+function cmtLinks(line, kb) {
+  const out = []; const re = /https:\/\/[^\s<>"'`]+/g; let last = 0, m, i = 0;
+  while ((m = re.exec(line))) {
+    let raw = m[0]; const trail = (raw.match(/[.,;:!?)\]}>'"」』]+$/) || [""])[0]; if (trail) raw = raw.slice(0, -trail.length);
+    const u = safeHttpsUrl(raw);
+    if (m.index > last) out.push(line.slice(last, m.index));
+    out.push(u ? <a key={`${kb}.${i++}`} href={u} target="_blank" rel="noopener noreferrer">{raw}</a> : raw);
+    if (trail) out.push(trail);
+    last = m.index + m[0].length;
+  }
+  if (last < line.length) out.push(line.slice(last));
+  return out;
+}
 function CommentText({ text }) {
   const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
-  return <div className="mt-1 text-[13.5px] leading-relaxed text-slate-700 break-words [overflow-wrap:anywhere] [&_a]:text-[#2F7B7A] [&_a]:underline [&_a]:underline-offset-2" data-testid="comment-body">{lines.map((l, i) => <React.Fragment key={i}>{i > 0 && <br />}{renderLinks(l, `c${i}`)}</React.Fragment>)}</div>;
+  return <div className="mt-1 text-[13.5px] leading-relaxed text-slate-700 break-words [overflow-wrap:anywhere] [&_a]:text-[#2F7B7A] [&_a]:underline [&_a]:underline-offset-2" data-testid="comment-body">{lines.map((l, i) => <React.Fragment key={i}>{i > 0 && <br />}{cmtLinks(l, `c${i}`)}</React.Fragment>)}</div>;
 }
 function Comments({ ctx, post }) {
   const { me } = ctx;
@@ -3469,8 +3494,9 @@ function Comments({ ctx, post }) {
   const canWriteHere = canSee(ctx.perms, "cat:" + post.Category);
   const mod = canModerateComments(ctx, post.Category);
   const catLabel = (ctx.catMap[post.Category] || {}).label || post.Category;
-  // 「STK」 표시 — 사용자 목록에서 Agent 가 아닌 역할(사용 중)인 사람
-  const roleOf = useMemo(() => { const m = new Map(); (ctx.users || []).forEach((u) => { const e = normEmail(u.Email); if (e && u.Active !== false && T365_ROLES.includes(u.Role) && !m.has(e)) m.set(e, u.Role); }); return m; }, [ctx.users]);
+  // 이름 · 「STK」 표시 — 사용자 목록(사용 중)에서 실제 계정으로 찾는다. 메일 표기만 다른 같은 사람(mailKey)도
+  const userOf = useMemo(() => { const m = new Map(); (ctx.users || []).forEach((u) => { const e = normEmail(u.Email); if (e && u.Active !== false && T365_ROLES.includes(u.Role)) { if (!m.has(e)) m.set(e, u); if (!m.has("k:" + mailKey(e))) m.set("k:" + mailKey(e), u); } }); return m; }, [ctx.users]);
+  const findUser = (e) => (e ? userOf.get(normEmail(e)) || userOf.get("k:" + mailKey(e)) || null : null);
   async function load(quiet) {
     const seq = ++seqRef.current;
     try {
@@ -3504,7 +3530,8 @@ function Comments({ ctx, post }) {
       const made = await tCreate(T365_LISTS.comments, fields);
       const row = { ...fields, id: String(made.id), _created: new Date().toISOString(), _modified: "", _createdBy: normEmail(me.email) };
       cmtLocalNote("made", row);
-      const n = [...(rowsRef.current || []), row]; setRows(n); ctx.setPostCommentCount(post.id, n.length);
+      if (rowsRef.current === null) load(true);   // 목록을 아직 못 읽은 채 썼으면 — 다시 읽는다(방금 쓴 것은 덧씌워 보인다)
+      else { const n = [...rowsRef.current, row]; setRows(n); ctx.setPostCommentCount(post.id, n.length); }
       setText(""); if (taRef.current) taRef.current.style.height = "";
       t365Log("댓글", "등록", post.Title, { info: { 게시판: catLabel, 게시물ID: post.id, 댓글ID: row.id, 글자수: t.length } });
     } catch (e) { uiAlert(cmtErrMsg(e, "등록")); }
@@ -3541,10 +3568,12 @@ function Comments({ ctx, post }) {
   }
   const item = (c) => {
     const own = cmtIsMine(c, me);
-    const r = roleOf.get(normEmail(c.AuthorEmail));
-    const staff = !!r && !isAgentRole(r);
-    const byAuthor = !!normEmail(post.AuthorEmail) && normEmail(c.AuthorEmail) === normEmail(post.AuthorEmail);
-    const name = String(c.AuthorName || c.AuthorEmail || "알 수 없음");
+    const real = cmtRealMail(c);
+    const trusted = !c._createdBy || !normEmail(c.AuthorEmail) || cmtSameMail(c._createdBy, c.AuthorEmail);   // 적힌 메일과 실제 계정이 같은지
+    const u = findUser(real);
+    const staff = !!u && !isAgentRole(u.Role);
+    const byAuthor = cmtSameMail(real, post._createdBy || post.AuthorEmail);
+    const name = String((u && u.Title) || (trusted && c.AuthorName) || real || "알 수 없음");
     const ed = editId === String(c.id);
     return (
       <li key={c.id} className="flex gap-3" data-comment={c.id} data-own={own ? "1" : "0"}>
@@ -6530,6 +6559,7 @@ function App({ boot }) {
   const [commentsOn, setCommentsOn] = useState(null);
   const commentsOnRef = useRef(null);
   const cmtMissAtRef = useRef(0);   // 목록 · 열이 없을 때 — 5분에 한 번만 다시 확인(1분마다 목록 찾기 요청을 하지 않게)
+  const cmtCountAtRef = useRef(0);  // 댓글 수를 마지막으로 센 때
   const [loading, setLoading] = useState(true);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [denied, setDenied0] = useState(null);
@@ -6644,8 +6674,10 @@ function App({ boot }) {
     loadCommentCounts();   // 11-04 댓글 수 — 게시판 읽기를 늦추지 않게 따로
   }
   // 11-04 댓글 수 — 글 번호(PostId)만 받아 센다. 목록이 없거나 꼭 필요한 열이 없으면 댓글을 끄고, 잠깐 실패면 이전 값을 둔다
-  async function loadCommentCounts() {
+  async function loadCommentCounts(force) {
     if (commentsOnRef.current === false && Date.now() - cmtMissAtRef.current < 5 * 60e3) return;
+    if (!force && commentsOnRef.current === true && Date.now() - cmtCountAtRef.current < 170e3) return;   // 3분에 한 번 — 댓글 창은 열 때마다 따로 읽는다
+    cmtCountAtRef.current = Date.now();
     const off = () => { commentsOnRef.current = false; cmtMissAtRef.current = Date.now(); setCommentsOn(false); setCommentCounts(new Map()); };
     try {
       const cols = await tListColumns(T365_LISTS.comments);
@@ -6655,7 +6687,7 @@ function App({ boot }) {
       commentsOnRef.current = true; setCommentsOn(true); setCommentCounts(m);
     } catch (e) {
       if (isMissingListError(e)) off();
-      else console.warn("[Training365] 댓글 수 읽기 실패:", e.message);
+      else { cmtCountAtRef.current = 0; console.warn("[Training365] 댓글 수 읽기 실패:", e.message); }
     }
   }
   // 댓글 창이 쓰고 지운 뒤 — 서버 다시 읽기를 기다리지 않고 그 글의 숫자만 바로
