@@ -4034,29 +4034,34 @@ function PublishCheckDialog({ me, isEdit, isQna, accent, onDone }) {
   );
 }
 // 게시물 안의 확인 기록 — 본문 · 첨부 아래 한 줄(누르면 항목 펼침)
+// 11-04 정리: 접힌 줄은 「게시 전 확인 완료 5/5」 + 확인한 사람 · 시각만, 펼치면 항목 칩 한 줄(같은 폭으로 정렬). 항목 설명은 칩에 마우스를 올리면 보인다
 function PublishCheckRecord({ post }) {
   const rec = parsePublishCheck(post.PublishCheckJson);
   const [open, setOpen] = useState(false);
   if (!rec) return null;
-  const labels = rec.items.map((k) => (T365_PUBLISH_CHECKS.find((c) => c.key === k) || {}).label || k);
+  const items = rec.items.map((k) => T365_PUBLISH_CHECKS.find((c) => c.key === k) || { key: k, label: k, desc: "" });
+  const when = rec.kind === "수정" ? "마지막 수정 때" : "게시할 때";
+  const who = `${when} ${rec.by}${rec.email ? ` (${rec.email})` : ""} 님이 ${fmtDate(rec.at)} 에 확인 · 활동 이력에도 같은 기록이 있습니다`;
   return (
     <section className="px-5 md:px-10 pb-5" data-testid="post-check">
-      <div className="rounded-xl border border-emerald-100 bg-gradient-to-r from-emerald-50/80 to-white">
-        <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className="w-full flex items-center gap-2.5 px-3.5 h-10 text-left" data-testid="post-check-toggle">
-          <span className="w-6 h-6 rounded-md bg-white border border-emerald-100 flex items-center justify-center shrink-0"><ShieldCheck size={13} className="text-emerald-700" /></span>
+      <div className="rounded-xl border border-emerald-100 bg-emerald-50/40">
+        <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className="w-full flex items-center gap-2 px-3.5 h-10 text-left" data-testid="post-check-toggle">
+          <ShieldCheck size={15} className="text-emerald-700 shrink-0" />
           <span className="text-[12.5px] font-semibold text-emerald-800 whitespace-nowrap">게시 전 확인 완료</span>
-          <span className="hidden sm:inline text-[11.5px] text-emerald-700/70 truncate min-w-0">{labels.join(" · ")}</span>
-          <span className="ml-auto text-[11.5px] text-slate-500 whitespace-nowrap tabular-nums">{rec.by} · {fmtDate(rec.at)}</span>
+          <span className="text-[11px] font-semibold text-emerald-700 bg-white border border-emerald-100 rounded-full px-1.5 h-5 inline-flex items-center tabular-nums shrink-0" data-testid="post-check-count">{items.length}/{T365_PUBLISH_CHECKS.length}</span>
+          <span className="ml-auto min-w-0 truncate text-[11.5px] text-slate-500 tabular-nums" title={who}>{rec.kind === "수정" ? "수정 · " : ""}{rec.by} · {fmtDate(rec.at)}</span>
           <ChevronDown size={14} className={`text-slate-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
         {open && (
-          <div className="px-3.5 pb-3 pt-0.5 border-t border-emerald-100/70" data-testid="post-check-detail">
-            <ul className="grid sm:grid-cols-2 gap-x-6 gap-y-1.5 mt-2.5">
-              {rec.items.map((k) => { const c = T365_PUBLISH_CHECKS.find((x) => x.key === k) || { label: k, desc: "" }; return (
-                <li key={k} className="flex items-start gap-2 text-[12px]"><CheckCircle2 size={13} className="text-emerald-600 shrink-0 mt-0.5" /><span className="min-w-0"><b className="font-medium text-slate-700">{c.label}</b><span className="text-slate-400"> — {c.desc}</span></span></li>
-              ); })}
+          <div className="px-3.5 pb-3 pt-3 border-t border-emerald-100/70" data-testid="post-check-detail">
+            <ul className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+              {items.map((c) => (
+                <li key={c.key} title={c.desc} className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-white border border-emerald-100 text-[12px] font-medium text-slate-700 min-w-0 cursor-help" data-pc-done={c.key}>
+                  <CheckCircle2 size={13} className="text-emerald-600 shrink-0" /><span className="truncate">{c.label}</span>
+                </li>
+              ))}
             </ul>
-            <div className="mt-2.5 text-[11px] text-slate-400">{rec.kind === "수정" ? "마지막 수정 때" : "게시할 때"} {rec.by}{rec.email ? ` (${rec.email})` : ""} 님이 {fmtDate(rec.at)} 에 확인했습니다 · 활동 이력에도 같은 기록이 있습니다</div>
+            <p className="mt-2 text-[11px] text-slate-400 truncate" title={who}>{when} 위 항목을 모두 확인했습니다 · 항목에 마우스를 올리면 내용이 보입니다</p>
           </div>
         )}
       </div>
@@ -4620,6 +4625,16 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
   const showMatrix = true;   // ICS · MKQR 처럼 메뉴별 보기 · 편집 체크박스 표 하나로(간단히 보기 없앰)
   const [showHelp, setShowHelp] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  // Excel 메뉴(양식 받기 · 일괄 등록 · 내보내기) — 11-04 단추 셋을 하나로. 파일 칸은 메뉴 밖에 늘 두어 메뉴가 닫혀도 고른 파일을 받는다
+  const [xlOpen, setXlOpen] = useState(false);
+  const xlRef = useRef(null), fileRef = useRef(null);
+  useEffect(() => {
+    if (!xlOpen) return;
+    const down = (e) => { if (xlRef.current && !xlRef.current.contains(e.target)) setXlOpen(false); };
+    const key = (e) => { if (e.key === "Escape") setXlOpen(false); };
+    document.addEventListener("mousedown", down); document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("mousedown", down); document.removeEventListener("keydown", key); };
+  }, [xlOpen]);
   useEffect(() => { let alive = true; loadEmployeeDirectory().then((list) => alive && setDir({ status: "ok", list, error: "" }), (e) => alive && setDir({ status: "error", list: [], error: e.message })); return () => { alive = false; }; }, []);
   useEffect(() => { setPage(1); }, [q, roleF, view]);
   const PAGE_SIZE = 50;
@@ -5014,24 +5029,50 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
         </div>
       )}
 
-      {/* 요약 한 줄 — 관리자(목록 기준) · 역할별 인원 · 도구 */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-4 py-2.5 mb-3 flex items-center gap-x-4 gap-y-2 flex-wrap" data-testid="users-summary">
-        <div className="flex items-center gap-1.5 min-w-0 flex-wrap" data-testid="admin-chips" title="사용자 · 권한 편집이 있는 사람(이 목록 기준)">
-          <ShieldCheck size={14} style={{ color: BRAND.accent }} />
-          <span className="text-[12.5px] font-semibold text-slate-700">관리자</span>
-          {listAdmins.map((p) => <span key={p.email} className="inline-flex items-center px-2 h-6 rounded-full text-[11.5px]" style={{ background: BRAND.accentSoft, color: BRAND.accent }}>{p.row.Title || p.email}</span>)}
+      {/* 도구 줄(11-04 정리) — 보기 칸(권한 있음 · 명부 직원 · 명부 없음 · 전체) · 명부 안내는 아이콘(마우스를 올리면 설명) | 도움말 · Excel ▾ · 사용자 추가.
+          역할별 인원은 아래 검색 줄의 역할 거르기로, 관리 권한자는 표 위 범례 줄로 옮겼다. */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-3 py-2.5 mb-3 flex items-center gap-x-3 gap-y-2 flex-wrap" data-testid="users-summary">
+        <div className="flex items-center gap-2.5 min-w-0 max-w-full" data-testid="dir-bar">
+          <div className="flex items-center rounded-lg border border-slate-300 overflow-x-auto h-9 max-w-full bg-white">
+            {[["registered", "권한 있음", viewCounts.registered], ...(dirOk ? [["dirOnly", "명부 직원(미등록)", viewCounts.dirOnly], ["missing", "명부 없음", viewCounts.missing]] : []), ["all", "전체", viewCounts.all]].map(([k, label, n], i) => (
+              <button key={k} onClick={() => setView(k)} data-view-chip={k}
+                className={`px-3 h-full text-[13px] whitespace-nowrap inline-flex items-center gap-1.5 ${i ? "border-l border-slate-300" : ""} ${view === k ? "text-white" : "text-slate-600 hover:bg-slate-50"}`}
+                style={view === k ? { background: BRAND.accent } : undefined}>
+                {label}<span className={`text-[11px] tabular-nums px-1.5 rounded-full ${view === k ? "bg-white/20" : "bg-slate-100 text-slate-500"}`}>{n}</span>
+              </button>
+            ))}
+          </div>
+          {(() => {
+            const nExt = missingRows.filter((p) => p.extAgent && p.dirStatus === "missing").length;
+            const tip = dir.status === "loading" ? "직원 명부를 불러오는 중입니다"
+              : dir.status === "error" ? "직원 명부를 불러오지 못해 등록된 사용자만 표시합니다 — 사용자 추가는 그대로 됩니다"
+              : dirOk ? `직원 명부 ${dir.list.length}명과 대조합니다 · 「명부 없음」 중 외부(Agent) ${nExt}명은 정상${canEdit && viewCounts.dirOnly > 0 ? " · 「명부 직원(미등록)」은 역할을 골라 「반영」 또는 「추가」" : ""}`
+              : "직원 명부가 비어 있습니다";
+            const warn = dir.status === "error";
+            return (
+              <span className={`inline-flex items-center gap-1 text-[11.5px] whitespace-nowrap cursor-help ${warn ? "text-amber-700" : "text-slate-400"}`} title={tip} aria-label={tip} data-testid="dir-status">
+                {warn ? <AlertTriangle size={13} /> : <Info size={13} />}
+                {dir.status === "loading" ? "명부 확인 중" : warn ? "명부를 불러오지 못함" : dirOk ? `명부 ${dir.list.length}명 대조` : "명부 없음"}
+              </span>
+            );
+          })()}
         </div>
-        <span className="w-px h-5 bg-slate-200 hidden sm:block"></span>
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {T365_ROLES.map((r) => <button key={r} onClick={() => { setRoleF(roleF === r ? "" : r); setView("all"); }} className={`text-[11.5px] px-2 h-6 rounded-full border ${roleF === r ? "ring-2 ring-[#2F7B7A]/40" : ""} ${ROLE_META[r].cls}`}>{r} <b className="tabular-nums">{counts[r]}</b></button>)}
-          {!canEdit && <span className="text-[11px] px-2 h-6 inline-flex items-center rounded-full bg-slate-100 text-slate-500 font-medium" data-testid="users-readonly">보기 전용</span>}
-        </div>
-        <div className="ml-auto flex items-center gap-1.5 flex-wrap">
-          <button onClick={() => setShowHelp((v) => !v)} className={`${btnCls} h-8 text-xs`} data-testid="help-btn"><HelpCircle size={13} />도움말</button>
-          {canEdit && <button onClick={downloadTemplate} className={`${btnCls} h-8 text-xs`}><FileSpreadsheet size={13} />양식</button>}
-          {canEdit && <label className={`${btnCls} h-8 text-xs cursor-pointer`}><Upload size={13} />Excel 일괄 등록<input type="file" accept=".xlsx,.xls,.csv" onChange={pickImport} className="hidden" data-testid="import-file" /></label>}
-          <button onClick={exportExcel} disabled={!merged.length} className={`${btnCls} h-8 text-xs`}><Download size={13} />내보내기</button>
-          {canEdit && <button onClick={() => setShowAdd((v) => !v)} className={`${btnPrimaryCls} h-8 text-xs`} style={{ background: BRAND.accent }} data-testid="add-toggle"><UserPlus size={13} />사용자 추가</button>}
+        <div className="ml-auto flex items-center gap-1.5">
+          {!canEdit && <span className="text-[11px] px-2 h-6 inline-flex items-center rounded-full bg-slate-100 text-slate-500 font-medium mr-1" data-testid="users-readonly">보기 전용</span>}
+          <button onClick={() => setShowHelp((v) => !v)} aria-pressed={showHelp} className={`${btnCls} text-xs ${showHelp ? "bg-slate-100" : ""}`} data-testid="help-btn"><HelpCircle size={13} />도움말</button>
+          <div className="relative" ref={xlRef}>
+            <button onClick={() => setXlOpen((v) => !v)} aria-haspopup="menu" aria-expanded={xlOpen} className={`${btnCls} text-xs`} data-testid="xl-btn"><FileSpreadsheet size={13} />Excel<ChevronDown size={12} className={`text-slate-400 transition-transform ${xlOpen ? "rotate-180" : ""}`} /></button>
+            {xlOpen && (
+              <div role="menu" className="absolute right-0 top-[calc(100%+4px)] z-30 w-56 bg-white border border-slate-200 rounded-lg shadow-lg p-1" data-testid="xl-menu">
+                {canEdit && <button role="menuitem" onClick={() => { setXlOpen(false); downloadTemplate(); }} className="w-full h-9 px-2.5 rounded-md flex items-center gap-2 text-[12.5px] text-slate-700 hover:bg-slate-50 text-left" data-testid="xl-template"><FileSpreadsheet size={14} className="text-slate-400" />양식 받기<span className="ml-auto text-[10.5px] text-slate-400">일괄 등록용</span></button>}
+                {canEdit && <button role="menuitem" onClick={() => { setXlOpen(false); if (fileRef.current) fileRef.current.click(); }} className="w-full h-9 px-2.5 rounded-md flex items-center gap-2 text-[12.5px] text-slate-700 hover:bg-slate-50 text-left" data-testid="xl-import"><Upload size={14} className="text-slate-400" />Excel 일괄 등록</button>}
+                {canEdit && <div className="my-1 border-t border-slate-100"></div>}
+                <button role="menuitem" onClick={() => { setXlOpen(false); exportExcel(); }} disabled={!merged.length} className="w-full h-9 px-2.5 rounded-md flex items-center gap-2 text-[12.5px] text-slate-700 hover:bg-slate-50 text-left disabled:opacity-40" data-testid="xl-export"><Download size={14} className="text-slate-400" />내보내기<span className="ml-auto text-[10.5px] text-slate-400">사용자 · 권한 표</span></button>
+              </div>
+            )}
+          </div>
+          {canEdit && <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={pickImport} className="hidden" data-testid="import-file" />}
+          {canEdit && <button onClick={() => setShowAdd((v) => !v)} className={`${btnPrimaryCls} text-xs`} style={{ background: BRAND.accent }} data-testid="add-toggle"><UserPlus size={13} />사용자 추가</button>}
         </div>
         {canEdit && showAdd && (
           <div className="w-full pt-2.5 mt-0.5 border-t border-slate-100" data-testid="add-panel">
@@ -5047,32 +5088,21 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
         )}
       </div>
 
-      <div className="flex items-center gap-2 mb-3 flex-wrap" data-testid="dir-bar">
-        <div className="flex items-center rounded-lg border border-slate-300 overflow-x-auto h-9 max-w-full bg-white">
-          {[["registered", "권한 있음", viewCounts.registered], ...(dirOk ? [["dirOnly", "명부 직원(미등록)", viewCounts.dirOnly], ["missing", "명부 없음", viewCounts.missing]] : []), ["all", "전체", viewCounts.all]].map(([k, label, n], i) => (
-            <button key={k} onClick={() => setView(k)} data-view-chip={k}
-              className={`px-3 h-full text-[13px] whitespace-nowrap inline-flex items-center gap-1.5 ${i ? "border-l border-slate-300" : ""} ${view === k ? "text-white" : "text-slate-600 hover:bg-slate-50"}`}
-              style={view === k ? { background: BRAND.accent } : undefined}>
-              {label}<span className={`text-[11px] tabular-nums px-1.5 rounded-full ${view === k ? "bg-white/20" : "bg-slate-100 text-slate-500"}`}>{n}</span>
-            </button>
-          ))}
-        </div>
-        <span className="text-[11.5px] text-slate-400" data-testid="dir-status">
-          {dir.status === "loading" ? "직원 명부를 불러오는 중…"
-            : dir.status === "error" ? <span className="text-amber-700">직원 명부를 불러오지 못해 등록된 사용자만 표시합니다 — 사용자 추가는 그대로 됩니다</span>
-            : dirOk ? <>직원 명부 {dir.list.length}명과 대조 · 명부 없음 중 외부(Agent) {missingRows.filter((p) => p.extAgent && p.dirStatus === "missing").length}명은 정상{canEdit && viewCounts.dirOnly > 0 ? " · 명부 직원은 역할을 골라 「반영」 또는 「추가」" : ""}</>
-            : "직원 명부가 비어 있습니다"}
-        </span>
-      </div>
+      {/* 검색 줄 — 검색 · 역할 거르기(역할별 인원) | 역할별 기본값 · 변경 취소 · 반영 */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <div className="relative w-full sm:w-auto">
           <Search size={15} className="absolute left-2.5 top-2.5 text-slate-400" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름 · 이메일 · 부서 · 회사 · 역할 검색" className="pl-8 pr-3 py-2 border border-slate-200 rounded-lg text-sm w-full sm:w-72 bg-white focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/30" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름 · 이메일 · 부서 · 회사 검색" className="pl-8 pr-3 py-2 h-9 border border-slate-200 rounded-lg text-sm w-full sm:w-64 bg-white focus:outline-none focus:ring-2 focus:ring-[#2F7B7A]/30" />
         </div>
-        <select value={roleF} onChange={(e) => setRoleF(e.target.value)} className={`${ctrl} px-3`}><option value="">전체 역할</option>{T365_ROLES.map((r) => <option key={r}>{r}</option>)}</select>
-        {canEdit && <button onClick={applyChanges} disabled={!!saving || !dirtyCount} className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-40" style={{ background: BRAND.accent }} data-testid="apply-btn">{dirtyCount ? `반영 (${dirtyCount}명)` : "반영"}</button>}
-        {dirtyCount > 0 && <button onClick={() => setOverrides({})} className="text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 bg-white">변경 취소</button>}
-        <button onClick={() => setShowLegend((v) => !v)} className="text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 bg-white" data-testid="legend-btn">역할별 기본값 {showLegend ? "접기" : "보기"}</button>
+        <div className="flex items-center gap-1 flex-wrap" role="group" aria-label="역할로 거르기" data-testid="role-filter">
+          <button onClick={() => setRoleF("")} aria-pressed={!roleF} className={`text-[12px] px-2.5 h-7 rounded-full border ${!roleF ? "bg-slate-700 text-white border-slate-700" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`} data-role-chip="">전체 역할</button>
+          {T365_ROLES.map((r) => <button key={r} onClick={() => { setRoleF(roleF === r ? "" : r); setView("all"); }} aria-pressed={roleF === r} title={`${r} — ${ROLE_META[r].desc}${roleF === r ? " · 다시 누르면 전체" : ""}`} className={`text-[12px] px-2.5 h-7 rounded-full border ${ROLE_META[r].cls} ${roleF === r ? "ring-2 ring-[#2F7B7A]/45" : roleF ? "opacity-60 hover:opacity-100" : ""}`} data-role-chip={r}>{r} <b className="tabular-nums">{counts[r]}</b></button>)}
+        </div>
+        <div className="ml-auto flex items-center gap-1.5">
+          <button onClick={() => setShowLegend((v) => !v)} aria-pressed={showLegend} className={`h-9 text-xs px-3 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 ${showLegend ? "bg-slate-100" : "bg-white"}`} data-testid="legend-btn">역할별 기본값 {showLegend ? "접기" : "보기"}</button>
+          {dirtyCount > 0 && <button onClick={() => setOverrides({})} className="h-9 text-xs px-3 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 bg-white">변경 취소</button>}
+          {canEdit && <button onClick={applyChanges} disabled={!!saving || !dirtyCount} title={dirtyCount ? "" : "표에서 칸을 바꾸면 눌러 저장합니다"} className={`h-9 px-4 rounded-lg text-sm font-medium ${dirtyCount ? "text-white" : "text-slate-400 bg-white border border-slate-200 cursor-default"}`} style={dirtyCount ? { background: BRAND.accent } : undefined} data-testid="apply-btn">{dirtyCount ? `반영 (${dirtyCount}명)` : "반영"}</button>}
+        </div>
       </div>
       {showLegend && (
         <div className="mb-3 bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto" data-testid="legend">
@@ -5114,6 +5144,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
         <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm border border-sky-200" style={{ background: "#EAF4FB" }}></span>역할 기본값과 다른 개별 설정</span>
         <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm border border-amber-300" style={{ background: "#FEF3C7" }}></span>반영 전 변경</span>
         <span className="inline-flex items-center gap-1.5"><LockKeyhole size={11} />바꿀 수 없음(항상 보임)</span>
+        {listAdmins.length > 0 && <span className="ml-auto inline-flex items-center gap-1.5 min-w-0" title="사용자 · 권한 편집이 있는 사람(이 목록 기준)" data-testid="admin-chips"><ShieldCheck size={12} style={{ color: BRAND.accent }} />관리 권한<span className="text-slate-600 truncate">{listAdmins.map((p) => p.row.Title || p.email).join(" · ")}</span></span>}
       </div>}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-auto max-h-[70vh]" data-testid="perm-scroll">
@@ -6805,7 +6836,7 @@ function App({ boot }) {
     overview: [LayoutDashboard, isAgent ? "게시판 홈 — 공지 · 확인이 필요한 필수 자료와 게시판별 새 글을 한눈에 봅니다" : "게시판 홈 — 공지 · 필수 자료와 게시판별 새 글, Agent 조회확인 현황을 한눈에 봅니다"],
     all: [LayoutList, "모든 게시판의 글을 한 번에 찾아봅니다 — 안 읽은 글 · 공지 · 필수 보기와 검색"],
     status: [BarChart3, "게시물마다 대상 Agent 중 몇 명이 조회확인했는지(필수 글을 연 시각) 봅니다 — 눌러서 누가 · 언제 확인했는지 확인"],
-    users: [Users, "사용자 · 역할과 메뉴별 보기 · 편집 권한을 관리합니다. 역할이 기본값이고, 칸을 바꾸면 그 사람만 따로 적용됩니다. 변경은 활동 이력에 남습니다."],
+    users: [Users, "역할이 기본 권한이고, 칸을 바꾸면 그 사람만 따로 적용됩니다 · 변경은 활동 이력에 남습니다"],
     categories: [Tags, "게시판(이름 · 설명 · 순서 · 아이콘 · 색 · 문의 담당자)과 게시판 홈 배너를 관리합니다"],
     links: [Link2, "사이드바 「바로가기」 링크(이름 · 주소 · 아이콘 · 색 · 보이는 사람 · 순서)를 관리합니다 — 누르면 새 창으로 열립니다"],
     access: [LogIn, "계정별 로그인 · 로그아웃 시각과 세션 종료(추정)를 조회하고 Excel 로 내보냅니다"],
