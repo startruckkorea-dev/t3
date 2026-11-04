@@ -275,7 +275,7 @@ import {
   ExternalLink, ArrowUpRight, Mail, ShieldCheck, AlertTriangle, ArrowLeftToLine, ArrowRightFromLine, ArrowLeft, Home, Menu, LockKeyhole, ChevronLeft, FileText,
   Bold, List, ListOrdered, Heading2, Link2, Clock, BarChart3, Tags, HelpCircle, ListChecks, UserPlus, FileSpreadsheet, PlayCircle,
   Circle, Quote, BookOpen, LogOut, SquarePen, Truck, Container, Bus, Car, Gauge, Fuel, Wrench, Cog, HardHat, ClipboardList, Newspaper, Bell, Calendar, Gift, Star, Trophy, Award, Lightbulb, Target, Rocket, Zap, CircleDollarSign, Handshake, Briefcase, Building2, Phone, MapPin, Globe, Leaf, Flag, Camera, Sparkles, ImagePlus, Palette, GalleryHorizontal, ArrowRight, Pause, Play, AlignLeft, Rows3, ChevronRight, ChevronDown, ChevronUp, ChevronsLeft, ChevronsRight, TrendingUp, FileArchive, FileImage, FileVideo, Info, Inbox,
-  BellRing, MessageCircleQuestion, MessageSquareReply, Copy,
+  BellRing, MessageCircleQuestion, MessageSquareReply, Copy, MessageSquare,
   ALargeSmall, Baseline, Highlighter, Check, ContactRound, Fingerprint, UserRound,
 } from "lucide-react";
 import * as XLSX from "xlsx";
@@ -327,6 +327,7 @@ const T365_LISTS = {
   categories: "training365_Categories",   // 선택 — 없으면 코드의 기본 카테고리(8개)
   banners: "training365_Banners",         // 선택 — 없으면 Overview 위에 기본 배너(그림 없이)
   links: "training365_Links",             // 선택 — 사이드바 「바로가기」(없으면 그 묶음을 숨긴다)
+  comments: "training365_Comments",       // 선택(11-04) — 모든 게시판의 댓글. 없거나 열이 모자라면 댓글 칸을 숨긴다(관리자 안내)
 };
 // 목록마다 꼭 있어야 하는 열(내부 이름) — 관리자 준비 안내 · 쓰기 전 확인용. 관리자 준비 안내와 같아야 한다
 const T365_COLUMNS = {
@@ -337,6 +338,8 @@ const T365_COLUMNS = {
   categories: ["Title", "Key", "Description", "SortOrder", "Active", "Icon", "Color", "Contacts"],
   banners: ["Title", "Subtitle", "LinkUrl", "ImageJson", "SortOrder", "Active"],
   links: ["Title", "Url", "Description", "Icon", "Color", "Audience", "SortOrder", "Active"],
+  // PostId(숫자 · 인덱스) — 글마다 댓글을 읽는 열. Category(인덱스) — 쓰기 권한 확인 · 정리용. AuthorRole 은 기록용(화면의 STK 표시는 사용자 목록 기준)
+  comments: ["Title", "PostId", "Category", "Body", "AuthorEmail", "AuthorName", "AuthorRole", "EditedAt"],
 };
 // 선택 열 — 없어도 게시판은 동작하고 그 기능만 저장되지 않는다(관리자 안내)
 const T365_OPT_COLUMNS = { posts: ["Answer", "AnsweredBy", "AnsweredAt", "PinUntil", "AnswerFilesJson", "PublishCheckJson"] };   // AnswerFilesJson — 답변 첨부(여러 줄 텍스트)   // Q&A 답변 · 공지 · 필수 노출 기한(PinUntil — 한 줄 텍스트 YYYY-MM-DD 또는 날짜 열)
@@ -535,6 +538,7 @@ function t365AssertWrite(listName, cats) {
   if (listName === T365_LISTS.reads || listName === T365_LISTS.access) return;
   const P = _tPermNow;
   const ok = !!P && (listName === T365_LISTS.posts ? cats.length > 0 && cats.every((c) => P["cat:" + c] === "e")
+    : listName === T365_LISTS.comments ? cats.length > 0 && cats.every((c) => canSee(P, "cat:" + c))   // 11-04 댓글 — 그 게시판을 볼 수 있는 사람
     : listName === T365_LISTS.users ? P.users === "e" : (listName === T365_LISTS.categories || listName === T365_LISTS.banners) ? P.categories === "e" : listName === T365_LISTS.links ? P.links === "e" : false);
   if (!ok) { const e = new Error("편집 권한이 없어 저장하지 않았습니다 — 관리자에게 권한을 요청해 주세요."); e.code = "NO_EDIT"; throw e; }
 }
@@ -1894,7 +1898,10 @@ function SetupNotice({ status, infoToo = true }) {
   const missing = Object.entries(status).filter(([k, v]) => v.missing && req.includes(k)).map(([k]) => k);
   const colsOf = (keep) => Object.entries(status).filter(([k, v]) => keep(k) && !v.missing && v.missingCols && v.missingCols.length).map(([k, v]) => `${T365_LISTS[k]}: ${v.missingCols.join(", ")}`);
   const cols = colsOf((k) => req.includes(k));
-  const optCols = colsOf((k) => !req.includes(k));   // 선택 목록(카테고리 · 배너)의 새 열 — 안내만
+  const optCols = colsOf((k) => !req.includes(k) && k !== "comments");   // 선택 목록(카테고리 · 배너)의 새 열 — 안내만
+  const cmtSt = status.comments;   // 11-04 댓글 목록(선택) — 없거나 꼭 필요한 열이 모자라면 댓글 칸을 숨긴다
+  const commentsMissing = !!(cmtSt && cmtSt.missing);
+  const commentCols = (cmtSt && !cmtSt.missing && cmtSt.missingCols) || [];
   const errs = Object.entries(status).filter(([, v]) => v.error).map(([k, v]) => `${T365_LISTS[k]} — ${v.error}`);
   const optionalMissing = status.categories && status.categories.missing;
   const bannerMissing = status.banners && status.banners.missing;
@@ -1905,7 +1912,7 @@ function SetupNotice({ status, infoToo = true }) {
   const pinMissing = postOpt.includes("PinUntil");
   const ansFilesMissing = postOpt.includes("AnswerFilesJson");
   const checkColMissing = postOpt.includes("PublishCheckJson");
-  if (!warn && !((optionalMissing || bannerMissing || linksMissing || optCols.length || ansMissing.length || pinMissing || ansFilesMissing || checkColMissing) && infoToo)) return null;   // 선택 목록 안내만 남았으면 게시판 화면에서는 숨긴다(Overview · 관리 화면에서만)
+  if (!warn && !((optionalMissing || bannerMissing || linksMissing || optCols.length || ansMissing.length || pinMissing || ansFilesMissing || checkColMissing || commentsMissing || commentCols.length) && infoToo)) return null;   // 선택 목록 안내만 남았으면 게시판 화면에서는 숨긴다(Overview · 관리 화면에서만)
   return (
     <div className={`rounded-xl border px-4 py-3 mb-5 text-xs leading-relaxed ${warn ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-blue-50 border-blue-100 text-blue-900"}`} data-testid="setup-notice">
       <div className="flex items-start gap-2.5">
@@ -1921,6 +1928,8 @@ function SetupNotice({ status, infoToo = true }) {
             {infoToo && ansFilesMissing && <li data-testid="ans-files-col-missing">{T365_LISTS.posts} 에 AnswerFilesJson 열(여러 줄 텍스트)을 만들면 Q&A 답변에 파일을 붙일 수 있습니다</li>}
             {infoToo && checkColMissing && <li data-testid="check-col-missing">{T365_LISTS.posts} 에 PublishCheckJson 열(여러 줄 텍스트)을 만들면 「게시 전 확인」 기록이 게시물에도 남습니다 — 없으면 활동 이력에만 남습니다</li>}
             {infoToo && pinMissing && <li data-testid="pin-col-missing">{T365_LISTS.posts} 에 PinUntil 열(한 줄 텍스트)을 만들면 글쓰기에서 공지 · 필수의 홈 노출 기한을 정할 수 있습니다 — 없으면 게시 후 7일 동안 보입니다</li>}
+            {infoToo && commentsMissing && <li data-testid="comments-list-missing">{T365_LISTS.comments} 목록이 없어 게시물 댓글을 쓸 수 없습니다 — IT 의 준비 스크립트(STK-T365-Comments-Setup)로 목록 · 열 · 인덱스 · 권한을 만드세요</li>}
+            {infoToo && commentCols.length > 0 && <li data-testid="comments-cols-missing">{T365_LISTS.comments} 에 없는 열 — {commentCols.join(", ")} (댓글 칸을 숨겼습니다 — 준비 스크립트를 다시 실행하세요)</li>}
             {infoToo && linksMissing && <li data-testid="links-list-missing">{T365_LISTS.links} 목록이 없어 사이드바 「바로가기」 를 쓸 수 없습니다 — 만드는 방법(열 구조)은 관리자 전용 「바로가기 관리」 화면에 있습니다</li>}
             {infoToo && bannerMissing && <li>{T365_LISTS.banners} 목록이 없어 게시판 홈에 기본 배너(그림 없음)를 보여 줍니다 — 그림 배너를 쓰려면 목록을 만드세요</li>}
             {optionalMissing && <li>{T365_LISTS.categories} 목록이 없어 기본 카테고리 {T365_DEFAULT_CATEGORIES.length}개(이름 · 설명 · 순서 고정)를 씁니다 — 카테고리 이름 · 설명을 바꾸려면 목록을 만드세요</li>}
@@ -2140,6 +2149,7 @@ function PostMarks({ p, compact, noQna }) {
       {p.Category === "qna" && !noQna && <QnaPill p={p} />}
       {att && <Paperclip size={12} className="text-slate-400" aria-label="첨부" />}
       {vid && <PlayCircle size={12.5} className="text-slate-400" aria-label="동영상" />}
+      {p._cc > 0 && <span className="inline-flex items-center gap-0.5 text-[11px] text-slate-400 tabular-nums" aria-label={`댓글 ${p._cc}개`} title={`댓글 ${p._cc}개`} data-cc={p._cc}><MessageSquare size={11.5} />{p._cc}</span>}
     </span>
   );
 }
@@ -3205,16 +3215,28 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
     busyRef.current = false; setBusy(false);
   }
   async function remove() {
-    if (!(await uiConfirm(`「${post.Title}」 게시물을 삭제할까요?\n삭제하면 되돌릴 수 없고, 첨부파일도 함께 지워지며 이 게시물의 조회확인 기록은 확인 현황에서 빠집니다.`, { title: "게시물 삭제", okText: "삭제", danger: true }))) return;
+    if (!(await uiConfirm(`「${post.Title}」 게시물을 삭제할까요?\n삭제하면 되돌릴 수 없고, 첨부파일${post._cc ? ` · 댓글 ${post._cc}개` : ""}도 함께 지워지며 이 게시물의 조회확인 기록은 확인 현황에서 빠집니다.`, { title: "게시물 삭제", okText: "삭제", danger: true }))) return;
     setDeleting(true);
     try {
       if (post.Category === "qna" && !ctx.isAdmin) {   // 이 창을 연 뒤 답변이 달렸으면 지우지 않는다(다른 Agent 가 볼 답이 사라지지 않게)
         const cur = await tGetItem(T365_LISTS.posts, post.id).catch(() => undefined);
         if (cur && qnaAnswered(cur)) { setDeleting(false); uiAlert("이 질문에 그 사이 답변이 달려 지울 수 없습니다."); await ctx.reload(); return; }
       }
+      // 11-04 댓글 — 남의 댓글이 달린 글은 그 댓글까지 지울 수 있는 사람(관리자 · 그 게시판 편집 권한자, Q&A 는 관리자)만 지운다.
+      // 그렇지 않으면 지운 글에 남의 댓글만 남는다(답변이 달린 질문을 질문자가 못 지우는 것과 같은 생각)
+      let cmts = [];
+      if (ctx.commentsOn) {
+        try { cmts = cmtApplyLocal(await tListAll(T365_LISTS.comments, cmtPostFilter(post.id)), post.id); }
+        catch (e) { if (!isMissingListError(e)) { setDeleting(false); uiAlert(`댓글을 확인하지 못해 지우지 않았습니다 — 잠시 후 다시 시도해 주세요.\n(${e.message})`); return; } }
+        const others = cmts.filter((c) => !cmtIsMine(c, me));
+        if (others.length && !canModerateComments(ctx, post.Category)) { setDeleting(false); uiAlert(`이 글에 다른 사람의 댓글이 ${others.length}개 있어 지울 수 없습니다 — 관리자에게 삭제를 요청해 주세요.`); return; }
+      }
       await tDelete(T365_LISTS.posts, post.id, { cat: post.Category });
       tDeletePostFolder(post.id);   // 첨부 폴더도 휴지통으로(지운 글의 파일이 라이브러리에 남아 계속 받을 수 있던 문제) — 실패해도 삭제는 그대로
-      t365Log("게시물", "삭제", post.Title, { info: { 카테고리: cat ? cat.label : post.Category, 게시물ID: post.id, 작성자: post.AuthorName || post.AuthorEmail || "", ...(parseFiles(post.AttachmentsJson).length ? { 첨부: `${parseFiles(post.AttachmentsJson).length}개 함께 삭제(휴지통)` } : {}) } });
+      // 댓글도 함께(휴지통) — 하나가 실패해도 글 삭제는 그대로. 남은 댓글은 글이 없어 어디에도 보이지 않는다
+      let cmtBad = 0;
+      if (cmts.length) { const rs = await Promise.allSettled(cmts.map((c) => tDelete(T365_LISTS.comments, c.id, { cat: post.Category }))); rs.forEach((r, i) => { if (r.status === "fulfilled") cmtLocalNote("gone", cmts[i]); else cmtBad++; }); ctx.setPostCommentCount(post.id, 0); }
+      t365Log("게시물", "삭제", post.Title, { info: { 카테고리: cat ? cat.label : post.Category, 게시물ID: post.id, 작성자: post.AuthorName || post.AuthorEmail || "", ...(parseFiles(post.AttachmentsJson).length ? { 첨부: `${parseFiles(post.AttachmentsJson).length}개 함께 삭제(휴지통)` } : {}), ...(cmts.length ? { 댓글: `${cmts.length - cmtBad}개 함께 삭제${cmtBad ? ` · ${cmtBad}개 실패` : ""}` } : {}) } });
       onBack();
       await ctx.reload();
     } catch (e) { uiAlert(e.message); }
@@ -3316,6 +3338,9 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
 
           {post.Category === "qna" && <QnaAnswer ctx={ctx} post={post} />}
 
+          {/* 11-04 댓글 — 모든 게시판(목록이 준비됐을 때만) */}
+          {ctx.commentsOn && <Comments ctx={ctx} post={post} />}
+
           {/* 조회확인 현황(본사 · 관리) — 한 줄, 누르면 명단 */}
           {showRate && <section className="px-5 md:px-10 pb-5"><ConfirmPanel ctx={ctx} post={post} /></section>}
 
@@ -3365,6 +3390,221 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
       })()}
       {deleting && <BlockingOverlay message="삭제하고 있습니다..." />}
     </PostModalShell>
+  );
+}
+
+/* ---- 댓글(11-04) — 모든 게시판 ----------------------------------------------------------------------------------
+ * 글을 볼 수 있는 사람은 누구나 쓴다(Agent 포함). 본인 댓글만 고치고 지우며, 남의 댓글 지우기는 관리자 · 그 게시판 편집 권한자(Q&A 는 관리자)만.
+ * SharePoint 쪽도 같은 기준 — training365_Comments 「항목 수준 권한 › 편집 = 본인이 만든 항목만」, Training365 관리자 · 게시 담당 그룹만
+ * 「본인 항목 설정 무시」(남의 댓글 지우기). 목록 · 열 · 인덱스 · 권한은 IT 준비 스크립트 STK-T365-Comments-Setup.ps1 로 만든다.
+ * 저장 열: PostId(숫자 · 인덱스) · Category(인덱스) · Body(일반 텍스트, 1,000자) · AuthorEmail · AuthorName · AuthorRole · EditedAt.
+ * 화면의 「STK」 표시는 댓글에 적힌 값이 아니라 사용자 목록의 역할로 정한다(댓글 쓴 사람이 꾸밀 수 없게). 본문은 글자 그대로(https 링크만 링크로) */
+const T365_COMMENT_MAX = 1000;
+const T365_COMMENT_NEED = ["PostId", "Category", "Body", "AuthorEmail"];   // 하나라도 없으면 댓글을 끈다(없는 열은 저장에서 빠져 빈 댓글이 생기므로)
+const cmtPostKey = (v) => { const s = String(v == null ? "" : v).trim(); return /^\d+(\.0+)?$/.test(s) ? String(parseInt(s, 10)) : ""; };
+const cmtPostFilter = (postId) => `&$filter=${encodeURIComponent(`fields/PostId eq ${parseInt(postId, 10) || 0}`)}`;
+const cmtIsMine = (c, me) => {
+  const ids = ((me && me.ids && me.ids.length) ? me.ids : [me && me.email]).map(normEmail).filter(Boolean);
+  return ids.includes(normEmail(c.AuthorEmail)) || (!!c._createdBy && ids.includes(c._createdBy));
+};
+const canModerateComments = (ctx, cat) => !!ctx.isAdmin || (cat !== "qna" && ctx.canWrite(cat));
+// 방금 쓴 · 고친 · 지운 댓글 — SharePoint 목록 읽기가 몇 초 늦게 따라오는 동안(게시물과 같은 3분) 이 브라우저 값을 덧씌운다
+const _cmtLocal = { made: new Map(), patch: new Map(), gone: new Map() };
+function cmtLocalNote(kind, row) {
+  const id = String(row.id), at = Date.now();
+  if (kind === "made") _cmtLocal.made.set(id, { row, at });
+  else if (kind === "patch") _cmtLocal.patch.set(id, { f: { Body: row.Body, EditedAt: row.EditedAt }, at });
+  else { _cmtLocal.gone.set(id, { at }); _cmtLocal.made.delete(id); _cmtLocal.patch.delete(id); }
+}
+function cmtApplyLocal(rows, postId) {
+  const now = Date.now();
+  for (const m of [_cmtLocal.made, _cmtLocal.patch, _cmtLocal.gone]) for (const [k, v] of m) if (now - v.at > T365_LOCAL_MS) m.delete(k);
+  const key = postId == null ? null : String(postId);
+  let out = (rows || []).filter((r) => !_cmtLocal.gone.has(String(r.id)));
+  const ids = new Set(out.map((r) => String(r.id)));
+  for (const [k, v] of _cmtLocal.made) { if (ids.has(k)) _cmtLocal.made.delete(k); else if (key == null || cmtPostKey(v.row.PostId) === key) out.push(v.row); }
+  return out.map((r) => {
+    const pt = _cmtLocal.patch.get(String(r.id)); if (!pt) return r;
+    if (String(r.Body || "") === String(pt.f.Body || "")) { _cmtLocal.patch.delete(String(r.id)); return r; }
+    return { ...r, ...pt.f };
+  });
+}
+// 개인정보 거르기 — 주민(외국인)등록번호 · 카드 번호처럼 보이면 막고, 휴대전화 번호처럼 보이면 한 번 묻는다(업무 연락처일 수 있어서)
+function cmtLuhn(d) { let s = 0; for (let i = 0; i < d.length; i++) { let n = +d[d.length - 1 - i]; if (i % 2) { n *= 2; if (n > 9) n -= 9; } s += n; } return s % 10 === 0; }
+function commentPii(text) {
+  const t = String(text || "");
+  // 「6자리-뒷자리」 꼴은 가렸어도(910001-1******) 막는다. 붙여 쓴 13자리는 앞 6자리가 날짜일 때만(견적 · 주문 번호를 잘못 막지 않게)
+  if (/(^|[^\d])\d{6}\s*[-–—]\s*[1-8][\d*xX●•]{4,7}(?![\d*xX●•])/.test(t)) return { block: "주민등록번호(외국인등록번호)" };
+  const rrn = /(^|[^\d])(\d{2})(\d{2})(\d{2})[1-8]\d{6}(?!\d)/g; let m;
+  while ((m = rrn.exec(t))) { const mm = +m[3], dd = +m[4]; if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) return { block: "주민등록번호(외국인등록번호)" }; }
+  const card = /(^|[^\d])(\d{4})[- ]?(\d{4})[- ]?(\d{4})[- ]?(\d{4})(?!\d)/g;
+  while ((m = card.exec(t))) { if (cmtLuhn(m[2] + m[3] + m[4] + m[5])) return { block: "카드 번호" }; }
+  if (/(^|[^\d])01[016789][-. ]?\d{3,4}[-. ]?\d{4}(?!\d)/.test(t)) return { warn: "휴대전화 번호" };
+  return {};
+}
+function cmtErrMsg(e, verb) {
+  if (e && e.code === "NO_EDIT") return `이 게시판에 댓글을 ${verb}할 수 없습니다 — 게시판 보기 권한이 필요합니다.`;
+  if (e && (e.status === 401 || e.status === 403)) return `댓글을 ${verb}할 권한이 없습니다 — 본인 댓글만 고치고 지울 수 있습니다. 계속되면 IT팀(ITSM 티켓: itsm-ticket.startruckkorea.com)에 문의해 주세요.`;
+  if (e && e.status === 404) return "이미 지워진 댓글입니다 — 창을 닫았다 다시 열어 주세요.";
+  return `댓글을 ${verb}하지 못했습니다${e && e.status ? ` (상태 ${e.status})` : ""} — 잠시 후 다시 시도해 주세요.`;
+}
+function CommentText({ text }) {
+  const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
+  return <div className="mt-1 text-[13.5px] leading-relaxed text-slate-700 break-words [overflow-wrap:anywhere] [&_a]:text-[#2F7B7A] [&_a]:underline [&_a]:underline-offset-2" data-testid="comment-body">{lines.map((l, i) => <React.Fragment key={i}>{i > 0 && <br />}{renderLinks(l, `c${i}`)}</React.Fragment>)}</div>;
+}
+function Comments({ ctx, post }) {
+  const { me } = ctx;
+  const postKey = String(post.id);
+  const MAX = T365_COMMENT_MAX;
+  const [rows, setRows] = useState(null);   // null = 읽는 중
+  const [err, setErr] = useState("");
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const [editId, setEditId] = useState(null);
+  const [editText, setEditText] = useState("");
+  const taRef = useRef(null);
+  const seqRef = useRef(0);
+  const rowsRef = useRef(null); rowsRef.current = rows;
+  const canWriteHere = canSee(ctx.perms, "cat:" + post.Category);
+  const mod = canModerateComments(ctx, post.Category);
+  const catLabel = (ctx.catMap[post.Category] || {}).label || post.Category;
+  // 「STK」 표시 — 사용자 목록에서 Agent 가 아닌 역할(사용 중)인 사람
+  const roleOf = useMemo(() => { const m = new Map(); (ctx.users || []).forEach((u) => { const e = normEmail(u.Email); if (e && u.Active !== false && T365_ROLES.includes(u.Role) && !m.has(e)) m.set(e, u.Role); }); return m; }, [ctx.users]);
+  async function load(quiet) {
+    const seq = ++seqRef.current;
+    try {
+      const list = cmtApplyLocal(await tListAll(T365_LISTS.comments, cmtPostFilter(post.id)), post.id)
+        .filter((c) => cmtPostKey(c.PostId) === postKey)
+        .sort((a, b) => (Date.parse(a._created || 0) || 0) - (Date.parse(b._created || 0) || 0) || Number(a.id) - Number(b.id));
+      if (seq !== seqRef.current) return;
+      setRows(list); setErr(""); ctx.setPostCommentCount(post.id, list.length);
+    } catch (e) { if (seq !== seqRef.current) return; console.warn("[Training365] 댓글 읽기 실패:", e.message); if (!quiet || rowsRef.current === null) setErr(e.message || "읽기 실패"); }
+  }
+  useEffect(() => { setRows(null); setErr(""); setText(""); setEditId(null); load(); }, [postKey]);
+  // 다른 사람이 쓴 · 지운 댓글 — 1분마다 다시 세는 숫자가 지금 보이는 수와 다르면 다시 읽는다
+  const serverCount = ctx.commentCounts.get(postKey) || 0;
+  useEffect(() => { if (rows && serverCount !== rows.length && !busyRef.current) load(true); }, [serverCount]);
+  const grow = (el) => { if (!el) return; el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 240)}px`; };
+  async function piiOk(t) {
+    const r = commentPii(t);
+    if (r.block) { await uiAlert(`${r.block}처럼 보이는 값이 있어 올리지 않았습니다.\n지우거나 가린 뒤 다시 올려 주세요.`, { title: "개인정보 확인" }); return false; }
+    if (r.warn) return !!(await uiConfirm(`${r.warn}처럼 보이는 값이 있습니다.\n고객 개인정보라면 지워 주세요. 업무 연락처라면 그대로 올려도 됩니다.`, { title: "개인정보 확인", okText: "그대로 올리기" }));
+    return true;
+  }
+  const begin = () => { if (busyRef.current) return false; busyRef.current = true; setBusy(true); return true; };
+  const end = () => { busyRef.current = false; setBusy(false); };
+  async function submit() {
+    const t = text.trim();
+    if (!t || busyRef.current) return;
+    if (t.length > MAX) { uiAlert(`댓글은 ${MAX.toLocaleString()}자까지 쓸 수 있습니다.`); return; }
+    if (!(await piiOk(t)) || !begin()) return;
+    try {
+      const fields = { Title: `#${post.id}`, PostId: parseInt(post.id, 10), Category: post.Category, Body: t, AuthorEmail: normEmail(me.email), AuthorName: me.name || me.email, AuthorRole: ctx.role || "" };
+      const made = await tCreate(T365_LISTS.comments, fields);
+      const row = { ...fields, id: String(made.id), _created: new Date().toISOString(), _modified: "", _createdBy: normEmail(me.email) };
+      cmtLocalNote("made", row);
+      const n = [...(rowsRef.current || []), row]; setRows(n); ctx.setPostCommentCount(post.id, n.length);
+      setText(""); if (taRef.current) taRef.current.style.height = "";
+      t365Log("댓글", "등록", post.Title, { info: { 게시판: catLabel, 게시물ID: post.id, 댓글ID: row.id, 글자수: t.length } });
+    } catch (e) { uiAlert(cmtErrMsg(e, "등록")); }
+    end();
+  }
+  async function saveEdit(c) {
+    const t = editText.trim();
+    if (!t) { uiAlert("내용을 입력해 주세요 — 지우려면 「삭제」 를 누르세요."); return; }
+    if (t === String(c.Body || "").trim()) { setEditId(null); return; }
+    if (t.length > MAX) { uiAlert(`댓글은 ${MAX.toLocaleString()}자까지 쓸 수 있습니다.`); return; }
+    if (!(await piiOk(t)) || !begin()) return;
+    try {
+      const f = { Body: t, EditedAt: new Date().toISOString() };
+      await tUpdate(T365_LISTS.comments, c.id, f, { prevCat: post.Category });
+      cmtLocalNote("patch", { id: c.id, ...f });
+      setRows((rowsRef.current || []).map((x) => (String(x.id) === String(c.id) ? { ...x, ...f } : x)));
+      setEditId(null);
+      t365Log("댓글", "수정", post.Title, { info: { 게시판: catLabel, 게시물ID: post.id, 댓글ID: c.id, 글자수: t.length } });
+    } catch (e) { uiAlert(cmtErrMsg(e, "수정")); }
+    end();
+  }
+  async function del(c) {
+    const own = cmtIsMine(c, me);
+    if (!(await uiConfirm(own ? "이 댓글을 삭제할까요?" : `${c.AuthorName || c.AuthorEmail || "다른 사람"} 님의 댓글을 삭제할까요?\n관리 권한으로 지우며 활동 이력에 남습니다.`, { title: "댓글 삭제", okText: "삭제", danger: true }))) return;
+    if (!begin()) return;
+    try {
+      await tDelete(T365_LISTS.comments, c.id, { cat: post.Category });
+      cmtLocalNote("gone", c);
+      const n = (rowsRef.current || []).filter((x) => String(x.id) !== String(c.id)); setRows(n); ctx.setPostCommentCount(post.id, n.length);
+      if (editId === String(c.id)) setEditId(null);
+      t365Log("댓글", "삭제", post.Title, { info: { 게시판: catLabel, 게시물ID: post.id, 댓글ID: c.id, ...(own ? {} : { 구분: "관리 삭제", "댓글 작성자": c.AuthorName || c.AuthorEmail || "" }) } });
+    } catch (e) { uiAlert(cmtErrMsg(e, "삭제")); }
+    end();
+  }
+  const item = (c) => {
+    const own = cmtIsMine(c, me);
+    const r = roleOf.get(normEmail(c.AuthorEmail));
+    const staff = !!r && !isAgentRole(r);
+    const byAuthor = !!normEmail(post.AuthorEmail) && normEmail(c.AuthorEmail) === normEmail(post.AuthorEmail);
+    const name = String(c.AuthorName || c.AuthorEmail || "알 수 없음");
+    const ed = editId === String(c.id);
+    return (
+      <li key={c.id} className="flex gap-3" data-comment={c.id} data-own={own ? "1" : "0"}>
+        <span className={`w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-[12px] font-semibold ${staff ? "bg-[#E4F1F0] text-[#2F7B7A]" : "bg-slate-100 text-slate-500"}`} aria-hidden="true">{(name.trim()[0] || "?").toUpperCase()}</span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 flex-wrap text-[12px] leading-5">
+            <span className="text-[13px] font-semibold text-slate-800 break-all">{name}</span>
+            {staff && <span className="text-[10px] font-bold px-1.5 rounded bg-[#E4F1F0] text-[#2F7B7A] leading-4" title="Star Truck Korea 담당자" data-staff="1">STK</span>}
+            {byAuthor && <span className="text-[10px] font-semibold px-1.5 rounded bg-slate-100 text-slate-500 leading-4">글쓴이</span>}
+            <span className="text-slate-400 tabular-nums">{fmtDate(c._created)}</span>
+            {c.EditedAt && <span className="text-slate-400" title={`수정 ${fmtDate(c.EditedAt)}`}>· 수정됨</span>}
+            {!ed && (own || mod) && <span className="ml-auto inline-flex items-center gap-0.5">
+              {own && <button type="button" onClick={() => { setEditId(String(c.id)); setEditText(String(c.Body || "")); }} disabled={busy} className="h-6 px-1.5 rounded text-[11.5px] text-slate-400 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-50" data-cmt-edit={c.id}>수정</button>}
+              <button type="button" onClick={() => del(c)} disabled={busy} className="h-6 px-1.5 rounded text-[11.5px] text-slate-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-50" data-cmt-del={c.id} title={own ? "내 댓글 삭제" : "관리 권한으로 삭제"}>삭제</button>
+            </span>}
+          </div>
+          {ed ? (
+            <div className="mt-1.5 rounded-lg border border-slate-300 focus-within:border-slate-500 bg-white">
+              <textarea value={editText} maxLength={MAX} autoFocus rows={3} onChange={(e) => setEditText(e.target.value.slice(0, MAX))}
+                onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveEdit(c); } else if (e.key === "Escape") { e.stopPropagation(); setEditId(null); } }}
+                aria-label="댓글 수정" className="block w-full resize-y px-3 py-2 text-[13.5px] leading-relaxed bg-transparent outline-none rounded-lg" data-testid="comment-edit-input" />
+              <div className="flex items-center gap-1.5 px-2 pb-2">
+                <span className="ml-1 text-[11px] text-slate-400 tabular-nums">{editText.length} / {MAX.toLocaleString()}</span>
+                <button type="button" onClick={() => setEditId(null)} className="ml-auto h-7 px-2.5 rounded-md text-[12px] text-slate-500 hover:bg-slate-100">취소</button>
+                <button type="button" onClick={() => saveEdit(c)} disabled={busy || !editText.trim()} className="h-7 px-3 rounded-md text-[12px] font-semibold text-white disabled:opacity-50" style={{ background: BRAND.accent }} data-testid="comment-edit-save">저장</button>
+              </div>
+            </div>
+          ) : <CommentText text={c.Body} />}
+        </div>
+      </li>
+    );
+  };
+  const n = rows ? rows.length : serverCount;
+  return (
+    <section className="px-5 md:px-10 pb-6" data-testid="comments" data-count={rows ? rows.length : ""} aria-label="댓글">
+      <div className="border-t border-slate-100 pt-4">
+        <div className="flex items-center gap-1.5 mb-3">
+          <MessageSquare size={14} className="text-slate-400" />
+          <h3 className="text-[13px] font-semibold text-slate-700">댓글</h3>
+          <span className="text-[12px] text-slate-400 tabular-nums" data-testid="comments-count">{n}</span>
+          {rows === null && !err && <span className="ml-1 w-3.5 h-3.5 rounded-full border-2 border-slate-200 border-t-slate-500 animate-spin" role="status" aria-label="댓글을 불러오는 중"></span>}
+        </div>
+        {err && <div className="mb-3 flex items-center gap-2 rounded-lg bg-red-50 border border-red-100 px-3 py-2 text-[12.5px] text-red-700" role="alert" data-testid="comments-error"><AlertTriangle size={14} className="shrink-0" />댓글을 불러오지 못했습니다.<button type="button" onClick={() => { setErr(""); load(); }} className="ml-auto font-medium underline underline-offset-2">다시 시도</button></div>}
+        {rows && rows.length > 0 && <ul className="space-y-4" data-testid="comment-list">{rows.map(item)}</ul>}
+        {rows && rows.length === 0 && !err && <p className="text-[12.5px] text-slate-400" data-testid="comments-empty">아직 댓글이 없습니다.</p>}
+        {canWriteHere && (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-white focus-within:border-slate-400 focus-within:shadow-[0_0_0_3px_rgba(47,123,122,0.12)] transition-shadow" data-testid="comment-composer">
+            <textarea ref={taRef} value={text} maxLength={MAX} rows={2} placeholder="댓글을 남겨 주세요" aria-label="댓글 쓰기"
+              onChange={(e) => { setText(e.target.value.slice(0, MAX)); grow(e.target); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submit(); } }}
+              className="block w-full resize-none px-3.5 pt-3 pb-1 text-[13.5px] leading-relaxed bg-transparent outline-none rounded-t-xl placeholder:text-slate-400" data-testid="comment-input" />
+            <div className="flex items-center gap-2 px-3 pb-2.5 pt-1">
+              <span className="inline-flex items-center gap-1 text-[11.5px] text-slate-400 min-w-0"><ShieldCheck size={12.5} className="shrink-0" /><span className="truncate">고객 개인정보 · 민감정보는 쓰지 마세요</span></span>
+              <span className={`ml-auto text-[11px] tabular-nums shrink-0 ${MAX - text.length < 50 ? "text-amber-600" : "text-slate-400"}`}>{text.length} / {MAX.toLocaleString()}</span>
+              <button type="button" onClick={submit} disabled={busy || !text.trim()} className="h-8 px-3.5 rounded-lg text-[13px] font-semibold text-white disabled:opacity-40 shrink-0" style={{ background: BRAND.accent }} title="등록 (Ctrl + Enter)" data-testid="comment-submit">{busy ? "등록 중…" : "등록"}</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -6050,7 +6290,7 @@ function AccessLogTab({ ctx }) {
 /* ------------------------------------------------------------------ */
 /* 활동 이력 — MKQR 과 같은 파일 방식(APS 「이력 조회」 에서도 보임)           */
 /* ------------------------------------------------------------------ */
-const T365_LOG_CATS = ["게시물", "사용자", "카테고리", "배너", "바로가기", "조회확인", "접속 기록", "활동 이력"];   // 10-15 배너 · 바로가기 · 활동 이력
+const T365_LOG_CATS = ["게시물", "댓글", "사용자", "카테고리", "배너", "바로가기", "조회확인", "접속 기록", "활동 이력"];   // 11-04 댓글   // 10-15 배너 · 바로가기 · 활동 이력
 function logCatStyle(c) { return { "게시물": "bg-teal-50 text-teal-700", "사용자": "bg-violet-50 text-violet-700", "카테고리": "bg-blue-50 text-blue-700", "조회확인": "bg-orange-50 text-orange-700", "접속 기록": "bg-slate-100 text-slate-600" }[c] || "bg-slate-100 text-slate-600"; }
 function logVerbStyle(v) { return /삭제|중지/.test(v) ? "text-red-600" : /게시 전 확인/.test(v) ? "text-sky-700" : /등록|추가|사용$/.test(v) ? "text-emerald-700" : "text-slate-700"; }
 function fmtVal(v) { return v === true ? "예" : v === false ? "아니요" : v === "" || v == null ? "(빈 값)" : String(v); }
@@ -6285,6 +6525,11 @@ function App({ boot }) {
   const [linkRows, setLinkRows] = useState([]);   // 바로가기(선택 목록) — 없으면 빈 목록
   const [accessRows, setAccessRows] = useState(null);
   const [listStatus, setListStatus] = useState(null);
+  // 11-04 댓글 — 글마다 개수(목록 · 제목 옆 표시)와 쓸 수 있는지(목록 · 꼭 필요한 열 준비). null = 아직 모름
+  const [commentCounts, setCommentCounts] = useState(() => new Map());
+  const [commentsOn, setCommentsOn] = useState(null);
+  const commentsOnRef = useRef(null);
+  const cmtMissAtRef = useRef(0);   // 목록 · 열이 없을 때 — 5분에 한 번만 다시 확인(1분마다 목록 찾기 요청을 하지 않게)
   const [loading, setLoading] = useState(true);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [denied, setDenied0] = useState(null);
@@ -6328,8 +6573,12 @@ function App({ boot }) {
     users.forEach((u) => { const e = normEmail(u.Email); if (!e) return; if (isAgentRole(u.Role)) ag.add(e); else if (u.Active !== false && T365_ROLES.includes(u.Role)) staff.add(e); });
     staff.forEach((e) => ag.delete(e)); return ag;
   }, [users]);
-  const posts = useMemo(() => rawPosts.map((p) => ((p.IsPinned || p.RequireConfirm) && (p.Category === "qna" || agentEmails.has(normEmail(p.AuthorEmail)) || (p._createdBy && agentEmails.has(p._createdBy)))
-    ? { ...p, IsPinned: false, RequireConfirm: false } : p)), [rawPosts, agentEmails]);
+  const posts = useMemo(() => rawPosts.map((p0) => {
+    const p = (p0.IsPinned || p0.RequireConfirm) && (p0.Category === "qna" || agentEmails.has(normEmail(p0.AuthorEmail)) || (p0._createdBy && agentEmails.has(p0._createdBy)))
+      ? { ...p0, IsPinned: false, RequireConfirm: false } : p0;
+    const cc = commentCounts.get(String(p0.id)) || 0;   // 11-04 댓글 수 — 목록 · 제목 옆 표시(저장값이 아니라 화면용)
+    return cc ? { ...p, _cc: cc } : p;
+  }), [rawPosts, agentEmails, commentCounts]);
   const knownEmails = useMemo(() => new Set(users.map((u) => normEmail(u.Email)).filter(Boolean)), [users]);
   const readIdx = useMemo(() => indexReads(reads, knownEmails), [reads, knownEmails]);
   const canWrite = (k) => !!catMap[k] && P["cat:" + k] === "e";
@@ -6392,7 +6641,25 @@ function App({ boot }) {
       tCheckLists().then(setListStatus, () => setListStatus(null));
     }
     setLoading(false); setHasLoadedOnce(true);
+    loadCommentCounts();   // 11-04 댓글 수 — 게시판 읽기를 늦추지 않게 따로
   }
+  // 11-04 댓글 수 — 글 번호(PostId)만 받아 센다. 목록이 없거나 꼭 필요한 열이 없으면 댓글을 끄고, 잠깐 실패면 이전 값을 둔다
+  async function loadCommentCounts() {
+    if (commentsOnRef.current === false && Date.now() - cmtMissAtRef.current < 5 * 60e3) return;
+    const off = () => { commentsOnRef.current = false; cmtMissAtRef.current = Date.now(); setCommentsOn(false); setCommentCounts(new Map()); };
+    try {
+      const cols = await tListColumns(T365_LISTS.comments);
+      if (!T365_COMMENT_NEED.every((c) => cols.has(c))) { delete _tListCols[T365_LISTS.comments]; off(); return; }   // 열을 만든 뒤 5분 안에 다시 보게 열 캐시는 지운다
+      const rows = cmtApplyLocal(await tListAll(T365_LISTS.comments, "", { select: "PostId" }));
+      const m = new Map(); rows.forEach((r) => { const k = cmtPostKey(r.PostId); if (k) m.set(k, (m.get(k) || 0) + 1); });
+      commentsOnRef.current = true; setCommentsOn(true); setCommentCounts(m);
+    } catch (e) {
+      if (isMissingListError(e)) off();
+      else console.warn("[Training365] 댓글 수 읽기 실패:", e.message);
+    }
+  }
+  // 댓글 창이 쓰고 지운 뒤 — 서버 다시 읽기를 기다리지 않고 그 글의 숫자만 바로
+  const setPostCommentCount = (postId, n) => setCommentCounts((prev) => { const k = String(postId); if ((prev.get(k) || 0) === n) return prev; const m = new Map(prev); if (n > 0) m.set(k, n); else m.delete(k); return m; });
   useEffect(() => { t365PurgeOthers(me0.email); reload(); }, []);
   // 저절로 새로 읽기 — 화면을 보고 있으면 1분마다, 다른 창 · 탭에 있다 돌아오면(30초 넘게 지났을 때) 바로. 다른 사람이 올린 글 · 답변도 새로고침 없이
   useEffect(() => {
@@ -6441,7 +6708,8 @@ function App({ boot }) {
 
   const ctx = { goPost: (cat, id) => setTab(catMap[cat] ? "cat:" + cat : "all", String(id)), openContact: () => setContactOpen(true),
     askQuestion: () => { if (catMap.qna && canWrite("qna")) setAsking(true); },   // 지금 보던 화면 위에 질문 창 — 닫으면 그 화면 그대로
-    me, role, isAdmin, isAgent, canWrite, canEditPost, qnaDuty, canView, canEditMenu, perms: P, cats, catMap, users, agents, posts, readIdx, upsertRead, reload };
+    me, role, isAdmin, isAgent, canWrite, canEditPost, qnaDuty, canView, canEditMenu, perms: P, cats, catMap, users, agents, posts, readIdx, upsertRead, reload,
+    commentsOn, commentCounts, setPostCommentCount };   // 11-04 댓글
 
   // 화면 접근 — 관리 화면은 관리자만, 확인 현황은 Agent 제외, 카테고리는 사용 중인 것만
   const tabAllowed = (t) => !!role && (t === "overview" || (t === "all" && canView("all")) || (t.startsWith("cat:") && !!catMap[t.slice(4)]) || ((t === "status" || T365_ADMIN_TABS.includes(t)) && canView(t)));
@@ -6787,7 +7055,7 @@ async function t365Boot(account) {
   else if (myRow.Active === false) reason = "inactive";
   else if (!T365_ROLES.includes(myRow.Role)) reason = "no-role";
   else role = myRow.Role;
-  // 로그인 문 — Agent 는 「Sales Agent」(STK-Sales-Freelancer) 로만, 본사 · 작성자 · 관리자는 「임직원」 으로만. Agent 는 이용 시간 안에만
+  // 로그인 문 — Agent 는 「Agent 로그인」(STK-Training365-Agent) 으로만, 본사 · 작성자 · 관리자는 「임직원」(STK-Training365-Staff) 으로만. Agent 는 이용 시간 안에만
   if (role === "Agent" && T365_APP_KIND !== "agent") { reason = "door-agent"; role = null; }
   else if (role && role !== "Agent" && T365_APP_KIND === "agent") { reason = "door-staff"; role = null; }
   else if (role === "Agent" && !t365AgentHoursOk()) { reason = "hours"; role = null; }
