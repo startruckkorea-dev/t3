@@ -2299,25 +2299,36 @@ function BoardCell({ cat, bare }) {
     </span>
   );
 }
-// 홈 「공지 · 필수」 · 「최근 게시물」 한 줄(10-14b) — 표 대신 게시판 소식 목록 모양:
-// 게시판(색 글자) → [공지]·[필수] + 제목 → 글번호 | 작성자 | 날짜 | 조회 (· 내 확인). 글번호 = 게시물 고유 번호(주소 #/cat/키/번호 와 같음) — 이 번호로 검색할 수 있다
+// 홈 「공지 · 필수」 · 「최근 게시물」 한 줄(10-14b → 11-05 정리):
+//   번호 | [공지] 게시판 │ 제목 (새 글 점 · 표시)
+//        | 작성자 이름 · 작성일 11.04 16:15 · 조회 30 (· 내 확인)
+// 번호 = 게시물 고유 번호(주소 #/cat/키/번호 와 같음 — 이 번호로 검색할 수 있다). 게시판은 제목 줄 앞으로, 둘째 줄은 이름표 붙은 짧은 한 줄
 function HomePostRow({ p, cat, onOpen, seen, fresh, views, confirm, tags, attr, className }) {
   const pin = pinActive(p);
+  const who = nameOf(p.AuthorEmail, p.AuthorName) || "-";
+  const at = p.PublishedAt || p._created;
+  const CI = cat && cat.icon;
+  const sep = <span className="text-slate-300" aria-hidden="true">·</span>;
   return (
-    <button onClick={() => onOpen(p)} title={p.Title} {...attr} className={`group block w-full text-left px-5 py-3 border-t border-[#E9EEF3] first:border-t-0 hover:bg-[#F6FAF9] transition-colors min-w-0 ${className || ""}`}>
-      <span className="flex items-center gap-1.5 min-w-0">
-        {tags && pin && <span data-kind="pin"><NoticePill /></span>}
-        <span className={`min-w-0 truncate text-[15.5px] leading-6 tracking-[-0.015em] group-hover:underline underline-offset-2 ${seen ? "font-medium text-slate-700" : "font-bold text-slate-900"}`}>{p.Title}</span>
-        {fresh && <NewDot />}
-        <PostMarks p={p} compact />
-      </span>
-      <span className="mt-1 flex items-center flex-wrap gap-y-0.5 text-[13px] text-slate-500 tabular-nums t365-meta">
-        <span className="t365-mc inline-flex items-center gap-1 font-semibold max-w-[160px] sm:max-w-none sm:w-[146px]" style={{ color: cat ? cat.color : "#64748B" }} data-row-cat title={cat ? cat.label : ""}>{cat && cat.icon ? <cat.icon size={13} className="shrink-0" /> : null}<span className="truncate">{cat ? cat.label : "-"}</span></span>
-        <span className="t365-mc sm:w-[84px]" data-postno={p.id} title="게시물 등록 번호(SharePoint ID) — 게시물 주소 · 검색에 쓰는 고유 번호">No. {p.id}</span>
-        <span className="t365-mc max-w-[160px] sm:max-w-none sm:w-[132px]" title={nameOf(p.AuthorEmail, p.AuthorName)}>{nameOf(p.AuthorEmail, p.AuthorName) || "-"}</span>
-        <span className="t365-mc sm:w-[112px]" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
-        <span className="t365-mc sm:w-[90px]">조회 {views || 0}</span>
-        {confirm && <span className="inline-flex items-center">{confirm}</span>}
+    <button onClick={() => onOpen(p)} title={p.Title} {...attr} className={`group flex items-start gap-2.5 sm:gap-3 w-full text-left px-4 sm:px-5 py-3 border-t border-[#E9EEF3] first:border-t-0 hover:bg-[#F6FAF9] transition-colors min-w-0 ${className || ""}`}>
+      <span className="w-7 sm:w-8 shrink-0 text-right text-[12.5px] leading-6 text-slate-400 tabular-nums" data-postno={p.id} title={`글번호 ${p.id} — 게시물 주소 · 검색에 쓰는 고유 번호`}>{p.id}</span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2 min-w-0">
+          {tags && pin && <span data-kind="pin" className="shrink-0"><NoticePill /></span>}
+          <span className="inline-flex items-center gap-1 shrink-0 max-w-[45%] text-[12.5px] font-semibold leading-6" style={{ color: cat ? cat.color : "#64748B" }} data-row-cat title={cat ? cat.label : ""}>{CI ? <CI size={13} className="shrink-0" /> : null}<span className="truncate">{cat ? cat.label : "-"}</span></span>
+          <span className="w-px h-3 bg-slate-200 shrink-0" aria-hidden="true"></span>
+          <span className={`min-w-0 truncate text-[15px] leading-6 tracking-[-0.015em] group-hover:underline underline-offset-2 ${seen ? "font-medium text-slate-700" : "font-bold text-slate-900"}`}>{p.Title}</span>
+          {fresh && <NewDot />}
+          <PostMarks p={p} compact />
+        </span>
+        <span className="mt-0.5 flex items-center flex-wrap gap-x-2 gap-y-0.5 text-[12.5px] text-slate-500 tabular-nums" data-row-meta>
+          <span className="min-w-0 max-w-[200px] truncate"><span className="hidden sm:inline text-slate-400">작성자 </span><span className="text-slate-600" title={who}>{who}</span></span>
+          {sep}
+          <span className="whitespace-nowrap" title={fmtDate(at)}><span className="hidden sm:inline text-slate-400">작성일 </span>{shortDate(at)}</span>
+          {sep}
+          <span className="whitespace-nowrap"><span className="text-slate-400">조회</span> {views || 0}</span>
+          {confirm && <span className="inline-flex items-center ml-1">{confirm}</span>}
+        </span>
       </span>
     </button>
   );
@@ -2734,7 +2745,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                 ? <span className="text-[11px] font-bold px-2 rounded-full leading-5 text-white whitespace-nowrap" style={{ background: "#C2410C" }} data-testid="todo-required">확인 필요 {noticeTodo}건</span>
                 : !todo.length && notice.some((p) => p.RequireConfirm) ? <span className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-emerald-600 whitespace-nowrap" data-testid="todo-required"><CheckCircle2 size={13} />모두 확인 완료</span> : null)}
               <span className="ml-auto inline-flex items-center gap-1 min-w-0 text-[11.5px] text-slate-400 whitespace-nowrap cursor-help" title={`공지 · 필수 자료는 게시 후 7일 동안 이곳에 보이고, 지나면 자동으로 내려갑니다(기한을 정한 글은 그날까지). 지난 글은 「지난 글」 에서 볼 수 있습니다.${ctx.isAgent ? "\n필수 자료는 열어 보면 자동으로 조회확인됩니다." : ""}`} data-testid="notice-window">
-                <Clock size={12} className="shrink-0" /><span>게시 후 7일간 노출</span><Info size={12} className="shrink-0 text-slate-300" />
+                <Clock size={12} className="shrink-0" /><span className="truncate min-w-0">게시 후 7일간 노출</span><Info size={12} className="shrink-0 text-slate-300" />
               </span>
               {noticeAny && canAll && <><span className="w-px h-3 bg-slate-200 shrink-0"></span><button onClick={() => onSearch("", "notice")} title="지난 공지 · 필수까지 모두 보기" className="text-[12px] text-slate-500 hover:text-slate-800 whitespace-nowrap shrink-0 inline-flex items-center" data-testid="notice-more">지난 글<ChevronRight size={13} /></button></>}
             </div>
@@ -2759,7 +2770,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
             </div>
             {recent.length ? recent.slice(0, 8).map((p, i) => {
               const c = catMap[p.Category];
-              return <HomePostRow key={p.id} p={p} cat={c} onOpen={openPost} seen={seen(p)} fresh={fresh(p)} views={viewStats(readIdx, p.id).views} attr={{ "data-wpost": p.id }} className={i >= 5 ? "hidden sm:block" : ""}
+              return <HomePostRow key={p.id} p={p} cat={c} onOpen={openPost} seen={seen(p)} fresh={fresh(p)} views={viewStats(readIdx, p.id).views} attr={{ "data-wpost": p.id }} className={i >= 5 ? "hidden sm:flex" : ""}
                 confirm={ctx.isAgent && myRow(p) ? <SeenMark r={myRow(p)} /> : null} />;
             }) : <SmallEmpty>최근 7일 동안 올라온 새 글이 없습니다.{canAll && <> <button onClick={() => setTab("all")} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>전체 게시물 보기</button></>}</SmallEmpty>}
           </section>
