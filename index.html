@@ -4446,7 +4446,7 @@ const Tip = ({ icon: I, children }) => <li className="flex items-center gap-2 mi
             </div>
             <div className="sm:col-span-2">
               <label className="flex items-center text-[12px] font-medium text-slate-500 mb-1">제목 <span className="text-red-500 ml-0.5">*</span><span className={`ml-auto tabular-nums text-[11px] ${title.length > T365_TITLE_MAX * 0.9 ? "text-amber-600" : "text-slate-400"}`} data-testid="ed-title-count">{title.length} / {T365_TITLE_MAX}</span></label>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={T365_TITLE_MAX} className={`${inputCls} h-10 text-[15px] font-medium`} placeholder={isQna ? "예: 견적서 할인율은 어디서 확인하나요?" : "예: 기프트 세트 링크 접속 방법"} data-testid="ed-title" />
+              <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={T365_TITLE_MAX} className={`${inputCls} h-10 text-[15px] font-medium`} placeholder="제목을 입력하세요." data-testid="ed-title" />
               {isQna && <p className="sm:hidden mt-1.5 text-[11.5px] text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-2 py-1.5 leading-snug" data-testid="ed-qna-privacy">고객 개인정보 · 민감정보 입력에 유의해 주세요. 질문은 다른 Agent 도 볼 수 있습니다.</p>}
             </div>
           </div>
@@ -4464,7 +4464,7 @@ const Tip = ({ icon: I, children }) => <li className="flex items-center gap-2 mi
             <div className={`flex-1 min-h-0 flex ${mode === "split" ? "divide-x divide-slate-200" : ""}`}>
               {mode !== "preview" && (
                 <RichEditor ref={ta} value={body} onChange={setBody} onFiles={addFiles} testid="ed-body"
-                  placeholder={isQna ? "궁금한 점을 자세히 적어 주세요 — 자세할수록 답변이 빠릅니다.\n\n예)\n- 어떤 화면에서: CRM 견적 화면\n- 하려던 일: 할인율 적용\n- 막힌 점: 할인율 칸이 보이지 않습니다\n\n화면 캡처는 「첨부파일」 에 올려 주세요." : "내용을 입력하세요.\n\n예)\n## 접속 방법\n1. CRM 에 로그인합니다\n2. 메뉴에서 **기프트 세트** 를 누릅니다\n> 권한이 없으면 담당자에게 요청해 주세요"} />
+                  placeholder="내용을 입력하세요." />
               )}
               {mode !== "write" && <div className="flex-1 min-w-0 overflow-y-auto px-5 py-4 bg-white min-h-[300px]" data-testid="ed-preview">{body.trim() ? preview : <p className="text-[13px] text-slate-300">미리 볼 내용이 없습니다.</p>}</div>}
             </div>
@@ -5275,15 +5275,18 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
               {pageRows.length ? pageRows.map((p) => {
                 const o = overrides[p.email]; const dirty = !!o; const role = eff(p, "Role"); const active = eff(p, "Active");
                 const cur = curPerm(p); const pre = presetOf(p); const saved = stored(p);
+                const ko = String(eff(p, "KorName") || "").trim(), mainName = ko || p.row.Title || p.email, subName = ko && p.row.Title && p.row.Title !== ko ? p.row.Title : "";   // 11-05 한글 이름 먼저
                 const rowBg = dirty ? "#FFFBEB" : "#FFFFFF";
                 return (
                   <tr key={p.email} data-user={p.email} className={`group ${!active ? "opacity-60" : ""}`}>
                     <td className={`${stickyL} px-3 md:px-4 py-1.5 border-b border-slate-100 w-[150px] min-w-[150px] max-w-[150px] md:w-[248px] md:min-w-[248px] md:max-w-[248px]`} style={{ background: rowBg, boxShadow: "1px 0 0 #E2E8F0" }}>
                       <div className="flex items-center gap-2 min-w-0">
                         {canEdit && <input type="checkbox" checked={selected.has(p.email)} onChange={() => toggleSel(p.email)} className="w-4 h-4 shrink-0" />}
-                        <div className="min-w-0 flex-1 leading-tight" title={`${p.row.Title || ""} (${p.email})`}>
+                        <div className="min-w-0 flex-1 leading-tight" title={`${mainName}${subName ? ` · ${subName}` : ""} (${p.email})`}>
                           <div className="flex items-center gap-1 min-w-0">
-                            <span className="font-medium text-[13px] text-slate-800 truncate">{p.row.Title || p.email}</span>
+                            {/* 11-05 한글 이름이 있으면 한글 이름이 먼저(등록된 영문 이름은 옆에 작게) — 없으면 등록된 이름 */}
+                            <span className="font-medium text-[13px] text-slate-800 truncate shrink-0 max-w-[70%]" data-user-main={p.email}>{mainName}</span>
+                            {subName && <span className="text-[11px] text-slate-400 truncate min-w-0" data-user-sub={p.email}>{subName}</span>}
                             {(!dirOk || p.dirStatus === "in") && isExternalEmail(p.email) && <span className="shrink-0 text-[9.5px] px-1 rounded bg-blue-50 text-blue-700 font-medium leading-[15px]" title="회사 밖 메일 — Microsoft 365 게스트(B2B)">외부</span>}
                             {p.dirStatus === "missing" && (p.extAgent
                               ? <span className="shrink-0 text-[9.5px] px-1 rounded bg-blue-50 text-blue-700 font-medium leading-[15px]" title="외부 Agent(게스트) — 직원 명부에 없는 것이 정상입니다" data-dir={p.email}>외부(Agent)</span>
@@ -7070,10 +7073,14 @@ function App({ boot }) {
           <div className={`${tab === "overview" ? "max-w-[1840px]" : "max-w-[1600px]"} mx-auto`}>
             {tab !== "overview" && (   /* 글은 창으로 떠서 뒤 머리를 숨기지 않는다 — 숨기면 목록이 위로 당겨져 보임 */
               <PageHeader icon={meta[0]} title={cur.label} subtitle={meta[1]} tint={meta[2]} descSide right={curCat && curCat.contacts && curCat.contacts.length ? (
-                <div className="hidden sm:flex items-center gap-2 h-11 pl-3 pr-1.5 rounded-xl border bg-white shadow-sm" style={{ borderColor: curCat.soft }} data-testid="board-contacts">
-                  <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold whitespace-nowrap" style={{ color: curCat.color }}><Mail size={14} />문의 담당자</span>
-                  {curCat.contacts.slice(0, 2).map((c) => <a key={c.email} href={mailtoOf(c.email)} title={`${c.email} 로 메일 쓰기`} className="inline-flex items-center gap-2 h-8 pl-1 pr-3 rounded-lg hover:brightness-95 transition" style={{ background: curCat.soft }}><span className="w-6 h-6 rounded-full flex items-center justify-center text-[10.5px] font-bold text-white shrink-0" style={{ background: curCat.color }}>{String(nameOf(c.email, c.name) || c.email).slice(0, 1).toUpperCase()}</span><span className="leading-tight min-w-0"><span className="block text-[12.5px] font-semibold text-slate-800 max-w-[140px] truncate">{nameOf(c.email, c.name) || c.email}</span><span className="block text-[10.5px] text-slate-500 max-w-[140px] truncate">{c.email}</span></span></a>)}
-                  {curCat.contacts.length > 2 && <button onClick={() => setContactOpen(true)} className="h-8 px-2.5 rounded-lg text-[12px] font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-800">+{curCat.contacts.length - 2}명</button>}
+                /* 11-05 문의 담당자 — 테두리 상자 · 알약 · 동그라미 없이 글자 한 줄로(「✉ 문의 담당자 | 이름 · 이름 외 N명」). 메일 주소는 마우스를 올리면, 누르면 메일 쓰기 */
+                <div className="hidden sm:flex items-center gap-2.5 min-w-0 max-w-[420px] text-[13px]" data-testid="board-contacts">
+                  <span className="inline-flex items-center gap-1.5 text-slate-400 whitespace-nowrap"><Mail size={13} aria-hidden="true" />문의 담당자</span>
+                  <span className="w-px h-3.5 bg-slate-200 shrink-0" aria-hidden="true"></span>
+                  <span className="inline-flex items-center min-w-0 whitespace-nowrap">
+                    {curCat.contacts.slice(0, 2).map((c, i) => <React.Fragment key={c.email}>{i > 0 && <span className="text-slate-300 mx-1.5" aria-hidden="true">·</span>}<a href={mailtoOf(c.email)} title={`${c.email} — 눌러서 메일 쓰기`} className="font-semibold text-slate-700 hover:text-[color:var(--t365-c)] hover:underline underline-offset-4 decoration-1 truncate max-w-[150px] transition-colors" style={{ "--t365-c": curCat.color }} data-contact={c.email}>{nameOf(c.email, c.name) || c.email}</a></React.Fragment>)}
+                    {curCat.contacts.length > 2 && <button onClick={() => setContactOpen(true)} className="ml-1.5 text-[12.5px] text-slate-400 hover:text-slate-700 hover:underline underline-offset-4" title="문의 담당자 모두 보기" data-testid="board-contacts-more">외 {curCat.contacts.length - 2}명</button>}
+                  </span>
                 </div>) : null} />
             )}
             {showSetup && <SetupNotice status={listStatus} infoToo={tab === "overview" || T365_ADMIN_TABS.includes(tab)} />}
