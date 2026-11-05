@@ -2986,6 +2986,8 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
   const block = Math.floor((pageSafe - 1) / 10);
   const pages = Array.from({ length: Math.min(10, totalPages - block * 10) }, (_, i) => block * 10 + i + 1);
   const pgBtn = "min-w-[32px] h-8 px-2 rounded-md text-[13px] tabular-nums inline-flex items-center justify-center disabled:opacity-30";
+  // 11-05 테두리 없는 글자 고르기(게시판 · 정렬 · 쪽당 글 수) — 마우스를 올리면 옅은 바탕
+  const plainSel = "h-9 pl-2 pr-1 rounded-lg text-[13px] text-slate-600 bg-transparent hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2F7B7A]/40 cursor-pointer";
   const emptyMsg = scope.length ? (qq ? <>「{q.trim()}」 검색 결과가 없습니다. <button onClick={() => setQ("")} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>검색어 지우기</button></> : filter === "unread" ? "안 읽은 글이 없습니다 — 모두 읽었습니다." : filter === "todo" ? "확인할 필수 자료가 없습니다 — 모두 확인했습니다." : filter === "done" ? "아직 확인한 필수 자료가 없습니다." : filter === "qwait" ? "답변을 기다리는 질문이 없습니다." : filter === "incomplete" ? "모든 Agent 가 확인을 마쳤습니다." : filter === "qdone" ? "아직 답변이 달린 질문이 없습니다." : filter === "mine" ? "내가 올린 질문이 없습니다." : "조건에 맞는 글이 없습니다.")
     : <>등록된 게시물이 없습니다.{canWriteHere && <> <button onClick={() => setEditing({})} className="font-medium underline underline-offset-2" style={{ color: BRAND.accent }}>첫 글 쓰기</button></>}</>;
   const TitleLine = ({ p, pin, big, inTable }) => {
@@ -3004,10 +3006,11 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
   return (
     <div className="w-full">
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden t365-portlet" data-testid="board">
-        {/* 보기 탭 · 검색 · 글쓰기 */}
-        <div className="px-3 md:px-4 border-b border-slate-200 flex flex-col md:flex-row md:items-center gap-2 md:gap-3 pt-2 md:pt-0">
-          {/* 보기 탭 — 회색 바탕 위의 둥근 조각(segmented) · 아이콘 + 개수 */}
-          <div className="order-2 md:order-1 self-stretch flex items-end overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {/* 11-05 도구 줄 한 줄로 — 보기 탭 | 게시판 · 정렬(글자 모양 고르기) · 검색(검색 대상은 칸 안에) · 보기 방식 · 글쓰기.
+            예전 둘째 줄(총 N건 · 쪽 · 쪽당 글 수)은 걷어냄 — 개수는 탭에, 쪽은 아래 쪽 번호에, 쪽당 글 수는 아래 쪽 번호 옆. 좁은 화면은 검색 → 탭 → 고르기 순으로 줄을 나눈다 */}
+        <div className="px-3 md:px-4 border-b border-slate-200 flex flex-wrap items-center gap-x-3" data-testid="board-toolbar">
+          {/* 보기 탭 · 아이콘 + 개수 */}
+          <div className="order-2 lg:order-1 w-full lg:w-auto lg:flex-1 lg:min-w-max self-stretch flex items-end overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <div className="inline-flex items-center gap-5" role="tablist">
               {tabs.map(([k, label]) => {
                 const on = filter === k || (k === "notice" && filter === "pinned") || (k === "notice" && filter === "required" && !ctx.isAgent);
@@ -3027,41 +3030,46 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
               })}
             </div>
           </div>
-          <div className="flex items-center gap-1.5 md:ml-auto order-1 md:order-2 md:py-2.5 min-w-0">
-            <select value={field} onChange={(e) => setField(e.target.value)} className={`${ctrl} px-2 shrink-0`} aria-label="검색 대상" data-testid="search-field">
-              <option value="tb">제목+내용</option><option value="t">제목</option><option value="b">내용</option><option value="a">작성자</option>
+          {/* 게시판 · 정렬 — 테두리 없는 글자 고르기 */}
+          <div className="order-3 lg:order-2 w-full lg:w-auto flex items-center gap-0.5 py-1 lg:py-0 border-t border-slate-100 lg:border-t-0" data-testid="board-filters">
+            {!catKey && (
+              <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className={plainSel + " max-w-[150px]"} aria-label="게시판" data-testid="board-cat">
+                <option value="">전체 게시판</option>{cats.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+              </select>
+            )}
+            <select value={sort} onChange={(e) => setSort(e.target.value)} className={plainSel} aria-label="정렬" data-testid="board-sort">
+              <option value="new">최신순</option><option value="old">오래된순</option><option value="views">조회순</option>{showRate && kind !== "qna" && <option value="rate">확인율 낮은순</option>}
             </select>
-            <div className="relative flex-1 md:w-64 min-w-0">
-              <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="검색어 입력" aria-label="검색어" className={`${ctrl} w-full pl-8 pr-8`} data-testid="board-search" />
-              {q ? <button onClick={() => setQ("")} aria-label="검색어 지우기" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"><X size={14} /></button>
-                : <kbd className="hidden md:inline absolute right-2 top-1/2 -translate-y-1/2 text-[10.5px] text-slate-400 border border-slate-200 rounded px-1.5 leading-[18px]">/</kbd>}
+          </div>
+          {/* 검색(검색 대상 고르기는 칸 안 왼쪽) · 보기 방식 · 글쓰기 */}
+          <div className="order-1 lg:order-3 w-full lg:w-auto flex items-center gap-1.5 pt-2 lg:py-2.5 min-w-0">
+            <div className="flex-1 lg:flex-none lg:w-[300px] xl:w-[340px] min-w-0 h-9 flex items-center border border-slate-300 rounded-lg bg-white focus-within:ring-2 focus-within:ring-[#2F7B7A]/40 focus-within:border-slate-400" data-testid="board-searchbox">
+              <select value={field} onChange={(e) => setField(e.target.value)} className="h-full pl-2.5 pr-1 bg-transparent text-[12.5px] text-slate-600 rounded-l-lg focus:outline-none cursor-pointer shrink-0" aria-label="검색 대상" data-testid="search-field">
+                <option value="tb">제목+내용</option><option value="t">제목</option><option value="b">내용</option><option value="a">작성자</option>
+              </select>
+              <span className="w-px h-4 bg-slate-200 shrink-0" aria-hidden="true"></span>
+              <div className="relative flex-1 min-w-0 h-full">
+                <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="검색어 입력" aria-label="검색어" className="w-full h-full pl-8 pr-8 bg-transparent text-[13px] rounded-r-lg focus:outline-none" data-testid="board-search" />
+                {q ? <button onClick={() => setQ("")} aria-label="검색어 지우기" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"><X size={14} /></button>
+                  : <kbd className="hidden md:inline absolute right-2 top-1/2 -translate-y-1/2 text-[10.5px] text-slate-400 border border-slate-200 rounded px-1.5 leading-[18px]">/</kbd>}
+              </div>
+            </div>
+            <div className="hidden sm:flex items-center rounded-lg border border-slate-300 overflow-hidden h-9 bg-white shrink-0" role="group" aria-label="보기 방식">
+              {[["list", Rows3, "목록형"], ["summary", AlignLeft, "요약형"]].map(([k, I, l], i) => (
+                <button key={k} onClick={() => setView(k)} title={l} aria-label={l} aria-pressed={view === k} data-view-mode={k} className={`w-9 h-full flex items-center justify-center ${i ? "border-l border-slate-300" : ""} ${view === k ? "text-white" : "text-slate-500 hover:bg-slate-50"}`} style={view === k ? { background: BRAND.accent } : undefined}><I size={14} /></button>
+              ))}
             </div>
             {canWriteHere && <button onClick={() => setEditing({})} className={`${btnPrimaryCls} shrink-0`} style={{ background: catKey === "qna" ? "#1D4ED8" : BRAND.accent }} data-testid="btn-write">{catKey === "qna" || (!catKey && ctx.isAgent) ? <MessageCircleQuestion size={14} /> : <SquarePen size={14} />}<span className="hidden sm:inline">{catKey === "qna" || (!catKey && ctx.isAgent) ? "질문하기" : "글쓰기"}</span></button>}
           </div>
         </div>
-        {/* 건수 · 분류 · 정렬 · 보기 방식 · 쪽당 글 수 */}
-        <div className="px-3 md:px-4 py-2 border-b border-slate-200 bg-white flex items-center gap-2 flex-wrap text-[12.5px] text-slate-500">
-          <span data-testid="board-count">총 <b className="text-slate-800 tabular-nums">{view0.length}</b>건{qq ? <> · 「<span className="text-slate-700">{q.trim()}</span>」 {partialSearch ? <span className="text-amber-700 font-medium" data-testid="board-partial" title="낱말이 모두 들어간 글이 없어 일부 낱말이 맞는 글을 보여 드립니다">일부 낱말이 맞는 글</span> : "검색 결과"}</> : null}<span className="hidden sm:inline"> · {pageSafe}/{totalPages}쪽</span></span>
-          <div className="ml-auto flex items-center gap-1.5">
-            {!catKey && (
-              <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="h-8 border border-slate-300 rounded-md text-[12.5px] bg-white px-2 max-w-[132px]" aria-label="게시판">
-                <option value="">전체 게시판</option>{cats.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-              </select>
-            )}
-            <select value={sort} onChange={(e) => setSort(e.target.value)} className="h-8 border border-slate-300 rounded-md text-[12.5px] bg-white px-2" aria-label="정렬" data-testid="board-sort">
-              <option value="new">최신순</option><option value="old">오래된순</option><option value="views">조회순</option>{showRate && kind !== "qna" && <option value="rate">확인율 낮은순</option>}
-            </select>
-            <div className="hidden sm:flex items-center rounded-md border border-slate-300 overflow-hidden h-8 bg-white" role="group" aria-label="보기 방식">
-              {[["list", Rows3, "목록형"], ["summary", AlignLeft, "요약형"]].map(([k, I, l], i) => (
-                <button key={k} onClick={() => setView(k)} title={l} aria-label={l} aria-pressed={view === k} data-view-mode={k} className={`w-8 h-full flex items-center justify-center ${i ? "border-l border-slate-300" : ""} ${view === k ? "text-white" : "text-slate-500 hover:bg-slate-50"}`} style={view === k ? { background: BRAND.accent } : undefined}><I size={14} /></button>
-              ))}
-            </div>
-            <select value={size} onChange={(e) => setSize(e.target.value)} className="hidden sm:block h-8 border border-slate-300 rounded-md text-[12.5px] bg-white px-2" aria-label="쪽당 글 수" data-testid="page-size">
-              {["15", "30", "50"].map((n) => <option key={n} value={n}>{n}개씩</option>)}
-            </select>
+        {/* 검색 중일 때만 — 결과 건수 한 줄 */}
+        {qq && (
+          <div className="px-3 md:px-4 py-2 border-b border-slate-100 bg-slate-50/70 flex items-center gap-2 text-[12.5px] text-slate-500" data-testid="board-count">
+            <span className="min-w-0 truncate">「<span className="text-slate-700">{q.trim()}</span>」 {partialSearch ? <span className="text-amber-700 font-medium" data-testid="board-partial" title="낱말이 모두 들어간 글이 없어 일부 낱말이 맞는 글을 보여 드립니다">일부 낱말이 맞는 글</span> : "검색 결과"} <b className="text-slate-800 tabular-nums">{view0.length}</b>건</span>
+            <button onClick={() => setQ("")} className="ml-auto shrink-0 text-slate-400 hover:text-slate-700 underline underline-offset-2">검색 지우기</button>
           </div>
-        </div>
+        )}
 
         {/* 넓은 화면 — 목록형 표 */}
         {view === "list" && (
@@ -3113,15 +3121,23 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
           }) : <div className="text-center text-slate-400 text-[13px] py-12">{emptyMsg}</div>}
         </div>
 
-        {/* 쪽 번호 */}
-        {totalPages > 1 && (
-          <div className="px-4 py-3 border-t border-slate-100 flex justify-center">
-            <div className="flex items-center gap-1" data-testid="pager">
-              <button className={`${pgBtn} text-slate-500 hover:bg-slate-100`} disabled={pageSafe <= 1} onClick={() => setPage(1)} aria-label="처음"><ChevronsLeft size={15} /></button>
-              <button className={`${pgBtn} text-slate-500 hover:bg-slate-100`} disabled={pageSafe <= 1} onClick={() => setPage(pageSafe - 1)} aria-label="이전"><ChevronLeft size={15} /></button>
-              {pages.map((n) => <button key={n} onClick={() => setPage(n)} data-page={n} aria-current={n === pageSafe ? "page" : undefined} className={`${pgBtn} ${n === pageSafe ? "text-white font-semibold" : "text-slate-600 hover:bg-slate-100"}`} style={n === pageSafe ? { background: BRAND.accent } : undefined}>{n}</button>)}
-              <button className={`${pgBtn} text-slate-500 hover:bg-slate-100`} disabled={pageSafe >= totalPages} onClick={() => setPage(pageSafe + 1)} aria-label="다음"><ChevronRight size={15} /></button>
-              <button className={`${pgBtn} text-slate-500 hover:bg-slate-100`} disabled={pageSafe >= totalPages} onClick={() => setPage(totalPages)} aria-label="끝"><ChevronsRight size={15} /></button>
+        {/* 쪽 번호 · 쪽당 글 수(11-05 위 둘째 줄에서 옮김 — 글이 15건이 넘을 때만) */}
+        {(totalPages > 1 || view0.length > 15) && (
+          <div className="px-4 py-3 border-t border-slate-100 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+            <span aria-hidden="true"></span>
+            {totalPages > 1 ? (
+              <div className="flex items-center gap-1" data-testid="pager">
+                <button className={`${pgBtn} text-slate-500 hover:bg-slate-100`} disabled={pageSafe <= 1} onClick={() => setPage(1)} aria-label="처음"><ChevronsLeft size={15} /></button>
+                <button className={`${pgBtn} text-slate-500 hover:bg-slate-100`} disabled={pageSafe <= 1} onClick={() => setPage(pageSafe - 1)} aria-label="이전"><ChevronLeft size={15} /></button>
+                {pages.map((n) => <button key={n} onClick={() => setPage(n)} data-page={n} aria-current={n === pageSafe ? "page" : undefined} className={`${pgBtn} ${n === pageSafe ? "text-white font-semibold" : "text-slate-600 hover:bg-slate-100"}`} style={n === pageSafe ? { background: BRAND.accent } : undefined}>{n}</button>)}
+                <button className={`${pgBtn} text-slate-500 hover:bg-slate-100`} disabled={pageSafe >= totalPages} onClick={() => setPage(pageSafe + 1)} aria-label="다음"><ChevronRight size={15} /></button>
+                <button className={`${pgBtn} text-slate-500 hover:bg-slate-100`} disabled={pageSafe >= totalPages} onClick={() => setPage(totalPages)} aria-label="끝"><ChevronsRight size={15} /></button>
+              </div>
+            ) : <span aria-hidden="true"></span>}
+            <div className="flex justify-end">
+              <select value={size} onChange={(e) => setSize(e.target.value)} className={plainSel + " hidden sm:block"} aria-label="쪽당 글 수" data-testid="page-size">
+                {["15", "30", "50"].map((n) => <option key={n} value={n}>{n}개씩 보기</option>)}
+              </select>
             </div>
           </div>
         )}
