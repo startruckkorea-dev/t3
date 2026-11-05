@@ -346,7 +346,7 @@ const T365_COLUMNS = {
   comments: ["Title", "PostId", "Category", "Body", "AuthorEmail", "AuthorName", "AuthorRole", "EditedAt"],
 };
 // 선택 열 — 없어도 게시판은 동작하고 그 기능만 저장되지 않는다(관리자 안내)
-const T365_OPT_COLUMNS = { posts: ["Answer", "AnsweredBy", "AnsweredAt", "PinUntil", "AnswerFilesJson", "PublishCheckJson"] };   // AnswerFilesJson — 답변 첨부(여러 줄 텍스트)   // Q&A 답변 · 공지 · 필수 노출 기한(PinUntil — 한 줄 텍스트 YYYY-MM-DD 또는 날짜 열)
+const T365_OPT_COLUMNS = { posts: ["Answer", "AnsweredBy", "AnsweredAt", "PinUntil", "AnswerFilesJson", "PublishCheckJson"], users: ["KorName"] };   // users.KorName(11-05) — 한글 이름(한 줄 텍스트). 없으면 등록된 이름(Title)으로 보인다   // AnswerFilesJson — 답변 첨부(여러 줄 텍스트)   // Q&A 답변 · 공지 · 필수 노출 기한(PinUntil — 한 줄 텍스트 YYYY-MM-DD 또는 날짜 열)
 const T365_FILE_ROOT = "training365";          // (10-12 이전 첨부 위치 — 문서 라이브러리 training365/YYYY-MM/. 새 첨부는 AttachedFiles/Training365_Media-Files/{번호}/)
 const T365_LOG_ROOT = "Logging_data/Training365"; // 관리 행위 이력 — APS 와 같은 파일 방식
 
@@ -1049,7 +1049,7 @@ async function loadContactMail() {
   return { contact: pick("TRAINING365_CONTACT"), it: pick("TRAINING365_IT"), bootAdmins };
 }
 
-/* ---- 직원 명부(employee_search.xlsx) — MKQR · ICS 와 같은 공용 파일 · 같은 열(Company · Department · Team · EngName · EMail) ----
+/* ---- 직원 명부(employee_search.xlsx) — MKQR · ICS 와 같은 공용 파일 · 같은 열(Company · Department · Team · EngName · EMail · KorName) ----
  * 문서 라이브러리 루트. 사용자 · 권한 관리 화면에서 「명부에만 있음」 · 「명부 없음」 대조에만 쓴다(읽기 전용).
  * 게스트(Agent)는 읽을 권한이 없어도 된다 — 관리 화면에서만 부른다. 못 읽으면 등록된 사용자만 보인다. */
 let _tEmpDirP = null;
@@ -1064,7 +1064,7 @@ function loadEmployeeDirectory(force) {
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
     const header = (rows[0] || []).map((h) => String(h || "").trim().toLowerCase());
     const ix = (n) => header.indexOf(n);
-    const eI = ix("email") >= 0 ? ix("email") : ix("e-mail"), nI = ix("engname"), dI = ix("department"), tI = ix("team"), cI = ix("company");
+    const eI = ix("email") >= 0 ? ix("email") : ix("e-mail"), nI = ix("engname"), dI = ix("department"), tI = ix("team"), cI = ix("company"), kI = ix("korname");   // KorName(11-05 L열 · HFS 가 Flex 한글 이름으로 채움) — 없으면 빈 값
     if (eI < 0) throw new Error("직원 명부에 EMail 열이 없습니다.");
     const by = new Map();
     rows.slice(1).forEach((r) => {
@@ -1072,7 +1072,7 @@ function loadEmployeeDirectory(force) {
       const email = normEmail(r[eI]);
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || by.has(email)) return;
       const cell = (i) => (i >= 0 ? String(r[i] == null ? "" : r[i]).trim().slice(0, 120) : "");
-      by.set(email, { email, name: cell(nI) || email, dept: cell(dI), team: cell(tI), company: cell(cI) });
+      by.set(email, { email, name: cell(nI) || email, dept: cell(dI), team: cell(tI), company: cell(cI), kor: cell(kI).slice(0, 60) });
     });
     return [...by.values()].sort((a, b) => a.name.localeCompare(b.name));
   })();
@@ -1104,6 +1104,31 @@ const T365_MAIL_RE = /^[a-z0-9._'+-]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/;
 const safeMail = (e) => { const s = normEmail(e); return T365_MAIL_RE.test(s) ? s : ""; };
 const mailtoOf = (e) => (safeMail(e) ? `mailto:${safeMail(e)}` : undefined);
 function isExternalEmail(e) { const d = normEmail(e).split("@")[1] || ""; return !!d && !/(^|\.)hyosung\.com$|(^|\.)startruckkorea\.com$/.test(d); }
+
+/* ---- 한글 이름(11-05) — 사용자 목록의 KorName(사용자 · 권한 관리 「한글 이름」 칸 · 직원 명부 KorName 에서 채움) ----
+ * 화면의 이름(글쓴이 · 댓글 · 조회 · 확인 현황 · 접속 기록 · 문의 담당자 · 머리글 …)은 메일로 찾은 한글 이름을 먼저 쓰고, 없으면 저장된 이름.
+ * 글 · 댓글 · 기록에 저장된 이름(AuthorName · UserName …)은 고치지 않는다 — 한글 이름을 정하면 지난 글에도 바로 그 이름이 보인다.
+ * 사용자 목록을 읽을 때마다 App 이 다시 만든다(t365SetKor). 사용 중지된 사람도 지난 글의 이름은 한글로 */
+const T365_KOR_MAX = 60;
+const userKor = (u) => String((u && u.KorName) || "").trim().slice(0, T365_KOR_MAX);
+const userDispName = (u) => userKor(u) || String((u && u.Title) || "").trim();   // 사용자 행 → 화면 이름
+let _tKor = new Map(), _tKorByName = new Map();
+function t365SetKor(users) {
+  const m = new Map(), byName = new Map();
+  (users || []).forEach((u) => {
+    const e = normEmail(u && u.Email), k = userKor(u), t = String((u && u.Title) || "").trim().toLowerCase();
+    if (!e || !k) return;
+    if (!m.has(e)) m.set(e, k);
+    if (!m.has("k:" + mailKey(e))) m.set("k:" + mailKey(e), k);   // 메일 표기만 다른 같은 사람(bum-joo ↔ bumjoo)
+    if (t && t !== k.toLowerCase()) byName.set(t, byName.has(t) && byName.get(t) !== k ? null : k);   // 같은 등록 이름이 여러 사람이면 쓰지 않는다
+  });
+  _tKor = m; _tKorByName = byName;
+}
+const korOf = (email) => { const e = normEmail(email); return (e && (_tKor.get(e) || _tKor.get("k:" + mailKey(e)))) || ""; };
+// 메일 → 한글 이름, 없으면 넘긴 이름(저장된 이름)
+const nameOf = (email, fallback) => korOf(email) || String(fallback == null ? "" : fallback);
+// 이름만 저장된 값(Q&A 답변자 · 마지막 수정자 · 문의 담당자 이름) — 등록된 이름(Title)과 같으면 그 사람의 한글 이름
+const nameOfName = (name) => { const s = String(name == null ? "" : name); return _tKorByName.get(s.trim().toLowerCase()) || s; };
 
 /* ---- 관리 행위 이력(MKQR mkLog 와 같은 파일 방식) — Logging_data/Training365/YYYY-MM-DD/HHmmss_사용자_rand.json ---- */
 let _tLogUser = { email: "", name: "" };
@@ -1917,7 +1942,8 @@ function SetupNotice({ status, infoToo = true }) {
   const pinMissing = postOpt.includes("PinUntil");
   const ansFilesMissing = postOpt.includes("AnswerFilesJson");
   const checkColMissing = postOpt.includes("PublishCheckJson");
-  if (!warn && !((optionalMissing || bannerMissing || linksMissing || optCols.length || ansMissing.length || pinMissing || ansFilesMissing || checkColMissing || commentsMissing || commentCols.length) && infoToo)) return null;   // 선택 목록 안내만 남았으면 게시판 화면에서는 숨긴다(Overview · 관리 화면에서만)
+  const korColMissing = !!(status.users && !status.users.missing && !status.users.error && (status.users.optMissing || []).includes("KorName"));   // 11-05 한글 이름(선택 열)
+  if (!warn && !((optionalMissing || bannerMissing || linksMissing || optCols.length || ansMissing.length || pinMissing || ansFilesMissing || checkColMissing || korColMissing || commentsMissing || commentCols.length) && infoToo)) return null;   // 선택 목록 안내만 남았으면 게시판 화면에서는 숨긴다(Overview · 관리 화면에서만)
   return (
     <div className={`rounded-xl border px-4 py-3 mb-5 text-xs leading-relaxed ${warn ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-blue-50 border-blue-100 text-blue-900"}`} data-testid="setup-notice">
       <div className="flex items-start gap-2.5">
@@ -1932,6 +1958,7 @@ function SetupNotice({ status, infoToo = true }) {
             {infoToo && ansMissing.length > 0 && <li data-testid="qna-cols-missing">{T365_LISTS.posts} 에 Q&A 답변 열이 없습니다 — {ansMissing.join(", ")} (Answer: 여러 줄 텍스트 · AnsweredBy: 한 줄 텍스트 · AnsweredAt: 한 줄 텍스트) 를 만들어야 답변이 저장됩니다</li>}
             {infoToo && ansFilesMissing && <li data-testid="ans-files-col-missing">{T365_LISTS.posts} 에 AnswerFilesJson 열(여러 줄 텍스트)을 만들면 Q&A 답변에 파일을 붙일 수 있습니다</li>}
             {infoToo && checkColMissing && <li data-testid="check-col-missing">{T365_LISTS.posts} 에 PublishCheckJson 열(여러 줄 텍스트)을 만들면 「게시 전 확인」 기록이 게시물에도 남습니다 — 없으면 활동 이력에만 남습니다</li>}
+            {infoToo && korColMissing && <li data-testid="kor-col-missing">{T365_LISTS.users} 에 KorName 열(한 줄 텍스트)을 만들면 사용자 · 권한 관리에서 한글 이름을 정해 글쓴이 · 댓글 · 확인 현황 등에 한글 이름으로 보입니다 — IT 준비 스크립트(STK-T365-KorName-Setup). 없으면 등록된 이름으로 보입니다</li>}
             {infoToo && pinMissing && <li data-testid="pin-col-missing">{T365_LISTS.posts} 에 PinUntil 열(한 줄 텍스트)을 만들면 글쓰기에서 공지 · 필수의 홈 노출 기한을 정할 수 있습니다 — 없으면 게시 후 7일 동안 보입니다</li>}
             {infoToo && commentsMissing && <li data-testid="comments-list-missing">{T365_LISTS.comments} 목록이 없어 게시물 댓글을 쓸 수 없습니다 — IT 의 준비 스크립트(STK-T365-Comments-Setup)로 목록 · 열 · 인덱스 · 권한을 만드세요</li>}
             {infoToo && commentCols.length > 0 && <li data-testid="comments-cols-missing">{T365_LISTS.comments} 에 없는 열 — {commentCols.join(", ")} ({commentCols.some((c) => T365_COMMENT_NEED.includes(c)) ? "댓글 칸을 숨겼습니다" : "그 값만 저장되지 않습니다"} — 준비 스크립트를 다시 실행하세요)</li>}
@@ -2287,7 +2314,7 @@ function HomePostRow({ p, cat, onOpen, seen, fresh, views, confirm, tags, attr, 
       <span className="mt-1 flex items-center flex-wrap gap-y-0.5 text-[13px] text-slate-500 tabular-nums t365-meta">
         <span className="t365-mc inline-flex items-center gap-1 font-semibold max-w-[160px] sm:max-w-none sm:w-[146px]" style={{ color: cat ? cat.color : "#64748B" }} data-row-cat title={cat ? cat.label : ""}>{cat && cat.icon ? <cat.icon size={13} className="shrink-0" /> : null}<span className="truncate">{cat ? cat.label : "-"}</span></span>
         <span className="t365-mc sm:w-[84px]" data-postno={p.id} title="게시물 등록 번호(SharePoint ID) — 게시물 주소 · 검색에 쓰는 고유 번호">No. {p.id}</span>
-        <span className="t365-mc max-w-[160px] sm:max-w-none sm:w-[132px]" title={p.AuthorName || ""}>{p.AuthorName || "-"}</span>
+        <span className="t365-mc max-w-[160px] sm:max-w-none sm:w-[132px]" title={nameOf(p.AuthorEmail, p.AuthorName)}>{nameOf(p.AuthorEmail, p.AuthorName) || "-"}</span>
         <span className="t365-mc sm:w-[112px]" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
         <span className="t365-mc sm:w-[90px]">조회 {views || 0}</span>
         {confirm && <span className="inline-flex items-center">{confirm}</span>}
@@ -2381,7 +2408,7 @@ function SearchPopup({ ctx, initialQ, hidden, suspended, onClose, onOpen, onAsk,
   const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6);
   const key = terms.join(" ");
   // 찾을 글자는 한 번만 만든다 — 제목 · 본문 · Q&A 답변 · 첨부 이름 · 작성자
-  const docs = useMemo(() => posts.filter((p) => catMap[p.Category]).map((p) => ({ p, t: String(p.Title || ""), b: plainPreview(p.Body, 4000), a: p.Answer ? plainPreview(p.Answer, 4000) : "", f: parseFiles(p.AttachmentsJson).map((x) => x.name).join(" · "), w: String(p.AuthorName || "") })), [posts, catMap]);
+  const docs = useMemo(() => posts.filter((p) => catMap[p.Category]).map((p) => ({ p, t: String(p.Title || ""), b: plainPreview(p.Body, 4000), a: p.Answer ? plainPreview(p.Answer, 4000) : "", f: parseFiles(p.AttachmentsJson).map((x) => x.name).join(" · "), w: String(nameOf(p.AuthorEmail, p.AuthorName)) + (korOf(p.AuthorEmail) && p.AuthorName ? " " + p.AuthorName : "") })), [posts, catMap]);
   const hits = useMemo(() => {
     if (!terms.length) return [];
     // 글번호로 찾기(10-14) — 「#12」 · 「12」 · 「No.12」 처럼 번호 하나만 넣으면 그 번호 글을 맨 위에(본문에 그 숫자가 든 글은 그 아래)
@@ -2496,7 +2523,7 @@ function SearchPopup({ ctx, initialQ, hidden, suspended, onClose, onOpen, onAsk,
                     {snip && <span className="block mt-1 text-[12.5px] text-slate-500 leading-relaxed t365-clamp2">{label && <span className="inline-flex items-center px-1.5 mr-1.5 rounded bg-slate-100 text-slate-500 text-[11px] font-semibold leading-[17px] align-[1px]">{label}</span>}<HlTerms text={snip} terms={terms} /></span>}
                     <span className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-slate-400 min-w-0">
                       <span className="font-medium truncate" style={{ color: c && c.color }}>{c ? c.label : ""}</span><span className="text-slate-300">·</span>
-                      <span className="truncate max-w-[120px]">{p.AuthorName || "-"}</span><span className="text-slate-300">·</span>
+                      <span className="truncate max-w-[120px]">{nameOf(p.AuthorEmail, p.AuthorName) || "-"}</span><span className="text-slate-300">·</span>
                       <span className="tabular-nums shrink-0" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
                       <span className="text-slate-300">·</span><span className="shrink-0 inline-flex items-center gap-0.5"><Eye size={11} />{viewStats(readIdx, p.id).views}</span>
                       {nf > 0 && <><span className="text-slate-300">·</span><span className="shrink-0 inline-flex items-center gap-0.5"><Paperclip size={11} />{nf}</span></>}
@@ -2795,7 +2822,7 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                       <span className="t365-mc w-[70px] inline-flex">{isNew ? <span className="t365-pill text-white" style={{ background: "#1D4ED8" }} data-qna="new"><Sparkles size={10} />새 답변</span> : <QnaPill p={p} age={duty} />}</span>
                       <span className="t365-mc w-[50px] tabular-nums" data-postno={p.id}>No. {p.id}</span>
                       <span className="text-slate-300">·</span>
-                      <span className="t365-mc w-[92px] inline-flex">{mineQ(p) ? <span className="t365-pill bg-slate-100 text-slate-500" data-mine="1">내 질문</span> : <span className="truncate" title={p.AuthorName || ""}>{p.AuthorName || ""}</span>}</span>
+                      <span className="t365-mc w-[92px] inline-flex">{mineQ(p) ? <span className="t365-pill bg-slate-100 text-slate-500" data-mine="1">내 질문</span> : <span className="truncate" title={nameOf(p.AuthorEmail, p.AuthorName)}>{nameOf(p.AuthorEmail, p.AuthorName)}</span>}</span>
                       <span className="text-slate-300">·</span>
                       <span className="tabular-nums shrink-0" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
                     </span>
@@ -2896,7 +2923,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
   const words = qq.split(/\s+/).filter(Boolean);
   const hayOf = (p) => {
     // 내용 = 본문 + 첨부 이름 + Q&A 답변(답변까지 찾아져야 Q&A 가 「먼저 찾아보는」 자료가 된다)
-    const t = String(p.Title || "").toLowerCase(), b = (plainPreview(p.Body, 4000) + " " + parseFiles(p.AttachmentsJson).map((f) => f.name).join(" ") + (p.Answer ? " " + plainPreview(p.Answer, 4000) : "")).toLowerCase(), a = String(p.AuthorName || "").toLowerCase();
+    const t = String(p.Title || "").toLowerCase(), b = (plainPreview(p.Body, 4000) + " " + parseFiles(p.AttachmentsJson).map((f) => f.name).join(" ") + (p.Answer ? " " + plainPreview(p.Answer, 4000) : "")).toLowerCase(), a = (String(nameOf(p.AuthorEmail, p.AuthorName)) + " " + String(p.AuthorName || "")).toLowerCase();   // 11-05 한글 이름 · 저장된 이름 둘 다로 찾는다
     return field === "t" ? t : field === "b" ? b : field === "a" ? a : t + "\n" + b;
   };
   const qNo = postNoTerm(qq);   // 글번호(10-14) — 번호 하나만 넣으면 그 번호 글도 함께
@@ -3052,7 +3079,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
                       <td className="px-3 h-10 text-left text-[12.5px] text-slate-400 tabular-nums">{pin ? <span className="inline-flex items-center gap-0.5 text-[11.5px] font-semibold text-amber-600" title={`맨 위 고정 공지 — 글 번호 ${numOf.get(p.id)}`} data-pin-no><Pin size={11} />공지</span> : numOf.get(p.id)}</td>
                       {!catKey && <td className="px-3 h-10 truncate"><span className="flex"><BoardCell cat={catMap[p.Category]} bare /></span></td>}
                       <td className="px-3 h-10 min-w-0"><TitleLine p={p} pin={pin} inTable /></td>
-                      <td className="px-3 h-10 text-[12.5px] text-slate-600 truncate text-left"><HlTerms text={p.AuthorName || "-"} terms={field === "a" ? words : null} /></td>
+                      <td className="px-3 h-10 text-[12.5px] text-slate-600 truncate text-left"><HlTerms text={nameOf(p.AuthorEmail, p.AuthorName) || "-"} terms={field === "a" ? words : null} /></td>
                       <td className="px-3 h-10 text-left text-[12.5px] text-slate-500 tabular-nums whitespace-nowrap" title={fmtDate(p.PublishedAt || p._created)}>{dateCell(p)}</td>
                       <td className="px-3 h-10 text-left text-[12.5px] text-slate-500 tabular-nums">{vs.views}</td>
                       {showStatusCol && <td className="px-3 h-10 text-left"><StatusCell p={p} /></td>}
@@ -3076,7 +3103,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
                 {pv && <p className="text-[13px] text-slate-500 leading-relaxed mt-1 t365-clamp2 hidden md:block"><HlTerms text={pv} terms={field === "b" || field === "tb" ? words : null} /></p>}
                 <div className="flex items-center gap-1.5 mt-1.5 text-[11.5px] text-slate-400 min-w-0">
                   {!catKey && <><CatTag cat={catMap[p.Category]} /><span>·</span></>}
-                  <span className="truncate max-w-[110px]">{p.AuthorName || "-"}</span><span>·</span>
+                  <span className="truncate max-w-[110px]">{nameOf(p.AuthorEmail, p.AuthorName) || "-"}</span><span>·</span>
                   <span className="tabular-nums">{dateCell(p)}</span><span>·</span><span className="whitespace-nowrap">조회 {vs.views}</span>
                   {nf > 0 && <><span>·</span><span className="whitespace-nowrap inline-flex items-center gap-0.5"><Paperclip size={11} />{nf}</span></>}
                   {showStatusCol && (p.RequireConfirm || (myRow(p) && myRow(p).ConfirmedAt)) && <span className="ml-auto shrink-0"><StatusCell p={p} /></span>}
@@ -3293,9 +3320,9 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
             <h1 className="text-[18px] md:text-[20px] font-bold text-slate-900 leading-[1.4] tracking-[-0.015em] break-words" data-testid="post-title">{post.Title}</h1>
             {/* 작성자 카드 + 오른쪽 숫자 칩 */}
             <div className="mt-4 flex items-center gap-3 flex-wrap" data-testid="meta-bar">
-              <span className="w-9 h-9 rounded-full flex items-center justify-center text-[14px] font-bold text-white shrink-0 ring-2 ring-white shadow-sm" style={{ background: cat ? cat.color : BRAND.accent }}>{String(post.AuthorName || "?").trim().slice(0, 1).toUpperCase()}</span>
+              <span className="w-9 h-9 rounded-full flex items-center justify-center text-[14px] font-bold text-white shrink-0 ring-2 ring-white shadow-sm" style={{ background: cat ? cat.color : BRAND.accent }}>{String(nameOf(post.AuthorEmail, post.AuthorName) || "?").trim().slice(0, 1).toUpperCase()}</span>
               <div className="min-w-0 leading-tight">
-                <div className="text-[13.5px] font-semibold text-slate-800">{post.AuthorName || "-"}</div>
+                <div className="text-[13.5px] font-semibold text-slate-800" data-testid="post-author">{nameOf(post.AuthorEmail, post.AuthorName) || "-"}</div>
                 <div className="text-[11.5px] text-slate-500 tabular-nums mt-0.5">{fmtDate(post.PublishedAt || post._created)}{post.UpdatedAt && <span className="text-slate-400"> · 수정 {fmtDate(post.UpdatedAt)}</span>}</div>
               </div>
               {/* 숫자 — 알약 없이 옅은 글자 · 가운뎃점(필수 확인 상태만 색) */}
@@ -3559,7 +3586,7 @@ function Comments({ ctx, post }) {
   }
   async function del(c) {
     const own = cmtIsMine(c, me);
-    if (!(await uiConfirm(own ? "이 댓글을 삭제할까요?" : `${c.AuthorName || c.AuthorEmail || "다른 사람"} 님의 댓글을 삭제할까요?\n관리 권한으로 지우며 활동 이력에 남습니다.`, { title: "댓글 삭제", okText: "삭제", danger: true }))) return;
+    if (!(await uiConfirm(own ? "이 댓글을 삭제할까요?" : `${nameOf(cmtRealMail(c), c.AuthorName) || c.AuthorEmail || "다른 사람"} 님의 댓글을 삭제할까요?\n관리 권한으로 지우며 활동 이력에 남습니다.`, { title: "댓글 삭제", okText: "삭제", danger: true }))) return;
     if (!begin()) return;
     try {
       await tDelete(T365_LISTS.comments, c.id, { cat: post.Category });
@@ -3577,7 +3604,7 @@ function Comments({ ctx, post }) {
     const u = findUser(real);
     const staff = !!u && !isAgentRole(u.Role);
     const byAuthor = cmtSameMail(real, post._createdBy || post.AuthorEmail);
-    const name = String((u && u.Title) || (trusted && c.AuthorName) || real || "알 수 없음");
+    const name = String((u && userDispName(u)) || (trusted && c.AuthorName) || real || "알 수 없음");   // 11-05 한글 이름 먼저
     const ed = editId === String(c.id);
     return (
       <li key={c.id} className="flex gap-3" data-comment={c.id} data-own={own ? "1" : "0"}>
@@ -3649,7 +3676,7 @@ function QnaAnswer({ ctx, post }) {
   // 질문자에게 알리기 — 답변을 단 담당자가 메일 앱으로(자동 메일은 Power Automate 로 — 리뷰 안내)
   const asker = normEmail(post.AuthorEmail);
   const notifyHref = has && asker && asker !== normEmail(ctx.me.email) ? mailtoHref({ to: [asker], link: postLink(post), subject: `[Training365] 질문에 답변이 등록되었습니다 — ${post.Title}`,
-    body: `${post.AuthorName || ""}님, 안녕하세요.\n\nTraining365 Q&A 에 올리신 질문에 답변이 등록되었습니다.\n아래 링크에서 확인해 주세요.\n\n■ ${post.Title}\n${postLink(post)}\n\n${ctx.me.name || ""}` }) : null;
+    body: `${nameOf(post.AuthorEmail, post.AuthorName) || ""}님, 안녕하세요.\n\nTraining365 Q&A 에 올리신 질문에 답변이 등록되었습니다.\n아래 링크에서 확인해 주세요.\n\n■ ${post.Title}\n${postLink(post)}\n\n${ctx.me.name || ""}` }) : null;
   // 질문자가 답변을 봤는지(답변 뒤에 그 글을 열었는지) — 담당자가 알림 메일이 필요한지 판단
   const askerRow = asker ? (ctx.readIdx.get(String(post.id)) || new Map()).get(asker) : null;
   const askerSeen = has && !!askerRow && String(askerRow.LastViewedAt || "") >= String(post.AnsweredAt || "");
@@ -3700,7 +3727,7 @@ function QnaAnswer({ ctx, post }) {
       const cur = await tGetItem(T365_LISTS.posts, post.id).catch(() => undefined);
       if (cur === null) { setBusy(false); uiAlert("이 질문은 그 사이에 삭제되었습니다."); await ctx.reload(); return; }
       if (cur && String(cur.Answer || "").trim() !== String(post.Answer || "").trim()) {
-        const who = cur.AnsweredBy ? `${cur.AnsweredBy} 님이` : "다른 담당자가";
+        const who = cur.AnsweredBy ? `${nameOfName(cur.AnsweredBy)} 님이` : "다른 담당자가";
         const ex = plainPreview(cur.Answer, 160);
         if (!(await uiConfirm(`${who}${cur.AnsweredAt ? ` ${fmtDate(cur.AnsweredAt)} 에` : ""} 이 질문에 먼저 ${has ? "답변을 고쳤습니다" : "답변했습니다"}.${ex ? `\n\n「${ex}」` : ""}\n\n그대로 저장하면 그 답변을 덮어씁니다. 계속할까요?`, { title: "다른 담당자가 답변함", okText: "덮어쓰기", cancelText: "저장 안 함", danger: true }))) { setBusy(false); return; }
       }
@@ -3778,7 +3805,7 @@ function QnaAnswer({ ctx, post }) {
             <div className="px-4 md:px-5 pt-3.5 flex items-center gap-2 flex-wrap text-[12px] text-slate-400">
               <span className="inline-flex items-center gap-1 text-[12.5px] font-bold text-[#1D4ED8]"><MessageSquareReply size={14} />답변</span>
               <span className="text-slate-300" aria-hidden="true">·</span>
-              <span className="font-medium text-slate-600">{post.AnsweredBy || "담당자"}</span>
+              <span className="font-medium text-slate-600">{nameOfName(post.AnsweredBy) || "담당자"}</span>
               {post.AnsweredAt && <span className="tabular-nums">{fmtDate(post.AnsweredAt)}</span>}
               {seenMark}
               {canAnswer && <span className="ml-auto flex items-center gap-1">
@@ -3816,15 +3843,15 @@ function ConfirmPanel({ ctx, post }) {
   const [showViewers, setShowViewers] = useState(false);
   const qq = q.trim().toLowerCase();
   const uMap = new Map(ctx.users.map((u) => [normEmail(u.Email), u]));
-  const viewers = [...((ctx.readIdx.get(String(post.id)) || new Map()).values())].map((r) => { const u = uMap.get(normEmail(r.UserEmail)) || {}; return { ...r, name: r.UserName || u.Title || r.UserEmail, role: u.Role || r.Role || "", company: r.Company || u.Company || "" }; })
+  const viewers = [...((ctx.readIdx.get(String(post.id)) || new Map()).values())].map((r) => { const u = uMap.get(normEmail(r.UserEmail)) || {}; return { ...r, name: userKor(u) || r.UserName || u.Title || r.UserEmail, role: u.Role || r.Role || "", company: r.Company || u.Company || "" }; })
     .sort((a, b) => String(b.LastViewedAt || "").localeCompare(String(a.LastViewedAt || "")));
   const views = viewers.reduce((a, v) => a + (Number(v.ViewCount) || 1), 0);
   const agentSeen = s.rows.filter((x) => x.viewedAt).length;   // 이 글을 한 번이라도 연 Agent 수(도달) — Q&A 질문에는 의미가 없어 빼고 보임
   const isQ = post.Category === "qna";
   const rows = s.rows
     .filter((x) => view === "all" ? true : view === "done" ? !!x.confirmedAt : !x.confirmedAt)
-    .filter((x) => !qq || [x.user.Title, x.user.Email, x.user.Company].some((v) => String(v || "").toLowerCase().includes(qq)))
-    .sort((a, b) => (a.confirmedAt ? 0 : 1) - (b.confirmedAt ? 0 : 1) || String(a.confirmedAt).localeCompare(String(b.confirmedAt)) || String(a.user.Company || "").localeCompare(String(b.user.Company || "")) || String(a.user.Title || "").localeCompare(String(b.user.Title || "")));
+    .filter((x) => !qq || [x.user.Title, userKor(x.user), x.user.Email, x.user.Company].some((v) => String(v || "").toLowerCase().includes(qq)))
+    .sort((a, b) => (a.confirmedAt ? 0 : 1) - (b.confirmedAt ? 0 : 1) || String(a.confirmedAt).localeCompare(String(b.confirmedAt)) || String(a.user.Company || "").localeCompare(String(b.user.Company || "")) || String(userDispName(a.user)).localeCompare(String(userDispName(b.user))));
   // 미확인 Agent 에게 확인 요청 — Outlook 웹 새 메일의 받는 사람(To)으로(11-03 숨은 참조 → 받는 사람), 인원이 많아 주소가 너무 길면 주소 복사로
   const pendingEmails = req ? s.rows.filter((x) => !x.confirmedAt).map((x) => normEmail(x.user.Email)).filter(Boolean) : [];
   const remindHref = pendingEmails.length ? mailtoHref({ to: pendingEmails, link: postLink(post), subject: `[Training365] 필수 자료 확인 요청 — ${post.Title}`,
@@ -3847,7 +3874,7 @@ function ConfirmPanel({ ctx, post }) {
     const vw = viewers.map((v, i) => ({ 번호: i + 1, 이름: v.name, 메일: v.UserEmail, 역할: v.role, "회사/지점": v.company, "첫 열람(KST)": fmtDate(v.FirstViewedAt), "마지막 열람(KST)": fmtDate(v.LastViewedAt), "열람 횟수": Number(v.ViewCount) || 1, ...(req ? { 조회확인: v.ConfirmedAt ? fmtDate(v.ConfirmedAt) : "" } : {}) }));
     const wb = XLSX.utils.book_new();
     if (req) {
-      const data = s.rows.map((x, i) => ({ 번호: i + 1, 이름: x.user.Title || "", 메일: x.user.Email || "", "회사/지점": x.user.Company || "", 조회확인: x.confirmedAt ? "확인" : "미확인", "확인 시각(KST)": x.confirmedAt ? fmtDate(x.confirmedAt) : "", "첫 열람(KST)": x.viewedAt ? fmtDate(x.viewedAt) : "" }));
+      const data = s.rows.map((x, i) => ({ 번호: i + 1, 이름: userDispName(x.user), 메일: x.user.Email || "", "회사/지점": x.user.Company || "", 조회확인: x.confirmedAt ? "확인" : "미확인", "확인 시각(KST)": x.confirmedAt ? fmtDate(x.confirmedAt) : "", "첫 열람(KST)": x.viewedAt ? fmtDate(x.viewedAt) : "" }));
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.length ? data : [{ 안내: "확인 대상 Agent 가 없습니다" }]), "조회확인");
     }
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(vw.length ? vw : [{ 안내: "열람 기록이 없습니다" }]), "열람한 사람");
@@ -3941,7 +3968,7 @@ function ConfirmPanel({ ctx, post }) {
                   <tbody>
                     {rows.length ? rows.map((x) => (
                       <tr key={x.user.id || x.user.Email} className="border-t border-slate-100 first:border-t-0">
-                        <td className="px-4 h-9 text-slate-800 font-medium whitespace-nowrap" title={x.user.Email}>{x.user.Title || x.user.Email || "-"}</td>
+                        <td className="px-4 h-9 text-slate-800 font-medium whitespace-nowrap" title={x.user.Email}>{userDispName(x.user) || x.user.Email || "-"}</td>
                         <td className="px-4 h-9 text-slate-600">{x.user.Company || "-"}</td>
                         <td className="px-4 h-9">{x.confirmedAt ? <ConfirmedPill /> : <UnconfirmedPill />}</td>
                         <td className="px-4 h-9 text-slate-600 tabular-nums whitespace-nowrap">{x.confirmedAt ? fmtDate(x.confirmedAt) : "-"}</td>
@@ -4078,7 +4105,7 @@ function PublishCheckBadge({ post }) {
             <span className="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center shrink-0"><ShieldCheck size={15} className="text-emerald-700" /></span>
             <div className="min-w-0 leading-tight">
               <div className="text-[13px] font-semibold text-slate-800 flex items-center gap-1.5">게시 전 확인 완료<span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 rounded-full px-1.5 tabular-nums" data-testid="post-check-count">{items.length}/{T365_PUBLISH_CHECKS.length}</span></div>
-              <div className="text-[11.5px] text-slate-500 tabular-nums mt-0.5 truncate" title={rec.email || ""}>{rec.by} · {fmtDate(rec.at)}</div>
+              <div className="text-[11.5px] text-slate-500 tabular-nums mt-0.5 truncate" title={rec.email || ""}>{nameOf(rec.email, rec.by)} · {fmtDate(rec.at)}</div>
             </div>
           </div>
           <ul className="grid grid-cols-2 gap-1 mt-3">
@@ -4274,7 +4301,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
         if (cur && !ctx.isAdmin && cur.Category === "qna" && qnaAnswered(cur)) { setSaving(""); savingRef.current = false; uiAlert("이 질문에 그 사이 답변이 달렸습니다 — 답변이 달린 질문은 고칠 수 없습니다.\n바꿀 내용이 있으면 새 질문으로 올려 주세요."); return; }
         if (cur && post._modified && cur._modified && cur._modified !== post._modified) {
           setSaving("");
-          const who = cur.UpdatedBy ? `${cur.UpdatedBy} 님이 ` : "다른 사람이 ";
+          const who = cur.UpdatedBy ? `${nameOfName(cur.UpdatedBy)} 님이 ` : "다른 사람이 ";
           if (!(await uiConfirm(`${who}${fmtDate(cur._modified)} 에 이 글을 먼저 수정했습니다.\n그대로 저장하면 그 변경 내용을 덮어씁니다. 계속할까요?`, { title: "다른 사람이 수정함", okText: "덮어쓰기", danger: true }))) { savingRef.current = false; return; }
         }
         const uploaded = await upAll(id);
@@ -4384,7 +4411,7 @@ const Tip = ({ icon: I, children }) => <li className="flex items-center gap-2 mi
         <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors duration-300" style={{ background: curCat ? curCat.soft : BRAND.accentSoft }} data-testid="ed-head-icon"><CatIcon size={17} style={{ color: curCat ? curCat.color : BRAND.accent }} /></span>
         <div className="min-w-0 flex-1 leading-tight">
           <div className="text-[15px] font-semibold text-slate-800" data-testid="ed-heading">{isEdit ? (isQna ? "질문 수정" : "게시물 수정") : (isQna ? "질문하기" : "글쓰기")}</div>
-          <div className="text-[11.5px] text-slate-400 truncate hidden sm:block">{isEdit ? `${post.AuthorName || ""} · ${fmtDate(post.PublishedAt || post._created)} 게시` : isQna ? <span className="inline-flex items-center gap-2 min-w-0" data-testid="ed-qna-sub"><span className="truncate">궁금한 점을 남겨 주시면 담당자가 답변해 드립니다.</span><span className="inline-flex items-center gap-1 px-1.5 rounded-md leading-[18px] font-medium text-amber-700 bg-amber-50 border border-amber-100 shrink-0"><ShieldCheck size={11} />고객 개인정보 · 민감정보 입력에 유의해 주세요</span></span> : (curCat ? `${curCat.label} 게시판에 올립니다 — 제목 · 본문을 쓰고 「게시」를 누르세요` : "게시판 · 제목 · 본문을 쓰고 「게시」를 누르세요")}</div>
+          <div className="text-[11.5px] text-slate-400 truncate hidden sm:block">{isEdit ? `${nameOf(post.AuthorEmail, post.AuthorName) || ""} · ${fmtDate(post.PublishedAt || post._created)} 게시` : isQna ? <span className="inline-flex items-center gap-2 min-w-0" data-testid="ed-qna-sub"><span className="truncate">궁금한 점을 남겨 주시면 담당자가 답변해 드립니다.</span><span className="inline-flex items-center gap-1 px-1.5 rounded-md leading-[18px] font-medium text-amber-700 bg-amber-50 border border-amber-100 shrink-0"><ShieldCheck size={11} />고객 개인정보 · 민감정보 입력에 유의해 주세요</span></span> : (curCat ? `${curCat.label} 게시판에 올립니다 — 제목 · 본문을 쓰고 「게시」를 누르세요` : "게시판 · 제목 · 본문을 쓰고 「게시」를 누르세요")}</div>
         </div>
         <button onClick={requestClose} aria-label="닫기" title="닫기 (Esc)" className="w-9 h-9 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-800 hover:bg-slate-100"><X size={19} /></button>
       </div>
@@ -4508,7 +4535,7 @@ const Tip = ({ icon: I, children }) => <li className="flex items-center gap-2 mi
                 {allCount > 0 && <Paperclip size={11.5} className="text-slate-400 shrink-0" />}
                 <NewDot />
               </div>
-              <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5 min-w-0"><CatTag cat={curCat} /><span>·</span><span className="truncate">{isEdit ? post.AuthorName : ctx.me.name}</span><span>·</span><span className="tabular-nums">{shortDate(isEdit ? post.PublishedAt || post._created : new Date().toISOString())}</span></div>
+              <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5 min-w-0"><CatTag cat={curCat} /><span>·</span><span className="truncate">{isEdit ? nameOf(post.AuthorEmail, post.AuthorName) : ctx.me.name}</span><span>·</span><span className="tabular-nums">{shortDate(isEdit ? post.PublishedAt || post._created : new Date().toISOString())}</span></div>
               {body.trim() && <p className="text-[11.5px] text-slate-500 mt-1.5 t365-clamp2">{plainPreview(body, 160)}</p>}
             </div>
           </Card>
@@ -4571,7 +4598,7 @@ function ConfirmStatusTab({ ctx, openPost }) {
     const ord = new Map([...posts].sort((a, b) => (Date.parse(a.PublishedAt || a._created || 0) || 0) - (Date.parse(b.PublishedAt || b._created || 0) || 0) || Number(a.id) - Number(b.id)).map((p, i) => [p.id, i + 1]));   // 번호 = 게시 순서(가장 먼저 올린 글이 1 · APS 공통)
     const sum = rows.map((x) => ({ 번호: ord.get(x.p.id), 카테고리: (catMap[x.p.Category] || {}).label || x.p.Category, 제목: x.p.Title, "게시일(KST)": fmtDate(x.p.PublishedAt || x.p._created), "조회확인 필수": x.p.RequireConfirm ? "예" : "아니요", 대상: x.s.total, 확인: x.s.done, 미확인: x.s.total - x.s.done, "확인율(%)": x.s.pct, "열람(전 역할)": x.s.viewers }));
     const matrix = agents.map((u) => {
-      const o = { 이름: u.Title || "", 메일: u.Email || "", "회사/지점": u.Company || "" };
+      const o = { 이름: userDispName(u), 메일: u.Email || "", "회사/지점": u.Company || "" };
       rows.forEach((x, i) => { const r = (readIdx.get(String(x.p.id)) || new Map()).get(normEmail(u.Email)); const can = !u._perms || canSee(u._perms, "cat:" + x.p.Category);
         o[`${i + 1}. ${String(x.p.Title).slice(0, 40)}`] = !can ? "대상 아님(게시판 보기 없음)" : r && r.ConfirmedAt ? fmtDate(r.ConfirmedAt) : "미확인"; });
       return o;
@@ -4640,7 +4667,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
   const [bulkLevel, setBulkLevel] = useState("v");
   const [saving, setSaving] = useState("");
   const [savedPopup, setSavedPopup] = useState(null);
-  const [add, setAdd] = useState({ email: "", name: "", company: "", role: "Agent" });
+  const [add, setAdd] = useState({ email: "", name: "", kor: "", company: "", role: "Agent" });
   const [importRows, setImportRows] = useState(null);
   const [page, setPage] = useState(1);
   const [justAdded, setJustAdded] = useState(() => new Set());
@@ -4671,6 +4698,9 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
   // Permissions 열 — 없으면 역할 기본값만(작성자의 게시판 편집은 WriterCategories 로 저장되므로 그 칸만 바꿀 수 있다)
   const usersSt = listStatus && listStatus.users;
   const hasPermCol = !!usersSt && !usersSt.missing && !usersSt.error && !(usersSt.missingCols || []).includes("Permissions");
+  // 11-05 한글 이름(KorName 열 · 선택) — 없으면 칸은 보이되 고칠 수 없고(명부 값만 흐리게), 화면 이름은 등록된 이름
+  const hasKorCol = !!usersSt && !usersSt.missing && !usersSt.error && !(usersSt.optMissing || []).includes("KorName");
+  const korColMissing = !!usersSt && !usersSt.missing && !usersSt.error && (usersSt.optMissing || []).includes("KorName");
   const catLabel = (it) => (it.cat ? ((ctx.catMap[it.cat] || T365_DEFAULT_CATEGORIES.find((c) => c.key === it.cat) || {}).label || it.label) : it.label);
 
   // 메일 하나에 한 사람 — 같은 메일의 행이 여럿이면 첫 행만 쓰고 표시
@@ -4694,7 +4724,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
   const regSet = new Set(merged.map((p) => p.email));
   const regNorm = new Set(merged.map((p) => mailKey(p.email)));
   const dirRows = dirOk ? dir.list.filter((d) => !regSet.has(d.email) && !regNorm.has(mailKey(d.email)))
-    .map((d) => ({ email: d.email, dirOnly: true, dir: d, dirStatus: "dirOnly", row: { Title: d.name, Email: d.email, Company: d.dept || d.company || "", Role: "", Active: true } })) : [];
+    .map((d) => ({ email: d.email, dirOnly: true, dir: d, dirStatus: "dirOnly", row: { Title: d.name, KorName: d.kor || "", Email: d.email, Company: d.dept || d.company || "", Role: "", Active: true } })) : [];
   const everyone = merged.concat(dirRows);
   const missingRows = merged.filter((p) => p.dirStatus === "missing" || p.dirStatus === "alt");
   const viewCounts = { all: everyone.length, registered: everyone.filter(hasAccess).length, dirOnly: dirRows.length, missing: missingRows.length };
@@ -4714,7 +4744,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
   const filtered = everyone
     .filter((p) => view === "all" || (view === "registered" ? hasAccess(p) : view === "dirOnly" ? p.dirOnly : (p.dirStatus === "missing" || p.dirStatus === "alt")))
     .filter((p) => !roleF || eff(p, "Role") === roleF)
-    .filter((p) => !qq || [p.email, p.row.Title, eff(p, "Company"), eff(p, "Role"), p.dir && p.dir.dept, p.dir && p.dir.team, p.dir && p.dir.name].some((v) => String(v || "").toLowerCase().includes(qq)));
+    .filter((p) => !qq || [p.email, p.row.Title, eff(p, "KorName"), eff(p, "Company"), eff(p, "Role"), p.dir && p.dir.dept, p.dir && p.dir.team, p.dir && p.dir.name, p.dir && p.dir.kor].some((v) => String(v || "").toLowerCase().includes(qq)));
   const roleRank = { "관리자": 0, "작성자": 1, "본사": 2, "Agent-내부": 3, "Agent": 4 };
   // 권한 있는 사람 먼저 — 설정 파일 관리자(명부에만 있어도) → 등록 사용자 → 명부 직원(이름순)
   const permRank = (p) => (hasAccess(p) ? (p.row.Role === "관리자" ? 0 : 1) : !p.dirOnly ? 2 : 3);
@@ -4726,6 +4756,13 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
   usePendingEdits("users", dirtyCount);
   const counts = T365_ROLES.reduce((m, r) => { m[r] = merged.filter((p) => p.row.Role === r && p.row.Active !== false).length; return m; }, {});
   const listAdmins = merged.filter((p) => p.row.Active !== false && permsOf(p.row).perms.users === "e");
+  // 11-05 명부 한글 이름 채우기 — 등록된 사람 중 한글 이름이 비어 있고 명부(KorName)에 있는 사람. 칸에 넣어 두고 「반영」 으로 저장
+  const korFillable = hasKorCol && canEdit ? merged.filter((p) => p.dir && p.dir.kor && !userKor(p.row) && !(overrides[p.email] && "KorName" in overrides[p.email])) : [];
+  function fillKorFromDir() {
+    if (!korFillable.length) return;
+    korFillable.forEach((p) => setField(p, "KorName", p.dir.kor));
+    toast(`${korFillable.length}명의 한글 이름을 직원 명부 값으로 채웠습니다 · 「반영」을 눌러 저장`);
+  }
 
   function setField(p, k, v) {
     setOverrides((prev) => {
@@ -4802,6 +4839,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
     const fields = {};
     if ("Role" in o) fields.Role = o.Role;
     if ("Company" in o) fields.Company = String(o.Company).trim();
+    if ("KorName" in o && hasKorCol) fields.KorName = String(o.KorName).trim().slice(0, T365_KOR_MAX);
     if ("Active" in o) fields.Active = !!o.Active;
     const role = "Role" in fields ? fields.Role : row.Role;
     if (o.Perm) {
@@ -4822,13 +4860,15 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
   // 명부 직원 → 사용자 목록 새 행(이름 · 메일 · 부서는 명부 값, 역할 · 권한은 고른 값)
   function newUserFields(dp, o) {
     const base = { Title: dp.row.Title, Email: dp.email, Role: o.Role, Company: String("Company" in o ? o.Company : dp.row.Company || "").trim(), WriterCategories: "", Active: true };
+    const kor = String("KorName" in o ? o.KorName : dp.row.KorName || "").trim().slice(0, T365_KOR_MAX);   // 11-05 명부 한글 이름(고친 값이 먼저)
+    if (hasKorCol && kor) base.KorName = kor;
     const f = buildFields(base, { ...o, Role: o.Role });
-    delete f.Active;
+    delete f.Active; if (!f.KorName) delete f.KorName;
     return { ...base, ...f };
   }
   async function createFromDir(c) {
     await tCreate(T365_LISTS.users, c.fields);
-    t365Log("사용자", "사용자 추가", `${c.fields.Title} (${c.email})`, { info: { 역할: c.fields.Role, "회사/지점": c.fields.Company, 출처: "직원 명부" }, changes: permChanges(noPerms(), permsOf(c.fields).perms) });
+    t365Log("사용자", "사용자 추가", `${c.fields.Title} (${c.email})`, { info: { 역할: c.fields.Role, "회사/지점": c.fields.Company, ...(c.fields.KorName ? { "한글 이름": c.fields.KorName } : {}), 출처: "직원 명부" }, changes: permChanges(noPerms(), permsOf(c.fields).perms) });
   }
   // 한 사람 바로 추가 — 고른 역할(없으면 본사)과 고른 권한으로 곧바로 등록
   async function addFromDir(p) {
@@ -4873,7 +4913,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
       for (const { email, row, fields } of plan) {
         if (!Object.keys(fields).length) continue;
         await tUpdate(T365_LISTS.users, row.id, fields);
-        const lab = { Role: "역할", Company: "회사/지점", Active: "사용" };
+        const lab = { Role: "역할", KorName: "한글 이름", Company: "회사/지점", Active: "사용" };
         const changes = {};
         Object.keys(lab).forEach((k) => { if (k in fields) changes[lab[k]] = [k === "Active" ? row.Active !== false : row[k] || "", fields[k]]; });
         const pc = permChanges(permsOf({ ...row, Active: true }).perms, permsOf({ ...row, ...fields, Active: true }).perms);
@@ -4902,9 +4942,10 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
     try {
       const fresh = await tListAll(T365_LISTS.users);
       if (fresh.some((r) => normEmail(r.Email) === email)) { uiAlert("이미 등록된 사용자입니다."); await reload(); return; }
-      await tCreate(T365_LISTS.users, { Title: add.name.trim(), Email: email, Role: add.role, Company: add.company.trim(), WriterCategories: "", Active: true });
-      t365Log("사용자", "사용자 추가", `${add.name.trim()} (${email})`, { info: { 역할: add.role, "회사/지점": add.company.trim(), 외부계정: isExternalEmail(email) ? "예" : "아니요", 권한: "역할 기본값" } });
-      setAdd({ email: "", name: "", company: "", role: add.role }); setJustAdded(new Set([email])); setQ(""); setRoleF("");
+      const kor = hasKorCol ? String(add.kor || (dirMap.get(email) || {}).kor || "").trim().slice(0, T365_KOR_MAX) : "";   // 11-05 비우면 명부 한글 이름
+      await tCreate(T365_LISTS.users, { Title: add.name.trim(), Email: email, Role: add.role, Company: add.company.trim(), WriterCategories: "", Active: true, ...(kor ? { KorName: kor } : {}) });
+      t365Log("사용자", "사용자 추가", `${add.name.trim()} (${email})`, { info: { 역할: add.role, "회사/지점": add.company.trim(), ...(kor ? { "한글 이름": kor } : {}), 외부계정: isExternalEmail(email) ? "예" : "아니요", 권한: "역할 기본값" } });
+      setAdd({ email: "", name: "", kor: "", company: "", role: add.role }); setJustAdded(new Set([email])); setQ(""); setRoleF("");
       await reload();
     } catch (e) { uiAlert(e.message); } finally { window._t365Adding = false; setSaving(""); }
   }
@@ -4931,7 +4972,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
   function exportExcel() {
     const data = ordered.map((p, i) => {
       const P = stored(p).perms;
-      const o = { 번호: i + 1, 이름: p.row.Title || "", 이메일: p.email, "회사/지점": p.row.Company || "", 등록: p.dirOnly ? "미등록(명부에만 있음)" : "등록", "직원 명부": !dirOk ? "" : { in: "있음", alt: "메일 다름", missing: p.extAgent ? "외부(Agent)" : "명부 없음", dirOnly: "있음" }[p.dirStatus] || "", 역할: p.row.Role || "", 사용: p.dirOnly ? "" : p.row.Active !== false ? "예" : "아니요", 권한: { custom: "개별 설정", preset: "역할 기본값", broken: "권한 값 오류(Overview 만)", none: "-" }[stored(p).source] || "" };
+      const o = { 번호: i + 1, 이름: p.row.Title || "", "한글 이름": userKor(p.row), 이메일: p.email, "회사/지점": p.row.Company || "", 등록: p.dirOnly ? "미등록(명부에만 있음)" : "등록", "직원 명부": !dirOk ? "" : { in: "있음", alt: "메일 다름", missing: p.extAgent ? "외부(Agent)" : "명부 없음", dirOnly: "있음" }[p.dirStatus] || "", 역할: p.row.Role || "", 사용: p.dirOnly ? "" : p.row.Active !== false ? "예" : "아니요", 권한: { custom: "개별 설정", preset: "역할 기본값", broken: "권한 값 오류(Overview 만)", none: "-" }[stored(p).source] || "" };
       T365_PERM_ITEMS.forEach((it) => { o[catLabel(it)] = T365_LEVEL_LABEL[P[it.key]] || "없음"; });
       return { ...o, 외부계정: isExternalEmail(p.email) ? "예" : "아니요", "마지막 접속(KST)": lastLogin[p.email] ? fmtDate(lastLogin[p.email]) : "" };
     });
@@ -4940,9 +4981,9 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
     t365Log("사용자", "Excel 내보내기", "사용자 · 권한 목록", { info: { 건수: data.length } });
   }
   function downloadTemplate() {
-    const ws = XLSX.utils.aoa_to_sheet([["이메일", "이름", "회사/지점", "역할", "작성 카테고리"], ["agent.kim@example.com", "김영업", "서울모터스 강서지점", "Agent", ""], ["user@example.com", "이작성", "STK Sales", "작성자", "crm,training"]]);
+    const ws = XLSX.utils.aoa_to_sheet([["이메일", "이름", "한글 이름", "회사/지점", "역할", "작성 카테고리"], ["agent.kim@example.com", "Youngup Kim", "김영업", "서울모터스 강서지점", "Agent", ""], ["user@example.com", "Jaksung Lee", "이작성", "STK Sales", "작성자", "crm,training"]]);
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "사용자");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["역할 값"], ...T365_ROLES.map((r) => [r]), [], ["카테고리 키"], ...T365_DEFAULT_CATEGORIES.map((c) => [`${c.key} = ${c.label}`]), [], ["메뉴별 개별 권한은 등록 후 화면 표에서 지정합니다"]]), "안내");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["역할 값"], ...T365_ROLES.map((r) => [r]), [], ["카테고리 키"], ...T365_DEFAULT_CATEGORIES.map((c) => [`${c.key} = ${c.label}`]), [], ["메뉴별 개별 권한은 등록 후 화면 표에서 지정합니다"], ["한글 이름 — 화면(글쓴이 · 댓글 · 확인 현황 등)에 보이는 이름. 비우면 직원 명부의 한글 이름(새로 등록할 때) 또는 지금 값을 그대로 둡니다"]]), "안내");
     try { XLSX.writeFile(wb, "Training365_사용자_일괄등록_양식.xlsx"); }
     catch (e) { t365Log("사용자", "양식 다운로드 실패", "사용자 일괄 등록 양식", { info: { 오류: String((e && e.message) || e || "").slice(0, 80) } }); throw e; }
     t365Log("사용자", "양식 다운로드", "사용자 일괄 등록 양식", {});   // 10-15
@@ -4957,6 +4998,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
       const out = rows.map((r, i) => {
         const email = normEmail(pick(r, ["이메일", "email", "메일", "e-mail"]));
         const name = pick(r, ["이름", "name", "성명"]);
+        const kor = hasKorCol ? pick(r, ["한글 이름", "한글이름", "korname", "kor name", "한글명"]).slice(0, T365_KOR_MAX) : "";   // 11-05 비우면 그대로(새 등록은 명부 값)
         const company = pick(r, ["회사/지점", "회사", "지점", "company"]);
         const roleRaw = pick(r, ["역할", "role"]); const role = T365_ROLES.find((x) => x.toLowerCase() === roleRaw.toLowerCase()) || "";
         // 10-21 작성 카테고리 칸이 비어 있으면 기존 값을 그대로 둔다 — 예전엔 비운 채 덮어써 작성자가 모든 게시판 편집이 됐다(내보내기 파일엔 이 칸이 없음)
@@ -4971,12 +5013,12 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
         else if (!name && !exist) { status = "오류"; reason = "이름 없음"; }
         else if (wcBad.length) { status = "오류"; reason = `작성 카테고리 값(${wcBad.join(", ")}) — 키로 적어 주세요: ${T365_DEFAULT_CATEGORIES.filter((c) => !c.band).map((c) => c.key).join(", ")}`; }
         else if (exist) {
-          const same = (exist.row.Role || "") === role && (exist.row.Company || "") === company && (!name || (exist.row.Title || "") === name) && (!wcRaw || catKeysOf(exist.row.WriterCategories).join(",") === wc);
+          const same = (exist.row.Role || "") === role && (exist.row.Company || "") === company && (!name || (exist.row.Title || "") === name) && (!kor || userKor(exist.row) === kor) && (!wcRaw || catKeysOf(exist.row.WriterCategories).join(",") === wc);
           status = same ? "동일" : "변경";
           if (!same && (exist.row.Role || "") !== role && stored(exist).source === "custom") reason = "역할이 바뀌어 개별 권한은 기본값으로";
         }
         seen.add(email);
-        return { line: i + 2, email, name, company, role, wc, wcSet: !!wcRaw, status, reason, exist };
+        return { line: i + 2, email, name, kor, company, role, wc, wcSet: !!wcRaw, status, reason, exist };
       }).filter((x) => x.email || x.name);
       if (!out.length) { uiAlert("읽을 행이 없습니다 — 양식의 머리글(이메일 · 이름 · 회사/지점 · 역할)을 확인해 주세요."); return; }
       setImportRows(out);
@@ -4992,6 +5034,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
       const plan = list.map((x) => {
         const row = fresh.find((r) => normEmail(r.Email) === x.email);
         const f = { Role: x.role, Company: x.company, ...(x.wcSet || !row ? { WriterCategories: x.wc } : {}) }; if (x.name) f.Title = x.name;
+        if (hasKorCol) { const k = x.kor || (!row ? String((dirMap.get(x.email) || {}).kor || "").slice(0, T365_KOR_MAX) : ""); if (k) f.KorName = k; }   // 11-05
         if (row && (row.Role || "") !== x.role && hasPermCol) f.Permissions = "";   // 역할이 바뀌면 개별 권한은 새 역할 기본값으로
         if (row) ch[x.email] = f;
         return { x, row, f };
@@ -5007,10 +5050,10 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
       for (const { x, row, f } of plan) {
         if (row) {
           await tUpdate(T365_LISTS.users, row.id, f);
-          t365Log("사용자", "역할 변경", `${x.name || row.Title} (${x.email})`, { changes: { 역할: [row.Role || "", x.role], "회사/지점": [row.Company || "", x.company], ...permChanges(permsOf({ ...row, Active: true }).perms, permsOf({ ...row, ...f, Active: true }).perms) }, info: { 일괄: "Excel 일괄 등록" } });
+          t365Log("사용자", "역할 변경", `${x.name || row.Title} (${x.email})`, { changes: { 역할: [row.Role || "", x.role], "회사/지점": [row.Company || "", x.company], ...(f.KorName && f.KorName !== userKor(row) ? { "한글 이름": [userKor(row), f.KorName] } : {}), ...permChanges(permsOf({ ...row, Active: true }).perms, permsOf({ ...row, ...f, Active: true }).perms) }, info: { 일괄: "Excel 일괄 등록" } });
         } else {
-          await tCreate(T365_LISTS.users, { Title: x.name, Email: x.email, Role: x.role, Company: x.company, WriterCategories: x.wc, Active: true });
-          t365Log("사용자", "사용자 추가", `${x.name} (${x.email})`, { info: { 역할: x.role, "회사/지점": x.company, 일괄: "Excel 일괄 등록" } });
+          await tCreate(T365_LISTS.users, { Title: x.name, Email: x.email, Role: x.role, Company: x.company, WriterCategories: x.wc, Active: true, ...(f.KorName ? { KorName: f.KorName } : {}) });
+          t365Log("사용자", "사용자 추가", `${x.name} (${x.email})`, { info: { 역할: x.role, "회사/지점": x.company, ...(f.KorName ? { "한글 이름": f.KorName } : {}), 일괄: "Excel 일괄 등록" } });
         }
         done++;
       }
@@ -5025,6 +5068,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
   const cols = [];
   if (showMatrix) T365_PERM_GROUPS.forEach((g) => g.items.forEach((it, ii) => { const item = { ...it, group: g.key }; cols.push({ g, item, col: "v", first: ii === 0 }); if (it.edit) cols.push({ g, item, col: "e", first: false }); }));
   const CELL_W = 44;
+  const KOR_W = 116;   // 11-05 한글 이름 칸
   const colW = (it) => (it.edit ? 2 * CELL_W : 60);   // 보기만 있는 메뉴는 한 칸을 조금 넓게(이름이 두 줄로 덜 깨지게)
   const groupSpan = (g) => g.items.reduce((a, it) => a + (it.edit ? 2 : 1), 0);
   const divider = (c) => (c.first ? { borderLeft: `2px solid ${c.g.line}` } : c.col === "e" ? { borderLeft: "1px dashed #E2E8F0" } : { borderLeft: "1px solid #EEF2F6" });
@@ -5052,6 +5096,13 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
         <div className="rounded-xl border px-4 py-3 mb-4 text-xs leading-relaxed bg-amber-50 border-amber-200 text-amber-900 flex items-start gap-2.5" data-testid="perm-col-missing">
           <AlertTriangle size={15} className="shrink-0 mt-0.5 text-amber-500" />
           <div>{usersSt ? <>사용자 목록에 <b>Permissions</b> 열(여러 줄 텍스트)이 없어 <b>역할 기본값</b>으로만 동작합니다. 사람별 보기 · 편집을 바꾸려면 열을 만든 뒤 새로고침하세요(작성자의 게시판 편집은 지금도 바꿀 수 있습니다).</> : "권한 열 확인 중입니다 — 확인이 끝날 때까지 사람별 권한 칸은 잠겨 있습니다."}</div>
+        </div>
+      )}
+
+      {korColMissing && canEdit && (
+        <div className="rounded-xl border px-4 py-3 mb-4 text-xs leading-relaxed bg-blue-50 border-blue-100 text-blue-900 flex items-start gap-2.5" data-testid="kor-col-missing-users">
+          <Info size={15} className="shrink-0 mt-0.5 text-blue-500" />
+          <div>사용자 목록에 <b>KorName</b> 열(한 줄 텍스트)이 없어 <b>한글 이름</b>을 저장할 수 없습니다 — 지금은 등록된 이름으로 보입니다. IT 준비 스크립트(STK-T365-KorName-Setup)로 열을 만든 뒤 새로고침하면 「한글 이름」 칸을 고칠 수 있고, 「명부 한글 이름 채우기」로 직원 명부 값을 한 번에 넣을 수 있습니다.</div>
         </div>
       )}
 
@@ -5102,9 +5153,10 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
         </div>
         {canEdit && showAdd && (
           <div className="w-full pt-2.5 mt-0.5 border-t border-slate-100" data-testid="add-panel">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,.85fr)_auto] gap-2">
+            <div className={`grid grid-cols-1 sm:grid-cols-2 ${hasKorCol ? "lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,.9fr)_minmax(0,1.2fr)_minmax(0,.85fr)_auto]" : "lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,.85fr)_auto]"} gap-2`}>
               <input value={add.email} onChange={(e) => setAdd({ ...add, email: e.target.value })} placeholder="이메일 (원래 메일 주소)" className={`${ctrl} px-3 w-full min-w-0`} data-testid="add-email" />
               <input value={add.name} onChange={(e) => setAdd({ ...add, name: e.target.value })} placeholder="이름" className={`${ctrl} px-3 w-full min-w-0`} data-testid="add-name" />
+              {hasKorCol && <input value={add.kor} maxLength={T365_KOR_MAX} onChange={(e) => setAdd({ ...add, kor: e.target.value })} placeholder={(dirMap.get(normEmail(add.email)) || {}).kor || "한글 이름 (선택)"} className={`${ctrl} px-3 w-full min-w-0`} data-testid="add-kor" />}
               <input value={add.company} onChange={(e) => setAdd({ ...add, company: e.target.value })} placeholder="회사 / 지점" className={`${ctrl} px-3 w-full min-w-0`} data-testid="add-company" />
               <select value={add.role} onChange={(e) => setAdd({ ...add, role: e.target.value })} className={`${ctrl} px-2 w-full min-w-0`} data-testid="add-role">{T365_ROLES.map((r) => <option key={r}>{r}</option>)}</select>
               <button onClick={addUser} disabled={!!saving} className={btnPrimaryCls} style={{ background: BRAND.accent }} data-testid="add-btn">+ 추가</button>
@@ -5125,6 +5177,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
           {T365_ROLES.map((r) => <button key={r} onClick={() => { setRoleF(roleF === r ? "" : r); setView("all"); }} aria-pressed={roleF === r} title={`${r} — ${ROLE_META[r].desc}${roleF === r ? " · 다시 누르면 전체" : ""}`} className={`text-[12px] px-2.5 h-7 rounded-full border ${ROLE_META[r].cls} ${roleF === r ? "ring-2 ring-[#2F7B7A]/45" : roleF ? "opacity-60 hover:opacity-100" : ""}`} data-role-chip={r}>{r} <b className="tabular-nums">{counts[r]}</b></button>)}
         </div>
         <div className="ml-auto flex items-center gap-1.5">
+          {korFillable.length > 0 && <button onClick={fillKorFromDir} disabled={!!saving} title="한글 이름이 비어 있는 등록 사용자에게 직원 명부의 한글 이름을 넣습니다 — 「반영」을 눌러야 저장" className="h-9 text-xs px-3 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5" data-testid="kor-fill">명부 한글 이름 채우기<span className="text-[11px] tabular-nums px-1.5 rounded-full bg-slate-100 text-slate-500">{korFillable.length}</span></button>}
           <button onClick={() => setShowLegend((v) => !v)} aria-pressed={showLegend} className={`h-9 text-xs px-3 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 ${showLegend ? "bg-slate-100" : "bg-white"}`} data-testid="legend-btn">역할별 기본값 {showLegend ? "접기" : "보기"}</button>
           {dirtyCount > 0 && <button onClick={() => setOverrides({})} className="h-9 text-xs px-3 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 bg-white">변경 취소</button>}
           {canEdit && <button onClick={applyChanges} disabled={!!saving || !dirtyCount} title={dirtyCount ? "" : "표에서 칸을 바꾸면 눌러 저장합니다"} className={`h-9 px-4 rounded-lg text-sm font-medium ${dirtyCount ? "text-white" : "text-slate-400 bg-white border border-slate-200 cursor-default"}`} style={dirtyCount ? { background: BRAND.accent } : undefined} data-testid="apply-btn">{dirtyCount ? `반영 (${dirtyCount}명)` : "반영"}</button>}
@@ -5170,16 +5223,17 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
         <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm border border-sky-200" style={{ background: "#EAF4FB" }}></span>역할 기본값과 다른 개별 설정</span>
         <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm border border-amber-300" style={{ background: "#FEF3C7" }}></span>반영 전 변경</span>
         <span className="inline-flex items-center gap-1.5"><LockKeyhole size={11} />바꿀 수 없음(항상 보임)</span>
-        {listAdmins.length > 0 && <span className="ml-auto inline-flex items-center gap-1.5 min-w-0" title="사용자 · 권한 편집이 있는 사람(이 목록 기준)" data-testid="admin-chips"><ShieldCheck size={12} style={{ color: BRAND.accent }} />관리 권한<span className="text-slate-600 truncate">{listAdmins.map((p) => p.row.Title || p.email).join(" · ")}</span></span>}
+        {listAdmins.length > 0 && <span className="ml-auto inline-flex items-center gap-1.5 min-w-0" title="사용자 · 권한 편집이 있는 사람(이 목록 기준)" data-testid="admin-chips"><ShieldCheck size={12} style={{ color: BRAND.accent }} />관리 권한<span className="text-slate-600 truncate">{listAdmins.map((p) => userDispName(p.row) || p.email).join(" · ")}</span></span>}
       </div>}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-auto max-h-[70vh]" data-testid="perm-scroll">
-          <table className="text-sm border-separate border-spacing-0" style={{ minWidth: showMatrix ? 248 + 128 + 56 + T365_PERM_ITEMS.reduce((a, it) => a + colW(it), 0) + 140 + 110 + (canEdit ? 72 : 0) : 760, width: showMatrix ? undefined : "100%" }} data-testid="perm-table">
+          <table className="text-sm border-separate border-spacing-0" style={{ minWidth: showMatrix ? 248 + KOR_W + 128 + 56 + T365_PERM_ITEMS.reduce((a, it) => a + colW(it), 0) + 140 + 110 + (canEdit ? 72 : 0) : 760, width: showMatrix ? undefined : "100%" }} data-testid="perm-table">
             <thead className="sticky top-0 z-20">
               <tr className="text-[11px]">
                 <th rowSpan={showMatrix ? 3 : 1} className={`${stickyL} z-30 bg-slate-50 text-left text-xs text-slate-500 px-3 md:px-4 py-2 ${th} w-[150px] min-w-[150px] md:w-[248px] md:min-w-[248px]`} style={{ boxShadow: "1px 0 0 #E2E8F0" }}>
                   <label className="inline-flex items-center gap-2.5 cursor-pointer select-none">{canEdit && <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelVisible} className="w-4 h-4" title="보이는 사용자 전체 선택" />}사용자</label>
                 </th>
+                <th rowSpan={showMatrix ? 3 : 1} className={`bg-slate-50 text-left text-xs text-slate-500 px-3 py-2 ${th}`} style={{ minWidth: KOR_W, width: KOR_W }} title="화면(글쓴이 · 댓글 · 확인 현황 등)에 보이는 이름 — 비어 있으면 등록된 이름. 흐린 글자는 직원 명부의 한글 이름(아직 저장 전)" data-testid="kor-th">한글 이름</th>
                 <th rowSpan={showMatrix ? 3 : 1} className={`hidden md:table-cell bg-slate-50 text-left text-xs text-slate-500 px-3 py-2 ${th}`} style={{ minWidth: 128 }}>역할</th>
                 <th rowSpan={showMatrix ? 3 : 1} className={`hidden md:table-cell bg-slate-50 text-center text-xs text-slate-500 px-2 py-2 ${th}`} style={{ minWidth: 56 }}>사용</th>
                 {showMatrix && T365_PERM_GROUPS.map((g) => (
@@ -5260,6 +5314,23 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
                         </div>
                       </div>
                     </td>
+                    {(() => {   // 11-05 한글 이름 — 저장된 값(고치면 노란 칸) · 비어 있으면 명부 한글 이름을 흐리게(「명부 한글 이름 채우기」 또는 직접 입력)
+                      const kv = eff(p, "KorName"), dk = (p.dir && p.dir.kor) || "", sk = userKor(p.row);
+                      const korEdit = canEdit && hasKorCol;
+                      const differs = !p.dirOnly && dk && sk && dk !== sk && !(o && "KorName" in o);
+                      const chg = !!(o && "KorName" in o);
+                      return (
+                        <td className="px-1.5 py-1.5 border-b border-slate-100" style={{ background: chg ? "#FEF3C7" : rowBg, width: KOR_W, minWidth: KOR_W, maxWidth: KOR_W }}>
+                          <div className="relative">
+                            <input value={kv} disabled={!korEdit} maxLength={T365_KOR_MAX} onChange={(e) => setField(p, "KorName", e.target.value)} data-kor={p.email}
+                              placeholder={dk || "-"} aria-label={`${p.row.Title || p.email} 한글 이름`}
+                              title={!hasKorCol ? (korColMissing ? "한글 이름 열이 없어 저장할 수 없습니다(위 안내)" : "열 확인 중") : differs ? `직원 명부: ${dk} — 다르면 칸을 고치세요` : !kv && dk ? `직원 명부: ${dk} — 「명부 한글 이름 채우기」 또는 직접 입력` : ""}
+                              className={`w-full h-8 px-2 border border-transparent hover:border-slate-200 focus:border-slate-300 rounded-md text-[12.5px] bg-transparent focus:bg-white focus:outline-none disabled:hover:border-transparent placeholder:text-slate-400 ${differs ? "pr-5" : ""}`} />
+                            {differs && <span className="absolute right-1.5 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-amber-400 pointer-events-none" data-kor-diff={p.email} aria-hidden="true"></span>}
+                          </div>
+                        </td>
+                      );
+                    })()}
                     <td className="hidden md:table-cell px-2 py-1.5 border-b border-slate-100" style={{ background: rowBg }}>
                       <select value={T365_ROLES.includes(role) ? role : ""} disabled={!canEdit} onChange={(e) => setField(p, "Role", e.target.value)} data-role-select={p.email}
                         className={`h-8 w-full border rounded-md text-[12.5px] px-1.5 font-medium disabled:opacity-90 ${ROLE_META[role] ? ROLE_META[role].cls : p.dirOnly ? "bg-white text-slate-400 border-slate-200 border-dashed" : "bg-red-50 text-red-600 border-red-200"}`}>
@@ -5292,7 +5363,7 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
                     {canEdit && !p.dirOnly && <td className="px-2 py-1.5 text-center border-b border-slate-100" style={{ background: rowBg }}><button onClick={() => removeUsers([p])} disabled={!!saving} title="삭제 — 활동 이력에 남습니다" className="w-7 h-7 inline-flex items-center justify-center rounded-lg text-slate-300 hover:text-red-600 hover:bg-red-50"><Trash2 size={14} /></button></td>}
                   </tr>
                 );
-              }) : <tr><td colSpan={(showMatrix ? 6 : 7) + cols.length} className="text-center text-slate-400 py-10">{merged.length ? "조회 결과가 없습니다." : "등록된 사용자가 없습니다 — 위 「사용자 추가」 또는 「Excel 일괄 등록」으로 등록해 주세요."}</td></tr>}
+              }) : <tr><td colSpan={(showMatrix ? 7 : 8) + cols.length} className="text-center text-slate-400 py-10">{merged.length ? "조회 결과가 없습니다." : "등록된 사용자가 없습니다 — 위 「사용자 추가」 또는 「Excel 일괄 등록」으로 등록해 주세요."}</td></tr>}
             </tbody>
           </table>
         </div>
@@ -5310,12 +5381,12 @@ function UsersTab({ ctx, users, bootstrap, accessRows, listStatus, reload }) {
           </div>
           <div className="border border-slate-200 rounded-lg overflow-auto max-h-[50vh]">
             <table className="w-full text-[12.5px]" style={{ minWidth: 680 }}>
-              <thead className="bg-slate-50 text-slate-500 text-[11.5px] sticky top-0"><tr>{["행", "상태", "이메일", "이름", "회사/지점", "역할", "비고"].map((h) => <th key={h} className="px-3 py-1.5 text-left font-medium">{h}</th>)}</tr></thead>
+              <thead className="bg-slate-50 text-slate-500 text-[11.5px] sticky top-0"><tr>{["행", "상태", "이메일", "이름", ...(hasKorCol ? ["한글 이름"] : []), "회사/지점", "역할", "비고"].map((h) => <th key={h} className="px-3 py-1.5 text-left font-medium">{h}</th>)}</tr></thead>
               <tbody>{importRows.map((x) => (
                 <tr key={x.line} className="border-t border-slate-100">
                   <td className="px-3 py-1.5 text-slate-400">{x.line}</td>
                   <td className="px-3 py-1.5"><span className={`px-1.5 rounded-full text-[11px] font-medium ${x.status === "오류" ? "bg-red-50 text-red-600" : x.status === "신규" ? "bg-emerald-50 text-emerald-700" : x.status === "변경" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-500"}`}>{x.status}</span></td>
-                  <td className="px-3 py-1.5 text-slate-700">{x.email}</td><td className="px-3 py-1.5">{x.name}</td><td className="px-3 py-1.5">{x.company}</td><td className="px-3 py-1.5">{x.role}</td>
+                  <td className="px-3 py-1.5 text-slate-700">{x.email}</td><td className="px-3 py-1.5">{x.name}</td>{hasKorCol && <td className="px-3 py-1.5">{x.kor || <span className="text-slate-300">{!x.exist && (dirMap.get(x.email) || {}).kor ? `${dirMap.get(x.email).kor} (명부)` : "-"}</span>}</td>}<td className="px-3 py-1.5">{x.company}</td><td className="px-3 py-1.5">{x.role}</td>
                   <td className={`px-3 py-1.5 ${x.status === "오류" ? "text-red-600" : "text-amber-700"}`}>{x.reason}</td>
                 </tr>
               ))}</tbody>
@@ -5623,10 +5694,10 @@ function CatStyleModal({ ctx, d, onApply, onClose }) {
       <div className="space-y-1.5 mb-2" data-testid="cs-contacts">
         {contacts.length ? contacts.map((c, k) => (
           <div key={c.email} className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-slate-200 bg-white" data-contact={c.email}>
-            <span className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold text-white shrink-0" style={{ background: pal.color }}>{String(c.name || c.email).slice(0, 1).toUpperCase()}</span>
-            <span className="min-w-0 flex-1"><span className="block text-[13px] text-slate-800 truncate">{c.name}</span><span className="block text-[11px] text-slate-400 truncate">{c.email}</span></span>
+            <span className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold text-white shrink-0" style={{ background: pal.color }}>{String(nameOf(c.email, c.name) || c.email).slice(0, 1).toUpperCase()}</span>
+            <span className="min-w-0 flex-1"><span className="block text-[13px] text-slate-800 truncate">{nameOf(c.email, c.name)}</span><span className="block text-[11px] text-slate-400 truncate">{c.email}</span></span>
             {k > 0 && <button type="button" onClick={() => setContacts((p) => { const n = p.slice(); [n[k - 1], n[k]] = [n[k], n[k - 1]]; return n; })} className="text-slate-300 hover:text-slate-600" aria-label="위로"><ChevronUp size={15} /></button>}
-            <button type="button" onClick={() => setContacts((p) => p.filter((x) => x.email !== c.email))} className="text-slate-300 hover:text-red-600" aria-label={`${c.name} 빼기`}><X size={15} /></button>
+            <button type="button" onClick={() => setContacts((p) => p.filter((x) => x.email !== c.email))} className="text-slate-300 hover:text-red-600" aria-label={`${nameOf(c.email, c.name)} 빼기`}><X size={15} /></button>
           </div>
         )) : <div className="text-[12.5px] text-slate-400 px-3 py-2.5 rounded-lg border border-dashed border-slate-200">아직 지정한 담당자가 없습니다 — 「문의하기」 에는 IT 연락처만 보입니다.</div>}
       </div>
@@ -5634,9 +5705,9 @@ function CatStyleModal({ ctx, d, onApply, onClose }) {
         <div className="flex gap-1.5 flex-1 min-w-0">
           <select value={pick} onChange={(e) => setPick(e.target.value)} className={`${inputCls} h-9 py-0`} data-testid="cs-pick">
             <option value="">등록 사용자에서 고르기 ({staff.length}명)</option>
-            {staff.map((u) => <option key={u.id || u.Email} value={normEmail(u.Email)}>{u.Title || u.Email} · {u.Role}{u.Company ? ` · ${u.Company}` : ""}</option>)}
+            {staff.map((u) => <option key={u.id || u.Email} value={normEmail(u.Email)}>{userDispName(u) || u.Email} · {u.Role}{u.Company ? ` · ${u.Company}` : ""}</option>)}
           </select>
-          <button type="button" disabled={!pick} onClick={() => { const u = staff.find((x) => normEmail(x.Email) === pick); addContact(pick, u && u.Title); setPick(""); }} className={`${btnCls} h-9`} data-testid="cs-add"><UserPlus size={14} />추가</button>
+          <button type="button" disabled={!pick} onClick={() => { const u = staff.find((x) => normEmail(x.Email) === pick); addContact(pick, u && userDispName(u)); setPick(""); }} className={`${btnCls} h-9`} data-testid="cs-add"><UserPlus size={14} />추가</button>
         </div>
         <div className="flex gap-1.5 sm:w-[260px]">
           <input value={mail} onChange={(e) => setMail(e.target.value)} placeholder="또는 메일 주소" className={`${inputCls} h-9`} data-testid="cs-mail" onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); if (mail.trim()) { addContact(mail.trim()); setMail(""); } } }} />
@@ -5770,8 +5841,8 @@ function CategoriesTab({ ctx, catRows, bannerRows, listStatus, reload }) {
                     <div className="mt-2 pt-2 border-t border-slate-100 flex items-center gap-2 min-w-0">
                       <button type="button" disabled={locked} onClick={() => setStyling(d)} className="flex items-center gap-1.5 min-w-0 flex-1 text-left rounded-md disabled:cursor-default" data-cat-contacts={d.key} title="문의 담당자">
                         {d.contacts.length ? <>
-                          <span className="flex -space-x-1 shrink-0">{d.contacts.slice(0, 3).map((c) => <span key={c.email} className="w-5 h-5 rounded-full ring-2 ring-white flex items-center justify-center text-[9.5px] font-bold text-white" style={{ background: vc.color }}>{String(c.name || c.email).trim().slice(0, 1).toUpperCase()}</span>)}</span>
-                          <span className="text-[12px] text-slate-600 truncate">{d.contacts.map((c) => c.name || c.email).join(", ")}</span>
+                          <span className="flex -space-x-1 shrink-0">{d.contacts.slice(0, 3).map((c) => <span key={c.email} className="w-5 h-5 rounded-full ring-2 ring-white flex items-center justify-center text-[9.5px] font-bold text-white" style={{ background: vc.color }}>{String(nameOf(c.email, c.name) || c.email).trim().slice(0, 1).toUpperCase()}</span>)}</span>
+                          <span className="text-[12px] text-slate-600 truncate">{d.contacts.map((c) => nameOf(c.email, c.name) || c.email).join(", ")}</span>
                         </> : <span className="inline-flex items-center gap-1 text-[11.5px] text-slate-400 hover:text-slate-700">{locked ? "담당자 없음" : <><UserPlus size={12} />{d.key === "qna" ? "답변 담당자 지정" : "담당자 지정"}</>}</span>}
                       </button>
                       <span className="shrink-0 text-[11.5px] text-slate-400 inline-flex items-center gap-1"><FileText size={12} />게시물 <b className="text-slate-700 tabular-nums">{counts[d.key] || 0}</b></span>
@@ -6258,11 +6329,11 @@ function AccessLogTab({ ctx }) {
   const qq = q.trim().toLowerCase();
   const view = (rows || []).map(enrich)
     .filter((r) => !roleF || r.Role === roleF).filter((r) => !statusF || r.st.label === statusF)
-    .filter((r) => !qq || [r.UserEmail, r.UserName, r.Company, r.Device].some((v) => String(v || "").toLowerCase().includes(qq)));
+    .filter((r) => !qq || [r.UserEmail, r.UserName, korOf(r.UserEmail), r.Company, r.Device].some((v) => String(v || "").toLowerCase().includes(qq)));
   // 사람별 묶음 — Map 으로(메일 칸에 「__proto__」 같은 값이 와도 객체 기본 속성을 건드리지 않게)
   const byUser = [...view.reduce((m, r) => {
     const k = normEmail(r.UserEmail); const u = uMap.get(k);
-    let o = m.get(k); if (!o) { o = { email: k, name: r.UserName || (u && u.Title) || k, company: r.Company || (u && u.Company) || "", role: r.Role, n: 0, last: null, lastEnd: null, logouts: 0, inferred: 0, total: 0 }; m.set(k, o); }
+    let o = m.get(k); if (!o) { o = { email: k, name: userKor(u) || r.UserName || (u && u.Title) || k, company: r.Company || (u && u.Company) || "", role: r.Role, n: 0, last: null, lastEnd: null, logouts: 0, inferred: 0, total: 0 }; m.set(k, o); }
     o.n++; o.total += Math.max(0, r.dur); if (r.st.label === "로그아웃") o.logouts++; if (r.st.inferred) o.inferred++;
     if (!o.last || r.LoginAt > o.last.LoginAt) o.last = r;
     return m;
@@ -6273,7 +6344,7 @@ function AccessLogTab({ ctx }) {
   const pageRows = list.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
   const cnt = (l) => view.filter((r) => r.st.label === l).length;
   function exportExcel() {
-    const data = view.map((r, i) => ({ 번호: view.length - i, "로그인(KST)": fmtDate(r.LoginAt), 이름: r.UserName || "", 메일: r.UserEmail || "", "회사/지점": r.Company || "", 역할: r.Role || "", 종료: r.st.label, "로그아웃/종료(KST)": r.st.end ? fmtDate(r.st.end) : "", "마지막 활동(KST)": fmtDate(r.LastActivityAt), "접속 시간(분)": Math.max(0, Math.round(r.dur / 60e3)), 기기: r.Device || "", 세션: r.Title || "" }));
+    const data = view.map((r, i) => ({ 번호: view.length - i, "로그인(KST)": fmtDate(r.LoginAt), 이름: nameOf(r.UserEmail, r.UserName), 메일: r.UserEmail || "", "회사/지점": r.Company || "", 역할: r.Role || "", 종료: r.st.label, "로그아웃/종료(KST)": r.st.end ? fmtDate(r.st.end) : "", "마지막 활동(KST)": fmtDate(r.LastActivityAt), "접속 시간(분)": Math.max(0, Math.round(r.dur / 60e3)), 기기: r.Device || "", 세션: r.Title || "" }));
     const users = byUser.map((u) => ({ 이름: u.name, 메일: u.email, "회사/지점": u.company, 역할: u.role, 접속: u.n, 로그아웃: u.logouts, "세션 종료(추정)": u.inferred, "마지막 로그인(KST)": fmtDate(u.last.LoginAt), "접속 시간 합(분)": Math.round(u.total / 60e3) }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.length ? data : [{ 안내: "조회 결과가 없습니다." }]), "접속기록");
@@ -6327,7 +6398,7 @@ function AccessLogTab({ ctx }) {
                   : error ? <tr><td colSpan={8} className="text-center text-red-500 text-sm py-12">{error}</td></tr>
                   : pageRows.length ? pageRows.map((r) => (
                     <tr key={r.id} onClick={() => setDetail(r)} className="border-t border-slate-100 first:border-t-0 hover:bg-slate-50 cursor-pointer" data-session={r.Title}>
-                      <td className={`${td2} text-[13px] text-slate-800 font-medium truncate`} title={r.UserEmail}>{r.UserName || r.UserEmail}</td>
+                      <td className={`${td2} text-[13px] text-slate-800 font-medium truncate`} title={r.UserEmail}>{nameOf(r.UserEmail, r.UserName) || r.UserEmail}</td>
                       <td className={td2}><RoleBadge role={r.Role} small /></td>
                       <td className={`${td2} text-[12.5px] text-slate-600 truncate`} title={r.Company || ""}>{r.Company || <span className="text-slate-300">-</span>}</td>
                       <td className={`${td2} text-[12.5px] text-slate-700 tabular-nums whitespace-nowrap`} title={fmtDate(r.LoginAt)}>{dtShort(r.LoginAt)}</td>
@@ -6363,7 +6434,7 @@ function AccessLogTab({ ctx }) {
       </div>
       {detail && (
         <Modal title="접속 상세" onClose={() => setDetail(null)} wide>
-          <div className="flex items-center gap-2 mb-3 flex-wrap"><RoleBadge role={detail.Role} /><span className="font-semibold text-slate-800">{detail.UserName}</span><span className="text-sm text-slate-400">{detail.UserEmail}</span><span className={`text-[11px] px-2 rounded-full font-medium leading-5 ${detail.st.cls}`}>{detail.st.label}</span></div>
+          <div className="flex items-center gap-2 mb-3 flex-wrap"><RoleBadge role={detail.Role} /><span className="font-semibold text-slate-800">{nameOf(detail.UserEmail, detail.UserName)}</span><span className="text-sm text-slate-400">{detail.UserEmail}</span><span className={`text-[11px] px-2 rounded-full font-medium leading-5 ${detail.st.cls}`}>{detail.st.label}</span></div>
           {[["로그인 (KST)", fmtDate(detail.LoginAt)], ["마지막 활동 (KST)", fmtDate(detail.LastActivityAt)], ["로그아웃 (KST)", detail.LogoutAt ? fmtDate(detail.LogoutAt) : detail.st.inferred ? `기록 없음 — 세션 종료(추정), 마지막 활동 ${fmtDate(detail.LastActivityAt)}` : "-"], ["접속 시간", detail.st.label === "접근 차단" ? "-" : fmtDuration(detail.dur)], ["회사/지점", detail.Company || "-"], ["기기", detail.Device || "-"], ["브라우저 정보", detail.UserAgent || "-"], ["세션 ID", detail.Title]].map(([l, v]) => (
             <div key={l} className="flex py-2 border-b border-slate-100 last:border-0"><div className="w-36 shrink-0 text-xs text-slate-400">{l}</div><div className="text-sm text-slate-700 break-all">{v}</div></div>
           ))}
@@ -6565,7 +6636,7 @@ function ContactModal({ ctx, onClose }) {
             <div className="flex items-center gap-2 px-3 h-10 border-b border-slate-100" style={{ background: c.soft }}>
               <CatIconBox cat={{ ...c, soft: "#ffffff" }} size={24} icon={13} /><span className="text-[13px] font-semibold" style={{ color: c.color }}>{c.label}</span>
             </div>
-            <div className="py-1">{c.contacts.map((x) => <Person key={x.email} name={x.name} email={x.email} color={c.color} />)}</div>
+            <div className="py-1">{c.contacts.map((x) => <Person key={x.email} name={nameOf(x.email, x.name)} email={x.email} color={c.color} />)}</div>
           </section>
         ))}
       </div>
@@ -6644,7 +6715,8 @@ function App({ boot }) {
   _tPermNow = P;   // 쓰기 지킴이(t365AssertWrite)가 읽는다
   const canView = (k) => canSee(P, k);
   const canEditMenu = (k) => P[k] === "e";
-  const me = { ...me0, role, company: (myRow && myRow.Company) || me0.company || "", name: (myRow && myRow.Title) || me0.name };
+  useMemo(() => t365SetKor(users), [users]);   // 11-05 한글 이름 표 — 아래 화면들이 그리기 전에(nameOf · korOf)
+  const me = { ...me0, role, company: (myRow && myRow.Company) || me0.company || "", name: (myRow && userDispName(myRow)) || me0.name };
   const myWriterCats = myRow ? catKeysOf(myRow.WriterCategories) : [];
   const allCats = mergeCategories(catRows, true);
   const cats = allCats.filter((c) => c.active && canView("cat:" + c.key));   // 보기 권한이 있는 게시판만
@@ -6939,7 +7011,7 @@ function App({ boot }) {
           <div className="px-4 py-3 border-t border-white/10 whitespace-nowrap" style={{ width: 256 }}>
             {isMobile && (
               <div className="flex items-center gap-2 mb-3 pb-3 border-b border-white/10">
-                <div className="min-w-0 flex-1 leading-tight"><div className="text-sm text-slate-200 truncate">{me.shortName}</div><div className="text-[11px] text-slate-500 truncate">{roleLabel}</div></div>
+                <div className="min-w-0 flex-1 leading-tight"><div className="text-sm text-slate-200 truncate" data-testid="me-name-m">{korOf(me.email) || me.shortName}</div><div className="text-[11px] text-slate-500 truncate">{roleLabel}</div></div>
                 <button onClick={t365Logout} className="shrink-0 flex items-center gap-1 text-xs font-medium text-slate-300 border border-white/15 rounded-lg px-2.5 py-1.5 hover:text-white hover:border-white/40" data-testid="btn-logout-m"><LogOut size={13} /> 로그아웃</button>
               </div>
             )}
@@ -6985,7 +7057,7 @@ function App({ boot }) {
           </div>
           <div className="flex items-center gap-2 md:gap-4 shrink-0">
             <div className="leading-tight text-sm text-slate-500 hidden md:block text-right" title={[me.name, me.email].filter(Boolean).join("\n")}>
-              <div>{me.shortName}</div>
+              <div data-testid="me-name">{korOf(me.email) || me.shortName}</div>
               <div className="text-[11px] text-slate-400">{roleLabel}</div>
             </div>
             {showAps && (
@@ -7000,7 +7072,7 @@ function App({ boot }) {
               <PageHeader icon={meta[0]} title={cur.label} subtitle={meta[1]} tint={meta[2]} descSide right={curCat && curCat.contacts && curCat.contacts.length ? (
                 <div className="hidden sm:flex items-center gap-2 h-11 pl-3 pr-1.5 rounded-xl border bg-white shadow-sm" style={{ borderColor: curCat.soft }} data-testid="board-contacts">
                   <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold whitespace-nowrap" style={{ color: curCat.color }}><Mail size={14} />문의 담당자</span>
-                  {curCat.contacts.slice(0, 2).map((c) => <a key={c.email} href={mailtoOf(c.email)} title={`${c.email} 로 메일 쓰기`} className="inline-flex items-center gap-2 h-8 pl-1 pr-3 rounded-lg hover:brightness-95 transition" style={{ background: curCat.soft }}><span className="w-6 h-6 rounded-full flex items-center justify-center text-[10.5px] font-bold text-white shrink-0" style={{ background: curCat.color }}>{String(c.name || c.email).slice(0, 1).toUpperCase()}</span><span className="leading-tight min-w-0"><span className="block text-[12.5px] font-semibold text-slate-800 max-w-[140px] truncate">{c.name || c.email}</span><span className="block text-[10.5px] text-slate-500 max-w-[140px] truncate">{c.email}</span></span></a>)}
+                  {curCat.contacts.slice(0, 2).map((c) => <a key={c.email} href={mailtoOf(c.email)} title={`${c.email} 로 메일 쓰기`} className="inline-flex items-center gap-2 h-8 pl-1 pr-3 rounded-lg hover:brightness-95 transition" style={{ background: curCat.soft }}><span className="w-6 h-6 rounded-full flex items-center justify-center text-[10.5px] font-bold text-white shrink-0" style={{ background: curCat.color }}>{String(nameOf(c.email, c.name) || c.email).slice(0, 1).toUpperCase()}</span><span className="leading-tight min-w-0"><span className="block text-[12.5px] font-semibold text-slate-800 max-w-[140px] truncate">{nameOf(c.email, c.name) || c.email}</span><span className="block text-[10.5px] text-slate-500 max-w-[140px] truncate">{c.email}</span></span></a>)}
                   {curCat.contacts.length > 2 && <button onClick={() => setContactOpen(true)} className="h-8 px-2.5 rounded-lg text-[12px] font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-800">+{curCat.contacts.length - 2}명</button>}
                 </div>) : null} />
             )}
@@ -7150,15 +7222,17 @@ async function t365Boot(account) {
   else if (role === "Agent" && !t365AgentHoursOk()) { reason = "hours"; role = null; }
   const email = myRow ? normEmail(myRow.Email) : ident.email;
   const company = (myRow && myRow.Company) || "";
-  _tLogUser = { email, name: (myRow && myRow.Title) || ident.shortName };
+  t365SetKor(users);   // 11-05 화면 이름은 한글 이름 먼저
+  const myName = (myRow && userDispName(myRow)) || ident.shortName;
+  _tLogUser = { email, name: myName };
   // 접속 기록 — 통과 · 차단 모두. 기록 실패(목록 없음 · 권한)는 화면을 막지 않는다
   // 10-15 기다리지 않는다(begin) — 기록이 늦거나 실패해도 첫 화면은 바로 뜬다
-  T365Session.begin({ email, name: (myRow && myRow.Title) || ident.shortName, role: role || "", company });
+  T365Session.begin({ email, name: myName, role: role || "", company });
   const loadingEl = document.getElementById("loading"); if (loadingEl) loadingEl.remove();
   const root = createRoot(document.getElementById("root"));
   if (!role) { root.render(<AccessDenied ident={{ ...ident, email }} reason={reason} contact={T365_MAILS.contact} />); return; }
   T365Session.startTimers();
-  root.render(<App boot={{ me: { ...ident, email, name: (myRow && myRow.Title) || ident.shortName, company }, role, isBootAdmin, users, usersLoaded: !usersR.e, myRow }} />);
+  root.render(<App boot={{ me: { ...ident, email, name: myName, company }, role, isBootAdmin, users, usersLoaded: !usersR.e, myRow }} />);
 }
 
 // 확인 · 알림 창(DialogHost)은 앱 · 권한 없음 화면과 따로 한 번만 붙인다 — 어느 화면에서든 uiConfirm/uiAlert 가 같은 모양으로 뜬다
