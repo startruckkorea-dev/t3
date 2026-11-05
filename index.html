@@ -3299,6 +3299,8 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
                 <span title="게시물 고유 번호 — 검색 칸에 번호(예: #12)를 넣어 찾을 수 있습니다" data-testid="post-no">No. <b className="font-medium text-slate-600">{post.id}</b></span>
                 <span className="text-slate-300">·</span>
                 <span className="inline-flex items-center gap-1" title="열어 본 횟수의 합 — 같은 사람이 다시 열어도 1씩 늘어납니다"><Eye size={13} />조회 <b className="font-medium text-slate-600" data-testid="meta-views">{vs.views}</b></span>
+                {/* 게시 전 확인 기록 — 글쓴이 본인과 활동 이력을 볼 수 있는 사람(관리)에게만(10-21) · 11-05 방패 아이콘(마우스를 올리면 작은 창) */}
+                {(normEmail(post.AuthorEmail) === normEmail(ctx.me.email) || ctx.canView("activity")) && parsePublishCheck(post.PublishCheckJson) && <><span className="text-slate-300">·</span><PublishCheckBadge post={post} /></>}
                 {files.length > 0 && <><span className="text-slate-300">·</span><button onClick={() => { const el = scrollRef.current && scrollRef.current.querySelector("[data-testid=attachments]"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="inline-flex items-center gap-1 hover:text-[#2F7B7A]" title="첨부로 이동" data-testid="meta-files"><Paperclip size={13} />첨부 <b className="font-medium text-slate-600">{files.length}</b></button></>}
                 {ctx.isAgent && (post.RequireConfirm || confirmed) && <><span className="text-slate-300">·</span><span className={`inline-flex items-center gap-1 font-medium ${confirmed ? "text-emerald-600" : "text-orange-600"}`} data-testid="meta-mine" title={confirmed ? `처음 확인 ${fmtDate(mine.ConfirmedAt)} — 조회확인은 처음 연 시각만 남습니다` : undefined}>{confirmed ? <><CheckCircle2 size={13} /><span>{shortDate(mine.ConfirmedAt)} 확인</span></> : <><BellRing size={12} />확인 필요</>}</span></>}
               </div>
@@ -3339,9 +3341,6 @@ function PostDetail({ ctx, post, siblings, listLabel, onOpen, onBack, onEdit, su
                 : <div className="flex items-center gap-2 h-9 px-1 text-[12.5px] text-slate-400" data-testid="attachments-empty"><FileText size={14} className="text-slate-300 shrink-0" />첨부파일이 없습니다.</div>}
             </div>
           </section>
-
-          {/* 게시 전 확인 기록 — 글쓴이 본인과 활동 이력을 볼 수 있는 사람(관리)에게만(10-21) */}
-          {(normEmail(post.AuthorEmail) === normEmail(ctx.me.email) || ctx.canView("activity")) && <PublishCheckRecord post={post} />}
 
           {post.Category === "qna" && <QnaAnswer ctx={ctx} post={post} />}
 
@@ -4033,39 +4032,61 @@ function PublishCheckDialog({ me, isEdit, isQna, accent, onDone }) {
     </div>
   );
 }
-// 게시물 안의 확인 기록 — 본문 · 첨부 아래 한 줄(누르면 항목 펼침)
-// 11-04 정리: 접힌 줄은 「게시 전 확인 완료 5/5」 + 확인한 사람 · 시각만, 펼치면 항목 칩 한 줄(같은 폭으로 정렬). 항목 설명은 칩에 마우스를 올리면 보인다
-function PublishCheckRecord({ post }) {
+// 게시 전 확인 기록 — 11-05: 첨부와 댓글 사이 띠를 없애고, 글 머리 오른쪽(No. · 조회 옆)에 방패 아이콘 하나로.
+// 마우스를 올리면(폰 · 키보드는 누르면) 작은 창으로 확인한 사람 · 시각 · 항목을 보여 준다. 항목 설명은 각 칸에 마우스를 올리면 보인다.
+function PublishCheckBadge({ post }) {
   const rec = parsePublishCheck(post.PublishCheckJson);
-  const [open, setOpen] = useState(false);
+  const [open, setOpenRaw] = useState(false);
+  const [left, setLeft] = useState(false);   // 아이콘이 화면 왼쪽 가까이(폰에서 숫자 줄이 아래로 내려갈 때)면 창을 왼쪽에 맞춘다
+  const boxRef = useRef(null), timer = useRef(null);
+  const setOpen = (v) => setOpenRaw((o) => {
+    const nv = typeof v === "function" ? v(o) : v;
+    if (nv && !o && boxRef.current) { const r = boxRef.current.getBoundingClientRect(); setLeft(r.right < 316); }
+    return nv;
+  });
+  useEffect(() => {
+    if (!open) return;
+    const down = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); };
+    // Esc 는 이 작은 창만 닫는다 — 글 창(PostModalShell)의 Esc 보다 먼저 받아 멈춘다(창 전체가 닫히지 않게)
+    const key = (e) => { if (e.key === "Escape") { e.stopPropagation(); e.stopImmediatePropagation(); setOpen(false); } };
+    document.addEventListener("mousedown", down); window.addEventListener("keydown", key, true);
+    return () => { document.removeEventListener("mousedown", down); window.removeEventListener("keydown", key, true); };
+  }, [open]);
+  useEffect(() => () => clearTimeout(timer.current), []);
   if (!rec) return null;
   const items = rec.items.map((k) => T365_PUBLISH_CHECKS.find((c) => c.key === k) || { key: k, label: k, desc: "" });
   const when = rec.kind === "수정" ? "마지막 수정 때" : "게시할 때";
-  const who = `${when} ${rec.by}${rec.email ? ` (${rec.email})` : ""} 님이 ${fmtDate(rec.at)} 에 확인 · 활동 이력에도 같은 기록이 있습니다`;
+  // 마우스: 들어오면 열고, 나가면 잠깐 뒤 닫는다(아이콘 → 창으로 옮겨 가는 사이 닫히지 않게)
+  const hoverAt = useRef(0);
+  const enter = () => { clearTimeout(timer.current); setOpen((o) => { if (!o) hoverAt.current = Date.now(); return true; }); };
+  const leave = () => { clearTimeout(timer.current); timer.current = setTimeout(() => setOpen(false), 160); };
   return (
-    <section className="px-5 md:px-10 pb-5" data-testid="post-check">
-      <div className="rounded-xl border border-emerald-100 bg-emerald-50/40">
-        <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className="w-full flex items-center gap-2 px-3.5 h-10 text-left" data-testid="post-check-toggle">
-          <ShieldCheck size={15} className="text-emerald-700 shrink-0" />
-          <span className="text-[12.5px] font-semibold text-emerald-800 whitespace-nowrap">게시 전 확인 완료</span>
-          <span className="text-[11px] font-semibold text-emerald-700 bg-white border border-emerald-100 rounded-full px-1.5 h-5 inline-flex items-center tabular-nums shrink-0" data-testid="post-check-count">{items.length}/{T365_PUBLISH_CHECKS.length}</span>
-          <span className="ml-auto min-w-0 truncate text-[11.5px] text-slate-500 tabular-nums" title={who}>{rec.kind === "수정" ? "수정 · " : ""}{rec.by} · {fmtDate(rec.at)}</span>
-          <ChevronDown size={14} className={`text-slate-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
-        </button>
-        {open && (
-          <div className="px-3.5 pb-3 pt-3 border-t border-emerald-100/70" data-testid="post-check-detail">
-            <ul className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
-              {items.map((c) => (
-                <li key={c.key} title={c.desc} className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-white border border-emerald-100 text-[12px] font-medium text-slate-700 min-w-0 cursor-help" data-pc-done={c.key}>
-                  <CheckCircle2 size={13} className="text-emerald-600 shrink-0" /><span className="truncate">{c.label}</span>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2 text-[11px] text-slate-400 truncate" title={who}>{when} 위 항목을 모두 확인했습니다 · 항목에 마우스를 올리면 내용이 보입니다</p>
+    <span className="relative inline-flex" ref={boxRef} onMouseEnter={enter} onMouseLeave={leave} data-testid="post-check">
+      {/* 마우스가 올라가 막 열린 직후의 누름(터치 포함)은 닫지 않는다 — 올리자마자 누르면 열렸다 바로 닫히던 것 */}
+      <button type="button" onClick={() => setOpen((o) => (o && Date.now() - hoverAt.current < 600 ? true : !o))} aria-expanded={open} aria-label={`게시 전 확인 완료 ${items.length}/${T365_PUBLISH_CHECKS.length} — 자세히`}
+        className={`w-7 h-7 -my-1 rounded-full inline-flex items-center justify-center transition-colors ${open ? "bg-emerald-50 text-emerald-700" : "text-emerald-600 hover:bg-emerald-50"}`} data-testid="post-check-toggle">
+        <ShieldCheck size={16} />
+      </button>
+      {open && (
+        <div role="dialog" aria-label="게시 전 확인" className={`absolute ${left ? "left-0" : "right-0"} top-[calc(100%+8px)] z-40 w-[300px] max-w-[calc(100vw-32px)] bg-white border border-slate-200 rounded-xl shadow-lg p-3.5 text-left cursor-default`} data-testid="post-check-detail">
+          <div className="flex items-center gap-2">
+            <span className="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center shrink-0"><ShieldCheck size={15} className="text-emerald-700" /></span>
+            <div className="min-w-0 leading-tight">
+              <div className="text-[13px] font-semibold text-slate-800 flex items-center gap-1.5">게시 전 확인 완료<span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 rounded-full px-1.5 tabular-nums" data-testid="post-check-count">{items.length}/{T365_PUBLISH_CHECKS.length}</span></div>
+              <div className="text-[11.5px] text-slate-500 tabular-nums mt-0.5 truncate" title={rec.email || ""}>{rec.by} · {fmtDate(rec.at)}</div>
+            </div>
           </div>
-        )}
-      </div>
-    </section>
+          <ul className="grid grid-cols-2 gap-1 mt-3">
+            {items.map((c) => (
+              <li key={c.key} title={c.desc} className="flex items-center gap-1.5 h-7 px-2 rounded-md bg-slate-50 text-[12px] text-slate-700 min-w-0" data-pc-done={c.key}>
+                <CheckCircle2 size={13} className="text-emerald-600 shrink-0" /><span className="truncate">{c.label}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2.5 text-[11px] text-slate-400 leading-snug">{when} 모두 확인 · 활동 이력에도 같은 기록</p>
+        </div>
+      )}
+    </span>
   );
 }
 function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
