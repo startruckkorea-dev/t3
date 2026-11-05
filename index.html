@@ -2172,6 +2172,15 @@ const QnaPill = ({ p, age }) => {
   return <span className={`t365-pill whitespace-nowrap ${late ? "" : "bg-slate-100 text-slate-500"}`} style={late ? { background: "#FDEEE6", color: "#C2410C" } : undefined} data-qna="wait" data-wait-days={age ? d : undefined}
     title={d >= 1 ? `질문한 지 ${d}일째 답변을 기다리고 있습니다` : undefined}>{late && <Clock size={10} />}{d >= 1 ? `대기 ${d}일` : "답변 대기"}</span>;
 };
+// 11-05 홈 Q&A 상자 둘째 줄용 — 알약 대신 색 글자(새 답변 · 답변 완료 · 답변 대기 / 대기 N일). data-qna 값은 QnaPill 과 같다
+const QnaText = ({ p, age, isNew }) => {
+  if (isNew) return <span className="inline-flex items-center gap-1 font-bold whitespace-nowrap shrink-0" style={{ color: "#1D4ED8" }} data-qna="new"><Sparkles size={12} />새 답변</span>;
+  if (qnaAnswered(p)) return <span className="inline-flex items-center gap-1 font-semibold whitespace-nowrap shrink-0" style={{ color: "#1D4ED8" }} data-qna="done"><MessageSquareReply size={12} />답변 완료</span>;
+  const d = age ? Math.floor((Date.now() - postTs(p)) / 864e5) : 0;
+  const late = d >= 3;
+  return <span className="inline-flex items-center gap-1 font-semibold whitespace-nowrap shrink-0" style={{ color: late ? "#C2410C" : "#64748B" }} data-qna="wait" data-wait-days={age ? d : undefined}
+    title={d >= 1 ? `질문한 지 ${d}일째 답변을 기다리고 있습니다` : undefined}><Clock size={12} />{d >= 1 ? `대기 ${d}일` : "답변 대기"}</span>;
+};
 // 제목 옆 작은 표시 — Q&A 상태 · 첨부 · 동영상(조회확인 필수 표시는 뺐다 — 10-15 요청, 공지 · 필수 상자 · 확인 대기에서 구분)
 function PostMarks({ p, compact, noQna }) {
   const att = parseFiles(p.AttachmentsJson).length > 0;
@@ -2300,9 +2309,9 @@ function BoardCell({ cat, bare }) {
   );
 }
 // 홈 「공지 · 필수」 · 「최근 게시물」 한 줄(10-14b → 11-05 정리):
-//   번호 | [공지] 게시판 │ 제목 (새 글 점 · 표시)
-//        | 작성자 이름 · 작성일 11.04 16:15 · 조회 30 (· 내 확인)
-// 번호 = 게시물 고유 번호(주소 #/cat/키/번호 와 같음 — 이 번호로 검색할 수 있다). 게시판은 제목 줄 앞으로, 둘째 줄은 이름표 붙은 짧은 한 줄
+//   [공지] 게시판 │ 제목 (새 글 점 · 표시)
+//   작성자 이름 · 작성일 11.04 16:15 · 조회 30 (· 내 확인)
+// 왼쪽 글번호 칸은 뺐다(11-05 — 번호가 정렬 순서와 달라 어지러움). 글번호는 줄 툴팁 · 글 머리 · 주소에 그대로(이 번호로 검색 가능)
 function HomePostRow({ p, cat, onOpen, seen, fresh, views, confirm, tags, attr, className }) {
   const pin = pinActive(p);
   const who = nameOf(p.AuthorEmail, p.AuthorName) || "-";
@@ -2310,8 +2319,7 @@ function HomePostRow({ p, cat, onOpen, seen, fresh, views, confirm, tags, attr, 
   const CI = cat && cat.icon;
   const sep = <span className="text-slate-300" aria-hidden="true">·</span>;
   return (
-    <button onClick={() => onOpen(p)} title={p.Title} {...attr} className={`group flex items-start gap-2.5 sm:gap-3 w-full text-left px-4 sm:px-5 py-3 border-t border-[#E9EEF3] first:border-t-0 hover:bg-[#F6FAF9] transition-colors min-w-0 ${className || ""}`}>
-      <span className="w-7 sm:w-8 shrink-0 text-right text-[12.5px] leading-6 text-slate-400 tabular-nums" data-postno={p.id} title={`글번호 ${p.id} — 게시물 주소 · 검색에 쓰는 고유 번호`}>{p.id}</span>
+    <button onClick={() => onOpen(p)} title={`${p.Title} · No. ${p.id}`} data-postno={p.id} {...attr} className={`group flex items-start w-full text-left px-4 sm:px-5 py-3 border-t border-[#E9EEF3] first:border-t-0 hover:bg-[#F6FAF9] transition-colors min-w-0 ${className || ""}`}>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2 min-w-0">
           {tags && pin && <span data-kind="pin" className="shrink-0"><NoticePill /></span>}
@@ -2829,13 +2837,13 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                       {fresh(p) && <NewDot />}
                       <span className={`truncate text-[14.5px] tracking-[-0.01em] ${seen(p) && !isNew ? "text-slate-700 font-medium" : "font-semibold text-slate-900"}`}>{p.Title}</span>
                     </span>
-                    <span className="mt-1 flex items-center gap-1.5 text-[12.5px] text-slate-400 min-w-0">
-                      <span className="t365-mc w-[70px] inline-flex">{isNew ? <span className="t365-pill text-white" style={{ background: "#1D4ED8" }} data-qna="new"><Sparkles size={10} />새 답변</span> : <QnaPill p={p} age={duty} />}</span>
-                      <span className="t365-mc w-[50px] tabular-nums" data-postno={p.id}>No. {p.id}</span>
-                      <span className="text-slate-300">·</span>
-                      <span className="t365-mc w-[92px] inline-flex">{mineQ(p) ? <span className="t365-pill bg-slate-100 text-slate-500" data-mine="1">내 질문</span> : <span className="truncate" title={nameOf(p.AuthorEmail, p.AuthorName)}>{nameOf(p.AuthorEmail, p.AuthorName)}</span>}</span>
-                      <span className="text-slate-300">·</span>
-                      <span className="tabular-nums shrink-0" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
+                    {/* 11-05 둘째 줄 — 「답변 상태 · 내 질문(또는 질문한 사람) · 시각」 글자로 붙여서(알약 · No. · 띄운 칸 없앰) */}
+                    <span className="mt-0.5 flex items-center gap-2 text-[12.5px] text-slate-500 min-w-0 tabular-nums" data-row-meta>
+                      <QnaText p={p} age={duty} isNew={isNew} />
+                      <span className="text-slate-300" aria-hidden="true">·</span>
+                      {mineQ(p) ? <span className="font-medium text-slate-600 shrink-0" data-mine="1">내 질문</span> : <span className="truncate min-w-0 text-slate-600" title={nameOf(p.AuthorEmail, p.AuthorName)}>{nameOf(p.AuthorEmail, p.AuthorName)}</span>}
+                      <span className="text-slate-300" aria-hidden="true">·</span>
+                      <span className="whitespace-nowrap shrink-0" title={fmtDate(p.PublishedAt || p._created)}>{shortDate(p.PublishedAt || p._created)}</span>
                     </span>
                   </button>
                 ); }) : <SmallEmpty icon={MessageCircleQuestion}>{ctx.isAgent ? "아직 질문이 없습니다 — 궁금한 점을 편하게 물어보세요." : "아직 올라온 질문이 없습니다."}</SmallEmpty>}
@@ -2856,9 +2864,13 @@ function OverviewTab({ ctx, openPost, openId, setOpenId, setTab, onSearch, banne
                         <span className={`mt-0.5 w-[22px] h-[22px] rounded-md flex items-center justify-center text-[12px] font-bold tabular-nums shrink-0 ${i < 3 ? "text-white" : "text-slate-500 bg-white border border-slate-200"}`} style={i < 3 ? { background: BRAND.accent } : undefined}>{i + 1}</span>
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-1.5 min-w-0">{fresh(p) && <NewDot />}<span className={`truncate text-[14.5px] tracking-[-0.01em] ${seen(p) ? "text-slate-700 font-medium" : "font-semibold text-slate-900"}`}>{p.Title}</span></span>
-                          <span className="mt-1 flex items-center gap-1.5 text-[12.5px] text-slate-400 min-w-0">
-                            <span className="t365-mc w-[140px] inline-flex items-center gap-1 font-medium" style={{ color: c && c.color }} title={c ? c.label : ""}><span className="w-4 h-4 rounded flex items-center justify-center shrink-0" style={{ background: c && c.soft }}><I size={10} style={{ color: c && c.color }} /></span><span className="truncate">{c ? c.label : "-"}</span></span>
-                            <span className="text-slate-300">·</span><span className="inline-flex items-center gap-0.5 tabular-nums shrink-0"><Eye size={12} />조회 {v}</span>
+                          {/* 11-05 둘째 줄 — 「게시판 · 작성자 · 조회」 를 붙여서(띄운 칸 · 작은 색 상자 없앰 — 공지 · 필수 줄과 같은 모양) */}
+                          <span className="mt-0.5 flex items-center gap-2 text-[12.5px] text-slate-500 min-w-0 tabular-nums" data-row-meta>
+                            <span className="inline-flex items-center gap-1 font-semibold min-w-0 max-w-[45%]" style={{ color: c ? c.color : "#64748B" }} title={c ? c.label : ""}><I size={12} className="shrink-0" /><span className="truncate">{c ? c.label : "-"}</span></span>
+                            <span className="text-slate-300" aria-hidden="true">·</span>
+                            <span className="truncate min-w-0 text-slate-600" title={nameOf(p.AuthorEmail, p.AuthorName)}>{nameOf(p.AuthorEmail, p.AuthorName) || "-"}</span>
+                            <span className="text-slate-300" aria-hidden="true">·</span>
+                            <span className="whitespace-nowrap shrink-0"><span className="text-slate-400">조회</span> {v}</span>
                           </span>
                         </span>
                       </button>
