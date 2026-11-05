@@ -110,6 +110,10 @@
   .t365-pol-sec { scroll-margin-top: 72px; }
   .t365-policy .t365-body { font-size: 14px; line-height: 1.9; color: #4B5563; }
   .t365-policy .t365-body p, .t365-policy .t365-body ul, .t365-policy .t365-body ol, .t365-policy .t365-body blockquote { margin-bottom: .5em; }
+  /* 11-05 정책 문서 — 본문은 차분하게, 안내 상자(> 줄)는 진한 초록 막대 대신 옅은 회색 상자 */
+  .t365-body.t365-policy { font-size: 13.5px; line-height: 1.8; color: #475569; }
+  .t365-body.t365-policy p, .t365-body.t365-policy ul, .t365-body.t365-policy ol { margin-bottom: .45em; }
+  .t365-body.t365-policy blockquote { margin: .6em 0 .4em; padding: .55em .9em; border-left: 2px solid #CBD5E1; background: #F8FAFC; border-radius: 0 6px 6px 0; color: #475569; font-size: 13px; }
   .t365-editor { font-size: 14.5px; line-height: 1.8; min-height: 300px; }
   .t365-editor p, .t365-editor blockquote p { margin: 0; }
   .t365-editor h3 { margin: .6em 0 .3em; }
@@ -1741,44 +1745,45 @@ function PolicyModal({ k, onClose, onSwitch }) {
           className={`h-9 px-3 text-[13px] -mb-px border-b-2 transition-colors ${x === k ? "border-[#2F7B7A] text-slate-900 font-semibold" : "border-transparent text-slate-500 hover:text-slate-800"}`}>{T365_POLICY_LABEL[x]}</button>)}
       </div>
       {k === "privacy" ? <CompanyPolicyEmbed /> : st.loading ? <div className="py-12 text-center text-slate-400 text-sm"><div className="w-6 h-6 mx-auto mb-2 rounded-full border-2 border-slate-200 animate-spin" style={{ borderTopColor: BRAND.accent }}></div>불러오는 중…</div> : (
-        <div data-testid="policy-body" data-policy={k} data-policy-src={st.data ? "file" : "fallback"} className="text-slate-700">
-          {/* 머리 — 제목 · 한 줄 소개 */}
-          <h2 className="text-[24px] md:text-[28px] font-bold text-slate-900 tracking-[-0.03em] leading-tight">{d.title}</h2>
-          {d.intro && <p className="mt-2 text-[14px] text-slate-500 leading-relaxed break-keep">{d.intro}</p>}
-          {/* 요약 카드 — Summary 시트 */}
+        <div data-testid="policy-body" data-policy={k} data-policy-src={st.data ? "file" : "fallback"} className="text-slate-700 max-w-[760px]">
+          {/* 11-05 정리: 큰 번호 · 회색 목차 상자 · 진한 색 강조를 걷어내고 문서처럼 — 제목 · 한 줄 정보, 조마다 작은 번호 + 제목, 사이 가는 선 */}
+          <h2 className="text-[20px] font-semibold text-slate-900 tracking-[-0.02em] leading-snug">{d.title}</h2>
+          {(d.intro || d.version || d.effective) && (
+            <p className="mt-1.5 text-[13px] text-slate-500 leading-relaxed break-keep">
+              {d.intro}{d.intro && (d.version || d.effective) && <span className="text-slate-300 mx-1.5">·</span>}
+              {(d.version || d.effective) && <span className="tabular-nums text-slate-400" data-testid="policy-version">{[d.effective && `${d.effective} 시행`, d.version].filter(Boolean).join(" · ")}</span>}
+            </p>
+          )}
+          {/* 요약 카드 — Summary 시트(있을 때만) */}
           {d.cards && d.cards.length > 0 && (
-            <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3" data-testid="policy-cards">
+            <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-2" data-testid="policy-cards">
               {d.cards.map((c, i) => { const I = T365_POLICY_ICONS[c.icon] || Info; return (
-                <div key={i} className="flex items-start gap-4 rounded-xl bg-[#F6F7F9] px-5 py-5">
-                  <span className="w-11 h-11 rounded-full bg-white flex items-center justify-center shrink-0 shadow-[0_1px_2px_rgba(16,24,40,.06)]"><I size={20} strokeWidth={1.6} className="text-slate-700" /></span>
-                  <div className="min-w-0"><div className="text-[14.5px] font-semibold text-slate-900">{c.title}</div>{c.body && <p className="mt-1 text-[13px] text-slate-500 leading-relaxed whitespace-pre-line break-keep">{c.body}</p>}</div>
+                <div key={i} className="flex items-start gap-3 rounded-lg border border-slate-200 px-4 py-3">
+                  <I size={17} strokeWidth={1.7} className="text-slate-500 shrink-0 mt-0.5" />
+                  <div className="min-w-0"><div className="text-[13.5px] font-semibold text-slate-800">{c.title}</div>{c.body && <p className="mt-0.5 text-[12.5px] text-slate-500 leading-relaxed whitespace-pre-line break-keep">{c.body}</p>}</div>
                 </div>); })}
             </div>
           )}
-          {/* 시행일 · 버전 */}
-          {(d.version || d.effective) && <div className="mt-8 pt-6 border-t border-slate-200 flex justify-end"><span className="text-[12.5px] text-slate-500 tabular-nums border-b border-slate-300 pb-1.5 pr-1">{[d.effective && `${d.effective} 시행일자 기준`, d.version].filter(Boolean).join(" · ")}</span></div>}
-          {/* 목차 */}
-          {d.sections.length > 2 && (
-            <nav className="mt-5 rounded-xl bg-[#F6F7F9] px-6 py-5 grid grid-cols-1 md:grid-cols-2 md:divide-x divide-slate-200" aria-label="목차" data-testid="policy-toc">
-              {[d.sections.slice(0, Math.ceil(d.sections.length / 2)), d.sections.slice(Math.ceil(d.sections.length / 2))].map((col, ci) => (
-                <ol key={ci} className={`space-y-2 ${ci ? "md:pl-8 mt-2 md:mt-0" : "md:pr-8"}`}>
-                  {col.map((x, i) => { const n = ci ? Math.ceil(d.sections.length / 2) + i + 1 : i + 1; return (
-                    <li key={n}><button type="button" onClick={() => { const el = document.getElementById(`pol-${k}-${n}`); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="flex gap-3 text-left text-[13.5px] text-slate-600 hover:text-slate-900 group">
-                      <span className="w-11 shrink-0 font-bold tabular-nums" style={{ color: BRAND.navy }}>{k === "privacy" ? `제${n}조` : String(n).padStart(2, "0")}</span><span className="group-hover:underline underline-offset-2">{x.heading || "-"}</span></button></li>); })}
-                </ol>
+          {/* 목차 — 조가 많을 때만(6개 이상). 짧은 안내는 바로 본문 */}
+          {d.sections.length >= 6 && (
+            <nav className="mt-5 flex flex-wrap gap-x-4 gap-y-1.5 text-[12.5px]" aria-label="목차" data-testid="policy-toc">
+              {d.sections.map((x, i) => (
+                <button key={i} type="button" onClick={() => { const el = document.getElementById(`pol-${k}-${i + 1}`); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="text-slate-500 hover:text-slate-900 hover:underline underline-offset-2">
+                  <span className="tabular-nums text-slate-400 mr-1">{i + 1}.</span>{x.heading || "-"}
+                </button>
               ))}
             </nav>
           )}
-          {/* 본문 — 조마다 */}
-          <div className="mt-2">
+          {/* 본문 — 조마다: 작은 번호 + 제목, 조 사이 가는 선 */}
+          <div className="mt-5 border-t border-slate-200">
             {d.sections.map((x, i) => (
-              <section key={i} id={`pol-${k}-${i + 1}`} className="t365-pol-sec pt-9">
-                {x.heading && <h3 className="text-[19px] md:text-[21px] font-bold text-slate-900 tracking-[-0.02em] mb-3"><span className="mr-2" style={{ color: BRAND.accent }}>{k === "privacy" ? `제${i + 1}조` : String(i + 1).padStart(2, "0")}</span>{x.heading}</h3>}
+              <section key={i} id={`pol-${k}-${i + 1}`} className={`t365-pol-sec py-5 ${i ? "border-t border-slate-100" : ""}`}>
+                {x.heading && <h3 className="text-[15px] font-semibold text-slate-900 mb-2 flex gap-2"><span className="tabular-nums text-slate-400 font-medium">{k === "privacy" ? `제${i + 1}조` : `${i + 1}.`}</span>{x.heading}</h3>}
                 {x.body && <div className="t365-body t365-policy"><RichText text={x.body} /></div>}
               </section>
             ))}
           </div>
-          {d.link && <div className="mt-10 pt-5 border-t border-slate-200"><a href={d.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[13px] font-semibold hover:underline" style={{ color: BRAND.accent }} data-testid="policy-link">{d.linkLabel || d.link}<ExternalLink size={13} /></a></div>}
+          {d.link && <div className="pt-4 border-t border-slate-200"><a href={d.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[12.5px] font-medium hover:underline" style={{ color: BRAND.accent }} data-testid="policy-link">{d.linkLabel || d.link}<ExternalLink size={13} /></a></div>}
         </div>
       )}
     </Modal>
