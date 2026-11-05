@@ -4092,7 +4092,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
   const [playFiles, setPlayFiles] = useState(isEdit ? parseFiles(post.VideoFileJson) : []);
   const [newPlay, setNewPlay] = useState([]);
   const playRef = useRef(null);
-  const [mode, setMode] = useState("write");
+  const [mode, setMode] = useState("write");   // 11-05 쓰기 · 나란히 · 미리 보기 단추를 없앴다 — 편집기가 보이는 그대로라 늘 「쓰기」(아래 분기는 그대로 둔다)
   const [saving, setSaving] = useState("");
   const [drag, setDrag] = useState(false);
   const ta = useRef(null);
@@ -4377,12 +4377,15 @@ const Tip = ({ icon: I, children }) => <li className="flex items-center gap-2 mi
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="sm:col-span-2">
               <label className="block text-[12px] font-medium text-slate-500 mb-1.5">게시판 <span className="text-red-500">*</span></label>
-              <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="게시판" data-testid="ed-cat">
+              {/* 11-05 정리: 같은 폭 칸(3열 · 폰 2열)으로 줄을 맞춘다. 고른 칸만 게시판 색 · 체크, 나머지는 흐린 아이콘. 글을 쓸 수 있는(편집) 게시판만 나온다 */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5" role="radiogroup" aria-label="게시판" data-testid="ed-cat">
                 {writable.map((c) => { const on = c.key === cat; const I = c.icon || FileText; return (
-                  <button key={c.key} type="button" role="radio" aria-checked={on} onClick={() => setCat(c.key)} data-ed-cat={c.key}
-                    className={`h-9 pl-1.5 pr-3 rounded-full border inline-flex items-center gap-2 text-[13px] transition-all ${on ? "font-semibold shadow-sm" : "border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"}`}
-                    style={on ? { background: c.soft, borderColor: c.color, color: c.color } : undefined}>
-                    <span className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: on ? "#fff" : c.soft }}><I size={13} style={{ color: c.color }} /></span>{c.label}
+                  <button key={c.key} type="button" role="radio" aria-checked={on} onClick={() => setCat(c.key)} data-ed-cat={c.key} title={c.label}
+                    className={`h-10 px-3 rounded-lg border flex items-center gap-2 min-w-0 text-left text-[13px] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2F7B7A]/35 ${on ? "font-semibold" : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"}`}
+                    style={on ? { background: c.soft, borderColor: c.color, color: c.color, boxShadow: `inset 0 0 0 1px ${c.color}` } : undefined}>
+                    <I size={15} className="shrink-0" style={{ color: on ? c.color : "#94A3B8" }} />
+                    <span className="truncate">{c.label}</span>
+                    {on && <Check size={14} strokeWidth={2.6} className="ml-auto shrink-0" />}
                   </button>
                 ); })}
               </div>
@@ -4403,9 +4406,6 @@ const Tip = ({ icon: I, children }) => <li className="flex items-center gap-2 mi
               <button type="button" className={tb} title="링크(https) — 글자를 고른 뒤 누르면 그 글자에 링크" onMouseDown={(e) => e.preventDefault()} onClick={addLink} data-ed-cmd="link"><Link2 size={15} /></button>
               <span className="w-px h-4 bg-slate-200 mx-1" aria-hidden="true"></span>
               <StyleButtons onApply={styleCmd} />
-              <div className="ml-auto flex items-center rounded-lg border border-slate-200 overflow-hidden h-7 text-[12px] bg-white">
-                {[["write", "쓰기"], ["split", "나란히"], ["preview", "미리 보기"]].map(([k, l], i) => <button key={k} onClick={() => setMode(k)} data-mode={k} className={`px-2.5 h-full ${i ? "border-l border-slate-200" : ""} ${k === "split" ? "hidden lg:block" : ""} ${mode === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{l}</button>)}
-              </div>
             </div>
             <div className={`flex-1 min-h-0 flex ${mode === "split" ? "divide-x divide-slate-200" : ""}`}>
               {mode !== "preview" && (
@@ -4415,7 +4415,6 @@ const Tip = ({ icon: I, children }) => <li className="flex items-center gap-2 mi
               {mode !== "write" && <div className="flex-1 min-w-0 overflow-y-auto px-5 py-4 bg-white min-h-[300px]" data-testid="ed-preview">{body.trim() ? preview : <p className="text-[13px] text-slate-300">미리 볼 내용이 없습니다.</p>}</div>}
             </div>
             <div className="flex items-center gap-3 px-3 h-8 border-t border-slate-100 bg-slate-50/70 text-[11px] text-slate-400">
-              <span className="hidden sm:inline-flex items-center gap-2 truncate"><span>서식은 위 도구 단추로 — 쓰는 그대로 보입니다</span><span className="text-slate-300">|</span><span className="inline-flex items-center gap-1"><kbd className="px-1 rounded border border-slate-200 bg-white text-[10px] leading-4">Ctrl</kbd><kbd className="px-1 rounded border border-slate-200 bg-white text-[10px] leading-4">B</kbd>굵게</span></span>
               <span className={`ml-auto tabular-nums shrink-0 ${body.length > T365_BODY_MAX ? "text-red-600 font-semibold" : ""}`} data-testid="ed-body-count">{body.length.toLocaleString()} / {T365_BODY_MAX.toLocaleString()}자</span>
             </div>
           </div>
