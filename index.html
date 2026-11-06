@@ -280,7 +280,7 @@ import {
   Bold, List, ListOrdered, Heading2, Link2, Clock, BarChart3, Tags, HelpCircle, ListChecks, UserPlus, FileSpreadsheet, PlayCircle,
   Circle, Quote, BookOpen, LogOut, SquarePen, Truck, Container, Bus, Car, Gauge, Fuel, Wrench, Cog, HardHat, ClipboardList, Newspaper, Bell, Calendar, Gift, Star, Trophy, Award, Lightbulb, Target, Rocket, Zap, CircleDollarSign, Handshake, Briefcase, Building2, Phone, MapPin, Globe, Leaf, Flag, Camera, Sparkles, ImagePlus, Palette, GalleryHorizontal, ArrowRight, Pause, Play, AlignLeft, Rows3, ChevronRight, ChevronDown, ChevronUp, ChevronsLeft, ChevronsRight, TrendingUp, FileArchive, FileImage, FileVideo, Info, Inbox,
   BellRing, MessageCircleQuestion, MessageSquareReply, Copy, MessageSquare,
-  ALargeSmall, Baseline, Highlighter, Check, ContactRound, Fingerprint, UserRound,
+  ALargeSmall, Baseline, Highlighter, Check, ContactRound, Fingerprint, UserRound, ShieldAlert, Ban,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -373,6 +373,21 @@ const T365_PUBLISH_CHECKS = [
   { key: "files", label: "첨부 · 캡처", icon: Paperclip, desc: "첨부파일 · 화면 캡처 · 동영상에도 위 정보가 보이지 않습니다" },
   { key: "scope", label: "공개 범위", icon: Globe, desc: "이 게시판을 볼 수 있는 모든 사람(외부 Agent 포함)에게 공개해도 되는 내용입니다" },
 ];
+// 정보 분류 등급(11-06) — 게시 전 확인 다음 단계. 사내 정보 분류 4단계(공개 · 내부용 · 대외비 · 극비, IT 운영 및 사용 정책 3-1)와 같은 정의 · 예시.
+// key 는 저장 값이라 바꾸지 않는다. post: "ok" 바로 게시 · "confirm" 핵심 · 주요 정보 암호화 · 마스킹 확인 뒤 게시 · "block" 게시할 수 없음
+const T365_INFO_LEVELS = [
+  { key: "public", ko: "공개", en: "Public", icon: Globe, post: "ok", color: "#047857", soft: "#ECFDF5", line: "#A7F3D0",
+    desc: "외부 공개를 전제로 작성된 정보", ex: "홍보 자료 · 공개 제품 정보", rule: "제한 없음(승인된 최종본만)" },
+  { key: "internal", ko: "내부용", en: "Internal", icon: Building2, post: "confirm", color: "#0369A1", soft: "#F0F9FF", line: "#BAE6FD",
+    desc: "사내 구성원 공유를 전제로 한 정보", ex: "사내 공지 · 업무 매뉴얼 · 회의록", rule: "사내 저장소, 외부 공유 시 승인" },
+  { key: "confidential", ko: "대외비", en: "Confidential", icon: LockKeyhole, post: "block", color: "#B45309", soft: "#FFFBEB", line: "#FDE68A",
+    desc: "유출 시 사업 · 신뢰에 손실이 생기는 정보", ex: "계약서 · 단가 · 견적 · 고객 정보", rule: "권한자 한정, 접근 이력 관리",
+    block: "권한자에게만 공유하고 접근 이력을 관리해야 하는 정보입니다. Training365 는 외부 Agent 를 포함한 여러 사람이 보는 게시판이라 올릴 수 없습니다." },
+  { key: "strict", ko: "극비", en: "Strictly Confidential", icon: ShieldAlert, post: "block", color: "#BE123C", soft: "#FFF1F2", line: "#FECDD3",
+    desc: "유출 시 법적 · 재무적 영향이 큰 정보", ex: "인사 · 급여 · 개인정보 대량 파일 · M&A 자료", rule: "지정 인원만, 암호화, 반출 금지",
+    block: "지정된 인원만 보고 암호화 · 반출 금지 대상인 정보입니다. Training365 를 포함한 게시판에는 올릴 수 없습니다." },
+];
+const infoLevelOf = (k) => T365_INFO_LEVELS.find((x) => x.key === k) || null;
 function parsePublishCheck(s) {
   try { const v = JSON.parse(String(s || "")); return v && Array.isArray(v.items) && v.at ? v : null; } catch (e) { return null; }
 }
@@ -4040,40 +4055,69 @@ function ConfirmPanel({ ctx, post }) {
 /* ------------------------------------------------------------------ */
 /* 글쓰기 · 수정                                                        */
 /* ------------------------------------------------------------------ */
-// 글쓰기 창 — 왼쪽: 카테고리 · 제목 · 본문(도구 · 쓰기/미리 보기/나란히), 오른쪽: 게시 옵션 · 첨부(끌어 놓기) · 목록 미리보기 · 작성 안내.
+// 글쓰기 창 — 왼쪽: 카테고리 · 제목 · 본문(도구 · 쓰기/미리 보기/나란히), 오른쪽: 게시 옵션 · 첨부(끌어 놓기) · 작성 안내(11-06 목록 미리보기 칸은 없앰).
 // Ctrl+Enter = 게시, Esc · ✕ · 바깥 = 닫기(쓴 내용이 있으면 확인). 휴대폰은 위아래로 쌓인다. 동영상 입력은 없앴다(10-12) — 기존 글의 동영상은 보기에서 그대로 재생.
 const T365_TITLE_MAX = 200, T365_BODY_MAX = 60000, T365_FILES_MAX = 10;
 // 저장 뒤 알림 — Q&A 는 어디서 올려도 「질문」 으로
 const savedToast = (wasEdit, cat) => (cat === "qna" ? (wasEdit ? "질문을 수정했습니다" : "질문을 올렸습니다") : wasEdit ? "게시물을 수정했습니다" : "게시물을 올렸습니다");
-/* 게시 전 확인 창(10-21) — 「게시」 를 누르면 뜬다. 모든 항목을 체크해야 「확인하고 게시」 가 켜진다 */
+/* 게시 전 확인 창(10-21) — 「게시」 를 누르면 뜬다. 1단계: 모든 항목을 체크해야 다음으로.
+   11-06 2단계 정보 분류 — 등급을 하나 고른다. 공개는 바로 게시, 내부용은 「핵심 · 주요 정보 암호화 · 마스킹」 확인 창을 거쳐 게시,
+   대외비 · 극비는 고르면 게시할 수 없다고 알리고 단추를 잠근다. 고른 등급은 게시 전 확인 기록(게시물 · 활동 이력)에 함께 남는다 */
 function PublishCheckDialog({ me, isEdit, isQna, accent, onDone }) {
   const [on, setOn] = useState(() => new Set());
   const all = on.size === T365_PUBLISH_CHECKS.length;
+  const [step, setStep] = useState(1);
+  const [level, setLevel] = useState("");
+  const [maskAsk, setMaskAsk] = useState(false);
+  const [masked, setMasked] = useState(false);
   const [now] = useState(() => new Date());
-  const boxRef = useRef(null);
+  const boxRef = useRef(null), maskRef = useRef(null);
+  const lv = infoLevelOf(level);
+  const blocked = !!(lv && lv.post === "block");
   const toggle = (k) => setOn((prev) => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
-  const finish = (ok) => onDone(ok ? { v: 1, items: T365_PUBLISH_CHECKS.map((c) => c.key), labels: T365_PUBLISH_CHECKS.map((c) => c.label), by: me.name, email: normEmail(me.email), at: new Date().toISOString(), kind: isEdit ? "수정" : "등록" } : null);
-  useEffect(() => { const t = setTimeout(() => { const el = boxRef.current && boxRef.current.querySelector("input"); if (el) el.focus(); }, 30); return () => clearTimeout(t); }, []);
+  const finish = (ok) => onDone(ok && all && lv && !blocked && (lv.post !== "confirm" || masked) ? {
+    v: 2, items: T365_PUBLISH_CHECKS.map((c) => c.key), labels: T365_PUBLISH_CHECKS.map((c) => c.label),
+    level: lv.key, levelLabel: `${lv.ko} (${lv.en})`, ...(lv.post === "confirm" ? { masked: true } : {}),
+    by: me.name, email: normEmail(me.email), at: new Date().toISOString(), kind: isEdit ? "수정" : "등록",
+  } : null);
+  const next = () => { if (all) setStep(2); };
+  const primary = () => { if (!lv || blocked) return; if (lv.post === "confirm") { setMasked(false); setMaskAsk(true); } else finish(true); };
+  useEffect(() => { const t = setTimeout(() => { const el = boxRef.current && boxRef.current.querySelector(step === 1 ? "input" : 'input[type="radio"]'); if (el) el.focus(); }, 30); return () => clearTimeout(t); }, [step]);
+  useEffect(() => { if (!maskAsk) return; const t = setTimeout(() => { if (maskRef.current) maskRef.current.focus(); }, 30); return () => clearTimeout(t); }, [maskAsk]);
   useEffect(() => {
-    // 위에서 키를 먼저 받는다 — 밑의 글쓰기 창 Esc 닫기 · Ctrl+Enter 게시가 함께 돌지 않게
+    // 위에서 키를 먼저 받는다 — 밑의 글쓰기 창 Esc 닫기 · Ctrl+Enter 게시가 함께 돌지 않게. Esc: 내부용 확인 창이 떠 있으면 그것만 닫는다
     const k = (e) => {
-      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(false); }
-      else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); e.stopPropagation(); if (all) finish(true); }
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); if (maskAsk) setMaskAsk(false); else finish(false); }
+      else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); e.stopPropagation(); if (maskAsk) { if (masked) finish(true); } else if (step === 1) next(); else primary(); }
     };
     window.addEventListener("keydown", k, true); return () => window.removeEventListener("keydown", k, true);
   });
   const verb = isQna ? (isEdit ? "질문 저장" : "질문 올리기") : isEdit ? "저장" : "게시";
+  const ac = accent || BRAND.accent;
+  const btn2 = "h-10 px-4 text-sm rounded-lg border border-slate-300 text-slate-600 bg-white hover:bg-slate-50 inline-flex items-center justify-center gap-1";
+  const btn1 = "h-10 px-5 text-sm rounded-lg text-white font-semibold inline-flex items-center justify-center gap-1.5 disabled:cursor-not-allowed hover:brightness-110";
+  const tag = (x) => x.post === "ok" ? <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 rounded-full px-2 leading-[20px] whitespace-nowrap">게시 가능</span>
+    : x.post === "confirm" ? <span className="text-[11px] font-semibold text-sky-700 bg-sky-50 rounded-full px-2 leading-[20px] whitespace-nowrap">확인 후 게시</span>
+    : <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 bg-slate-100 rounded-full px-2 leading-[20px] whitespace-nowrap"><LockKeyhole size={10.5} />게시 불가</span>;
   return (
     <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center bg-slate-900/45 p-3 sm:p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) finish(false); }}>
-      <div ref={boxRef} role="dialog" aria-modal="true" aria-labelledby="pc-title" className="bg-white rounded-2xl shadow-2xl w-full max-w-[520px] max-h-[90vh] overflow-y-auto t365-dlg-in" data-testid="publish-check">
+      <div ref={boxRef} role="dialog" aria-modal="true" aria-labelledby="pc-title" className="bg-white rounded-2xl shadow-2xl w-full max-w-[540px] max-h-[90vh] overflow-y-auto t365-dlg-in" data-testid="publish-check" data-step={step}>
         <div className="px-6 pt-5 pb-4 border-b border-slate-100 flex items-start gap-3">
-          <span className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#E7F5EE" }}><ShieldCheck size={19} style={{ color: "#047857" }} /></span>
+          <span className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: step === 1 ? "#E7F5EE" : "#EEF2F7" }}>{step === 1 ? <ShieldCheck size={19} style={{ color: "#047857" }} /> : <Tags size={18} style={{ color: "#334155" }} />}</span>
           <div className="min-w-0 flex-1">
-            <h3 id="pc-title" className="text-[15.5px] font-semibold text-slate-800 tracking-[-0.01em]">게시 전 확인</h3>
-            <p className="text-[12px] text-slate-500 leading-snug mt-0.5">아래 항목을 모두 확인해야 {verb}할 수 있습니다. 확인 기록은 게시물과 활동 이력에 남습니다.</p>
+            <h3 id="pc-title" className="text-[15.5px] font-semibold text-slate-800 tracking-[-0.01em]">{step === 1 ? "게시 전 확인" : <>정보 분류 등급 <span className="text-[12.5px] font-normal text-slate-400">Information Classification</span></>}</h3>
+            <p className="text-[12px] text-slate-500 leading-snug mt-0.5">{step === 1 ? "아래 항목을 모두 확인한 뒤 정보 분류 등급을 고릅니다. 확인 기록은 게시물과 활동 이력에 남습니다." : `이 글에 담긴 정보의 등급을 하나만 고르세요. 공개 · 내부용만 ${isQna ? "올릴" : "게시할"} 수 있습니다.`}</p>
+            <ol className="flex items-center gap-1.5 mt-2.5 text-[11.5px]" data-testid="pc-steps">
+              {["게시 전 확인", "정보 분류"].map((s, i) => { const n = i + 1, cur = step === n, done = step > n; return (
+                <li key={s} className={`inline-flex items-center gap-1.5 ${cur ? "text-slate-800 font-semibold" : done ? "text-emerald-700" : "text-slate-400"}`} aria-current={cur ? "step" : undefined}>
+                  {i > 0 && <span className="w-5 h-px bg-slate-300 mr-0.5" aria-hidden="true"></span>}
+                  <span className={`w-[18px] h-[18px] rounded-full inline-flex items-center justify-center text-[10.5px] font-bold ${cur ? "bg-slate-800 text-white" : done ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-500"}`}>{done ? <Check size={11} strokeWidth={3} /> : n}</span>{s}
+                </li>); })}
+            </ol>
           </div>
           <button onClick={() => finish(false)} aria-label="닫기" tabIndex={-1} className="text-slate-400 hover:text-slate-600 shrink-0"><X size={19} /></button>
         </div>
+        {step === 1 ? (
         <div className="px-6 py-4">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11.5px] text-slate-400 tabular-nums" data-testid="pc-count"><b className={all ? "text-emerald-700" : "text-slate-600"}>{on.size}</b> / {T365_PUBLISH_CHECKS.length} 확인</span>
@@ -4094,12 +4138,74 @@ function PublishCheckDialog({ me, isEdit, isQna, accent, onDone }) {
             ); })}
           </ul>
         </div>
+        ) : (
+        <div className="px-6 py-4">
+          <div role="radiogroup" aria-label="정보 분류 등급" className="space-y-2" data-testid="pc-levels">
+            {T365_INFO_LEVELS.map((x) => { const sel = level === x.key, I = x.icon; return (
+              <label key={x.key} className={`flex items-start gap-3 px-3.5 py-3 rounded-xl border cursor-pointer select-none transition-colors ${sel ? "" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"}`} style={sel ? { borderColor: x.line, background: x.soft } : undefined} data-level={x.key} data-on={sel ? "1" : "0"}>
+                <input type="radio" name="t365-info-level" value={x.key} checked={sel} onChange={() => setLevel(x.key)} className="sr-only peer" />
+                <span className="mt-[7px] w-[18px] h-[18px] rounded-full border-2 bg-white flex items-center justify-center shrink-0 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-slate-400/40" style={{ borderColor: sel ? x.color : "#CBD5E1" }}>{sel && <span className="w-2 h-2 rounded-full" style={{ background: x.color }}></span>}</span>
+                <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: sel ? "#FFFFFF" : x.soft }}><I size={16} style={{ color: x.color }} /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2"><span className="text-[13.5px] font-semibold text-slate-800">{x.ko}</span><span className="text-[12px] text-slate-500 truncate">{x.en}</span><span className="ml-auto shrink-0">{tag(x)}</span></span>
+                  <span className="block text-[12px] text-slate-600 leading-snug mt-0.5">{x.desc}</span>
+                  <span className="block text-[11.5px] text-slate-400 leading-snug mt-0.5">예: {x.ex} <span className="text-slate-300">|</span> {x.rule}</span>
+                </span>
+              </label>
+            ); })}
+          </div>
+          {blocked && (
+            <div role="alert" className="mt-3 flex items-start gap-3 rounded-xl border px-4 py-3 t365-dlg-in" style={{ borderColor: "#FECDD3", background: "#FFF5F6" }} data-testid="pc-block">
+              <span className="w-8 h-8 rounded-full bg-white border flex items-center justify-center shrink-0" style={{ borderColor: "#FECDD3" }}><Ban size={16} className="text-rose-600" /></span>
+              <div className="min-w-0">
+                <div className="text-[13.5px] font-semibold text-rose-800">{lv.ko}({lv.en}) 정보는 {isQna ? "올릴" : "게시할"} 수 없습니다</div>
+                <p className="text-[12px] text-slate-600 leading-relaxed mt-0.5">{lv.block}</p>
+                <p className="text-[11.5px] text-slate-500 mt-1">해당 내용을 빼고 다시 쓰거나, 판단이 어려우면 팀장 · 부서장과 협의하세요.</p>
+              </div>
+            </div>
+          )}
+        </div>
+        )}
         <div className="px-6 py-3.5 border-t border-slate-100 bg-slate-50/70 rounded-b-2xl flex flex-col-reverse sm:flex-row sm:items-center gap-2">
           <span className="text-[11.5px] text-slate-400 min-w-0 truncate sm:mr-auto" data-testid="pc-who">확인자 <b className="font-medium text-slate-600">{me.name}</b> · {fmtDate(now.toISOString())}</span>
-          <button onClick={() => finish(false)} className="h-10 px-4 text-sm rounded-lg border border-slate-300 text-slate-600 bg-white hover:bg-slate-50" data-testid="pc-cancel">돌아가기</button>
-          <button onClick={() => finish(true)} disabled={!all} className="h-10 px-5 text-sm rounded-lg text-white font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed hover:brightness-110" style={{ background: accent || BRAND.accent }} data-testid="pc-ok"><ShieldCheck size={15} />확인하고 {verb}</button>
+          {step === 1 ? <>
+            <button onClick={() => finish(false)} className={btn2} data-testid="pc-cancel">돌아가기</button>
+            <button onClick={next} disabled={!all} className={btn1 + " disabled:opacity-40"} style={{ background: ac }} data-testid="pc-next">다음 · 정보 분류<ArrowRight size={15} /></button>
+          </> : <>
+            <button onClick={() => setStep(1)} className={btn2} data-testid="pc-prev"><ChevronLeft size={15} />이전</button>
+            <button onClick={primary} disabled={!lv || blocked} className={btn1 + (blocked ? "" : " disabled:opacity-40")} style={{ background: blocked ? "#94A3B8" : ac }} data-testid="pc-ok">
+              {!lv ? "등급을 고르세요" : blocked ? <><LockKeyhole size={15} />{isQna ? "올릴" : "게시할"} 수 없음</> : lv.post === "confirm" ? <>다음 · 보안 처리 확인<ArrowRight size={15} /></> : <><ShieldCheck size={15} />확인하고 {verb}</>}
+            </button>
+          </>}
         </div>
       </div>
+      {maskAsk && lv && (
+        <div className="fixed inset-0 z-[160] flex items-end sm:items-center justify-center bg-slate-900/30 p-3 sm:p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setMaskAsk(false); }}>
+          <div role="alertdialog" aria-modal="true" aria-labelledby="pc-mask-title" className="bg-white rounded-2xl shadow-2xl w-full max-w-[460px] t365-dlg-in" data-testid="pc-mask">
+            <div className="px-6 pt-5 pb-3 flex items-start gap-3">
+              <span className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center shrink-0"><AlertTriangle size={19} className="text-amber-600" /></span>
+              <div className="min-w-0">
+                <h3 id="pc-mask-title" className="text-[15px] font-semibold text-slate-800">내부용 정보 — {isQna ? "올리기" : "게시"} 전 주의</h3>
+                <p className="text-[12.5px] text-slate-600 leading-relaxed mt-1">내부용은 사내 구성원 공유를 전제로 한 정보입니다. 이 게시판은 외부 Agent 도 볼 수 있으니, 핵심 · 주요 정보(금액 · 계약 조건 · 내부 수치 · 접속 정보 등)는 빼고 올려 주세요.</p>
+              </div>
+            </div>
+            <div className="px-6 pb-4">
+              <label className={`flex items-start gap-3 px-3.5 py-3 rounded-xl border cursor-pointer select-none transition-colors ${masked ? "border-amber-300 bg-amber-50/70" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"}`} data-testid="pc-mask-check" data-on={masked ? "1" : "0"}>
+                <input ref={maskRef} type="checkbox" checked={masked} onChange={(e) => setMasked(e.target.checked)} className="sr-only peer" />
+                <span className={`mt-0.5 w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-amber-500/40 ${masked ? "bg-amber-500 border-amber-500" : "bg-white border-slate-300"}`}>{masked && <Check size={13} className="text-white" strokeWidth={3} />}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13.5px] font-semibold text-slate-800 leading-snug">핵심 · 주요 정보는 암호화 · 마스킹해 제외했습니다</span>
+                  <span className="block text-[12px] text-slate-500 leading-snug mt-0.5">본문 · 첨부파일 · 화면 캡처 · 동영상 모두 확인했습니다</span>
+                </span>
+              </label>
+            </div>
+            <div className="px-6 py-3.5 border-t border-slate-100 bg-slate-50/70 rounded-b-2xl flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+              <button onClick={() => setMaskAsk(false)} className={btn2} data-testid="pc-mask-back">다른 등급 고르기</button>
+              <button onClick={() => finish(true)} disabled={!masked} className={btn1 + " disabled:opacity-40"} style={{ background: ac }} data-testid="pc-mask-ok"><ShieldCheck size={15} />확인하고 {verb}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -4126,6 +4232,7 @@ function PublishCheckBadge({ post }) {
   useEffect(() => () => clearTimeout(timer.current), []);
   if (!rec) return null;
   const items = rec.items.map((k) => T365_PUBLISH_CHECKS.find((c) => c.key === k) || { key: k, label: k, desc: "" });
+  const lvRec = infoLevelOf(rec.level);   // 11-06 정보 분류(그 전 글은 없음)
   const when = rec.kind === "수정" ? "마지막 수정 때" : "게시할 때";
   // 마우스: 들어오면 열고, 나가면 잠깐 뒤 닫는다(아이콘 → 창으로 옮겨 가는 사이 닫히지 않게)
   const hoverAt = useRef(0);
@@ -4154,7 +4261,12 @@ function PublishCheckBadge({ post }) {
               </li>
             ))}
           </ul>
-          <p className="mt-2.5 text-[11px] text-slate-400 leading-snug">{when} 모두 확인 · 활동 이력에도 같은 기록</p>
+          {lvRec && (() => { const LI = lvRec.icon; return (
+            <div className="mt-1.5 flex items-center gap-1.5 h-8 px-2 rounded-md text-[12px] min-w-0" style={{ background: lvRec.soft, color: lvRec.color }} data-testid="post-check-level">
+              <LI size={13} className="shrink-0" /><span className="font-semibold shrink-0">{lvRec.ko}</span><span className="truncate opacity-80">{lvRec.en}</span>
+              {rec.masked && <span className="ml-auto shrink-0 text-[11px] text-slate-500">암호화 · 마스킹 확인</span>}
+            </div>); })()}
+          <p className="mt-2.5 text-[11px] text-slate-400 leading-snug">{when} 모두 확인{lvRec ? " · 정보 분류 지정" : ""} · 활동 이력에도 같은 기록</p>
         </div>
       )}
     </span>
@@ -4299,7 +4411,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
     if (!body.trim() && !files.length && !newFiles.length && !playFiles.length && !newPlay.length) { uiAlert("본문을 입력하거나 파일을 첨부해 주세요."); return; }
     if (body.length > T365_BODY_MAX) { uiAlert("본문이 너무 깁니다(6만 자까지). 긴 자료는 파일로 첨부해 주세요."); return; }
     if (checkReq) return;
-    const check = await askPublishCheck();   // 게시 전 확인 — 모두 체크해야 진행
+    const check = await askPublishCheck();   // 게시 전 확인(모두 체크) → 정보 분류(공개 · 내부용만) — 둘 다 거쳐야 진행
     if (!check || savingRef.current) return;
     savingRef.current = true;
     const failed = [];
@@ -4358,7 +4470,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
         const before = parseFiles(post.AttachmentsJson).length;
         if (before !== allFiles.length || uploaded.length) changes["첨부"] = [`${before}개`, `${allFiles.length}개`];
         t365Log("게시물", "수정", t, { changes, info: { 게시물ID: id, ...(uploaded.length ? { "첨부 위치": `${T365_ATTACH_LIB}/${attachFolderOf(id, cat)}` } : {}) } });
-        t365Log("게시물", "게시 전 확인", t, { info: { 게시물ID: id, 구분: check.kind, 확인자: `${check.by} (${check.email})`, 확인시각: fmtDate(check.at), 확인항목: check.labels.join(" · "), "게시물에 기록": checkCol ? "예" : "아니요(PublishCheckJson 열 없음)" } });
+        t365Log("게시물", "게시 전 확인", t, { info: { 게시물ID: id, 구분: check.kind, 확인자: `${check.by} (${check.email})`, 확인시각: fmtDate(check.at), 확인항목: check.labels.join(" · "), ...(check.levelLabel ? { 정보분류: check.levelLabel + (check.masked ? " · 핵심 정보 암호화 · 마스킹 확인" : "") } : {}), "게시물에 기록": checkCol ? "예" : "아니요(PublishCheckJson 열 없음)" } });
         const removed = [...parseFiles(post.AttachmentsJson).filter((f) => !allFiles.some((x) => x.itemId === f.itemId)), ...parseFiles(post.VideoFileJson).filter((f) => !allPlay.some((x) => x.itemId === f.itemId))];
         if (removed.length) tDeleteRemovedFiles(id, removed);   // 뺀 첨부는 휴지통으로(이 글 폴더 안의 것만 · 실패해도 저장은 그대로)
       } else {
@@ -4369,7 +4481,7 @@ function PostEditor({ ctx, post, defaultCat, onClose, onSaved }) {
         const row = await tCreate(T365_LISTS.posts, { ...fields, ...(defer ? { IsPinned: false, RequireConfirm: false } : {}), AttachmentsJson: "[]", AuthorEmail: ctx.me.email, AuthorName: ctx.me.name, PublishedAt: now });
         id = row.id; createdId = id;   // 여기부터 실패해도 글은 이미 있다 — 다시 「게시」 해서 같은 글이 둘 생기지 않게 아래 catch 에서 창을 닫는다
         // 10-21 게시 전 확인 기록은 글이 생기자마자 남긴다 — 첨부 · 마무리에서 실패해도 기록이 빠지지 않게
-        t365Log("게시물", "게시 전 확인", t, { info: { 게시물ID: id, 구분: check.kind, 확인자: `${check.by} (${check.email})`, 확인시각: fmtDate(check.at), 확인항목: check.labels.join(" · "), "게시물에 기록": checkCol ? "예" : "아니요(PublishCheckJson 열 없음)" } });
+        t365Log("게시물", "게시 전 확인", t, { info: { 게시물ID: id, 구분: check.kind, 확인자: `${check.by} (${check.email})`, 확인시각: fmtDate(check.at), 확인항목: check.labels.join(" · "), ...(check.levelLabel ? { 정보분류: check.levelLabel + (check.masked ? " · 핵심 정보 암호화 · 마스킹 확인" : "") } : {}), "게시물에 기록": checkCol ? "예" : "아니요(PublishCheckJson 열 없음)" } });
         const uploaded = await upAll(id);
         const uploadedPlay = await upPlay(id);
         if (uploaded.length || uploadedPlay.length || defer) {
@@ -4565,18 +4677,6 @@ const Tip = ({ icon: I, children }) => <li className="flex items-center gap-2 mi
                 {newPlay.map((f, i) => <FileRow key={"p" + i + f.name} f={f} isNew onRemove={() => setNewPlay((p) => p.filter((x) => x !== f))} />)}
               </div>
             )}
-          </Card>
-          <Card title="목록에서 이렇게 보입니다" icon={Eye}>
-            <div className={`rounded-lg border px-3 py-2.5 ${canFlag && pinned ? "bg-amber-50/70 border-amber-100" : "bg-white border-slate-200"}`} data-testid="ed-card-preview">
-              <div className="flex items-center gap-1.5 min-w-0">
-                {canFlag && pinned && <span className="text-[10px] font-bold px-1 rounded leading-[16px] bg-amber-100 text-amber-800 shrink-0">공지</span>}
-                <span className={`truncate text-[13.5px] font-semibold ${title.trim() ? "text-slate-900" : "text-slate-300"}`}>{title.trim() || "제목을 입력하세요"}</span>
-                {allCount > 0 && <Paperclip size={11.5} className="text-slate-400 shrink-0" />}
-                <NewDot />
-              </div>
-              <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5 min-w-0"><CatTag cat={curCat} /><span>·</span><span className="truncate">{isEdit ? nameOf(post.AuthorEmail, post.AuthorName) : ctx.me.name}</span><span>·</span><span className="tabular-nums">{shortDate(isEdit ? post.PublishedAt || post._created : new Date().toISOString())}</span></div>
-              {body.trim() && <p className="text-[11.5px] text-slate-500 mt-1.5 t365-clamp2">{plainPreview(body, 160)}</p>}
-            </div>
           </Card>
           <Card title={isQna ? "질문 안내" : "작성 안내"} icon={Info}>
             {isQna ? (
