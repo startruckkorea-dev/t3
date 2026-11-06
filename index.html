@@ -379,7 +379,7 @@ const T365_INFO_LEVELS = [
   { key: "public", ko: "공개", en: "Public", icon: Globe, post: "ok", color: "#047857", soft: "#ECFDF5", line: "#A7F3D0",
     desc: "외부 공개를 전제로 작성된 정보", ex: "홍보 자료 · 공개 제품 정보", rule: "제한 없음(승인된 최종본만)" },
   { key: "internal", ko: "내부용", en: "Internal", icon: Building2, post: "confirm", color: "#0369A1", soft: "#F0F9FF", line: "#BAE6FD",
-    desc: "사내 구성원 공유를 전제로 한 정보", ex: "사내 공지 · 업무 매뉴얼 · 회의록", rule: "사내 저장소, 외부 공유 시 승인" },
+    desc: "Training365 에 접근할 수 있는 구성원(본사 임직원 · 세일즈 에이전트) 공유를 전제로 한 정보", ex: "공지 · 업무 매뉴얼 · 교육 자료", rule: "Training365 안에서만, 그 밖으로 공유 시 승인" },   // 11-06 「사내 구성원」 → Training365 접근 구성원(외부 Agent 도 쓰는 창구)
   { key: "confidential", ko: "대외비", en: "Confidential", icon: LockKeyhole, post: "block", color: "#B45309", soft: "#FFFBEB", line: "#FDE68A",
     desc: "유출 시 사업 · 신뢰에 손실이 생기는 정보", ex: "계약서 · 단가 · 견적 · 고객 정보", rule: "권한자 한정, 접근 이력 관리",
     block: "권한자에게만 공유하고 접근 이력을 관리해야 하는 정보입니다. Training365 는 외부 Agent 를 포함한 여러 사람이 보는 게시판이라 올릴 수 없습니다." },
@@ -4186,7 +4186,7 @@ function PublishCheckDialog({ me, isEdit, isQna, accent, onDone }) {
               <span className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center shrink-0"><AlertTriangle size={19} className="text-amber-600" /></span>
               <div className="min-w-0">
                 <h3 id="pc-mask-title" className="text-[15px] font-semibold text-slate-800">내부용 정보 — {isQna ? "올리기" : "게시"} 전 주의</h3>
-                <p className="text-[12.5px] text-slate-600 leading-relaxed mt-1">내부용은 사내 구성원 공유를 전제로 한 정보입니다. 이 게시판은 외부 Agent 도 볼 수 있으니, 핵심 · 주요 정보(금액 · 계약 조건 · 내부 수치 · 접속 정보 등)는 빼고 올려 주세요.</p>
+                <p className="text-[12.5px] text-slate-600 leading-relaxed mt-1">내부용은 Training365 에 접근할 수 있는 구성원(본사 임직원 · 세일즈 에이전트) 공유를 전제로 한 정보입니다. 핵심 · 주요 정보(금액 · 계약 조건 · 내부 수치 · 접속 정보 등)는 암호화하거나 마스킹해 빼고 올려 주세요.</p>
               </div>
             </div>
             <div className="px-6 pb-4">
