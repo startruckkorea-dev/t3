@@ -3049,7 +3049,7 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
         {/* 11-05 도구 줄 한 줄로 — 보기 탭 | 게시판 · 정렬(글자 모양 고르기) · 검색(검색 대상은 칸 안에) · 보기 방식 · 글쓰기.
             예전 둘째 줄(총 N건 · 쪽 · 쪽당 글 수)은 걷어냄 — 개수는 탭에, 쪽은 아래 쪽 번호에, 쪽당 글 수는 아래 쪽 번호 옆. 좁은 화면은 검색 → 탭 → 고르기 순으로 줄을 나눈다 */}
         <div className="px-3 md:px-4 border-b border-slate-200 flex flex-wrap items-center gap-x-3" data-testid="board-toolbar">
-          {/* 보기 탭 · 아이콘 + 개수 */}
+          {/* 보기 탭 · 아이콘 + 개수 — 고른 탭은 굵은 글자 · 아이콘 · 개수 색으로(11-06 아래 색 막대는 없앰) */}
           <div className="order-2 lg:order-1 w-full lg:w-auto lg:flex-1 lg:min-w-max self-stretch flex items-end overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <div className="inline-flex items-center gap-5" role="tablist">
               {tabs.map(([k, label]) => {
@@ -3064,7 +3064,6 @@ function BoardTab({ ctx, catKey, openId, setOpenId, seed, onSeedUsed }) {
                     <TI size={14} style={{ color: on ? tint : "#94A3B8" }} />
                     {label}
                     <span className="text-[11.5px] font-semibold tabular-nums" style={{ color: urgent ? "#C2410C" : on ? tint : "#94A3B8" }}>{n}</span>
-                    {on && <span className="absolute left-0 right-0 bottom-0 h-[2px] rounded-full" style={{ background: tint }} aria-hidden="true"></span>}
                   </button>
                 );
               })}
