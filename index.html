@@ -346,7 +346,7 @@ const T365_COLUMNS = {
   comments: ["Title", "PostId", "Category", "Body", "AuthorEmail", "AuthorName", "AuthorRole", "EditedAt"],
 };
 // 선택 열 — 없어도 게시판은 동작하고 그 기능만 저장되지 않는다(관리자 안내)
-const T365_OPT_COLUMNS = { posts: ["Answer", "AnsweredBy", "AnsweredAt", "PinUntil", "AnswerFilesJson", "PublishCheckJson"], users: ["KorName"] };   // users.KorName(11-05) — 한글 이름(한 줄 텍스트). 없으면 등록된 이름(Title)으로 보인다   // AnswerFilesJson — 답변 첨부(여러 줄 텍스트)   // Q&A 답변 · 공지 · 필수 노출 기한(PinUntil — 한 줄 텍스트 YYYY-MM-DD 또는 날짜 열)
+const T365_OPT_COLUMNS = { posts: ["Answer", "AnsweredBy", "AnsweredAt", "PinUntil", "AnswerFilesJson", "PublishCheckJson", "AnswerMetaJson"], users: ["KorName"] };   // users.KorName(11-05) — 한글 이름(한 줄 텍스트). 없으면 등록된 이름(Title)으로 보인다   // AnswerFilesJson — 답변 첨부(여러 줄 텍스트)   // Q&A 답변 · 공지 · 필수 노출 기한(PinUntil — 한 줄 텍스트 YYYY-MM-DD 또는 날짜 열)
 const T365_FILE_ROOT = "training365";          // (10-12 이전 첨부 위치 — 문서 라이브러리 training365/YYYY-MM/. 새 첨부는 AttachedFiles/Training365_Media-Files/{번호}/)
 const T365_LOG_ROOT = "Logging_data/Training365"; // 관리 행위 이력 — APS 와 같은 파일 방식
 
@@ -1953,12 +1953,13 @@ function SetupNotice({ status, infoToo = true }) {
   const linksMissing = status.links && status.links.missing;
   const warn = missing.length || cols.length || errs.length;
   const postOpt = (status.posts && !status.posts.missing && status.posts.optMissing) || [];
-  const ansMissing = postOpt.filter((c) => c.startsWith("Answer") && c !== "AnswerFilesJson");
+  const ansMissing = postOpt.filter((c) => c.startsWith("Answer") && c !== "AnswerFilesJson" && c !== "AnswerMetaJson");
+  const ansMetaMissing = postOpt.includes("AnswerMetaJson");   // 11-06 답변 이력 · 추가 답변
   const pinMissing = postOpt.includes("PinUntil");
   const ansFilesMissing = postOpt.includes("AnswerFilesJson");
   const checkColMissing = postOpt.includes("PublishCheckJson");
   const korColMissing = !!(status.users && !status.users.missing && !status.users.error && (status.users.optMissing || []).includes("KorName"));   // 11-05 한글 이름(선택 열)
-  if (!warn && !((optionalMissing || bannerMissing || linksMissing || optCols.length || ansMissing.length || pinMissing || ansFilesMissing || checkColMissing || korColMissing || commentsMissing || commentCols.length) && infoToo)) return null;   // 선택 목록 안내만 남았으면 게시판 화면에서는 숨긴다(Overview · 관리 화면에서만)
+  if (!warn && !((optionalMissing || bannerMissing || linksMissing || optCols.length || ansMissing.length || pinMissing || ansFilesMissing || checkColMissing || ansMetaMissing || korColMissing || commentsMissing || commentCols.length) && infoToo)) return null;   // 선택 목록 안내만 남았으면 게시판 화면에서는 숨긴다(Overview · 관리 화면에서만)
   return (
     <div className={`rounded-xl border px-4 py-3 mb-5 text-xs leading-relaxed ${warn ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-blue-50 border-blue-100 text-blue-900"}`} data-testid="setup-notice">
       <div className="flex items-start gap-2.5">
@@ -1973,6 +1974,7 @@ function SetupNotice({ status, infoToo = true }) {
             {infoToo && ansMissing.length > 0 && <li data-testid="qna-cols-missing">{T365_LISTS.posts} 에 Q&A 답변 열이 없습니다 — {ansMissing.join(", ")} (Answer: 여러 줄 텍스트 · AnsweredBy: 한 줄 텍스트 · AnsweredAt: 한 줄 텍스트) 를 만들어야 답변이 저장됩니다</li>}
             {infoToo && ansFilesMissing && <li data-testid="ans-files-col-missing">{T365_LISTS.posts} 에 AnswerFilesJson 열(여러 줄 텍스트)을 만들면 Q&A 답변에 파일을 붙일 수 있습니다</li>}
             {infoToo && checkColMissing && <li data-testid="check-col-missing">{T365_LISTS.posts} 에 PublishCheckJson 열(여러 줄 텍스트)을 만들면 「게시 전 확인」 기록이 게시물에도 남습니다 — 없으면 활동 이력에만 남습니다</li>}
+            {infoToo && ansMetaMissing && <li data-testid="ans-meta-col-missing">{T365_LISTS.posts} 에 AnswerMetaJson 열(여러 줄 텍스트 · 일반 텍스트)을 만들면 Q&A 「추가 답변」 과 답변 「수정됨」 날짜 · 수정 이력이 게시물에 남습니다 — 없으면 수정 이력은 활동 이력에만 남고 추가 답변은 쓸 수 없습니다</li>}
             {infoToo && korColMissing && <li data-testid="kor-col-missing">{T365_LISTS.users} 에 KorName 열(한 줄 텍스트)을 만들면 사용자 · 권한 관리에서 한글 이름을 정해 글쓴이 · 댓글 · 확인 현황 등에 한글 이름으로 보입니다 — IT 준비 스크립트(STK-T365-KorName-Setup). 없으면 등록된 이름으로 보입니다</li>}
             {infoToo && pinMissing && <li data-testid="pin-col-missing">{T365_LISTS.posts} 에 PinUntil 열(한 줄 텍스트)을 만들면 글쓰기에서 공지 · 필수의 홈 노출 기한을 정할 수 있습니다 — 없으면 게시 후 7일 동안 보입니다</li>}
             {infoToo && commentsMissing && <li data-testid="comments-list-missing">{T365_LISTS.comments} 목록이 없어 게시물 댓글을 쓸 수 없습니다 — IT 의 준비 스크립트(STK-T365-Comments-Setup)로 목록 · 열 · 인덱스 · 권한을 만드세요</li>}
@@ -3722,11 +3724,31 @@ function Comments({ ctx, post }) {
   );
 }
 
-// Q&A 답변 — Agent 가 아닌 담당자(Q&A 편집 권한)가 쓰고 고친다. 답변은 같은 게시물의 Answer · AnsweredBy · AnsweredAt 열
+// 11-06 답변 이력(AnswerMetaJson, 선택 열) — { v: 1, first: { name, email, at }, edits: [{ name, email, at, prev }], adds: [{ id, name, email, at, text }] }
+//   first 처음 답변한 사람(수정해도 바뀌지 않는다 — AnsweredBy 도 그대로) · edits 고친 사람 · 시각 · 고치기 전 내용(앞 1,500자, 전체는 활동 이력) · adds 다른 담당자의 추가 답변
+const T365_ANS_EDITS_MAX = 30;
+function parseAnsMeta(s) {
+  try { const v = JSON.parse(String(s || "")); if (!v || typeof v !== "object" || Array.isArray(v)) return null; return { v: 1, first: v.first && typeof v.first === "object" ? v.first : null, edits: Array.isArray(v.edits) ? v.edits : [], adds: Array.isArray(v.adds) ? v.adds.filter((a) => a && a.text) : [] }; } catch (e) { return null; }
+}
+// 이력이 없던 답변(11-06 전) — 지금 칸의 답변자 · 시각을 처음 답변으로 본다(메일은 모름 → 이름으로 본인 확인)
+const seedAnsMeta = (p) => ({ v: 1, first: { name: String((p && p.AnsweredBy) || ""), email: "", at: String((p && p.AnsweredAt) || "") }, edits: [], adds: [] });
+// Q&A 답변 — Agent 가 아닌 담당자(Q&A 편집 권한)가 쓴다. 고치기는 처음 답변한 사람 · 관리자만(11-06), 다른 담당자는 「추가 답변」. 답변은 같은 게시물의 Answer · AnsweredBy · AnsweredAt 열
 function QnaAnswer({ ctx, post }) {
   const canAnswer = !ctx.isAgent && ctx.canWrite("qna");
   const has = qnaAnswered(post);
   const [editing, setEditing] = useState(false);
+  // 11-06 고치기 · 추가 답변 — 처음 답변한 사람(이력의 메일, 이력이 없으면 이름) · 관리자만 고친다. 다른 담당자는 덧붙이기만(AnswerMetaJson 열이 있을 때)
+  const meta = parseAnsMeta(post.AnswerMetaJson);
+  const first = has ? ((meta && meta.first) || seedAnsMeta(post).first) : null;
+  const meName = nameOf(ctx.me.email, ctx.me.name);
+  const isFirst = !!first && (first.email ? normEmail(first.email) === normEmail(ctx.me.email) : !!first.name && (first.name === ctx.me.name || nameOfName(first.name) === meName));
+  const canEditAns = canAnswer && has && (!!ctx.isAdmin || isFirst);
+  const [metaCol, setMetaCol] = useState(null);
+  useEffect(() => { let alive = true; tColumnTypes(T365_LISTS.posts).then((m) => { if (alive) setMetaCol(m.has("AnswerMetaJson")); }, () => { if (alive) setMetaCol(false); }); return () => { alive = false; }; }, []);
+  const canAddAns = canAnswer && has && !canEditAns && metaCol === true;
+  const [mode, setMode] = useState("edit");   // edit 답변 쓰기 · 고치기 | add 추가 답변
+  const ansAdds = meta ? meta.adds : [];
+  const edits = meta ? meta.edits : [];
   // 질문자에게 알리기 — 답변을 단 담당자가 메일 앱으로(자동 메일은 Power Automate 로 — 리뷰 안내)
   const asker = normEmail(post.AuthorEmail);
   const notifyHref = has && asker && asker !== normEmail(ctx.me.email) ? mailtoHref({ to: [asker], link: postLink(post), subject: `[Training365] 질문에 답변이 등록되었습니다 — ${post.Title}`,
@@ -3747,7 +3769,7 @@ function QnaAnswer({ ctx, post }) {
   const [adds, setAdds] = useState([]);
   const [upMsg, setUpMsg] = useState("");
   const fileIn = useRef(null);
-  useEffect(() => { setText(post.Answer || ""); setEditing(false); setKeep(parseFiles(post.AnswerFilesJson)); setAdds([]); }, [post.id, post.Answer, post.AnswerFilesJson]);
+  useEffect(() => { setText(post.Answer || ""); setEditing(false); setMode("edit"); setKeep(parseFiles(post.AnswerFilesJson)); setAdds([]); }, [post.id, post.Answer, post.AnswerFilesJson, post.AnswerMetaJson]);
   function addAnsFiles(list) {
     list = Array.from(list || []);
     const bad = list.filter((f) => T365_BLOCKED_EXT.includes(fileExt(f.name)));
@@ -3769,11 +3791,27 @@ function QnaAnswer({ ctx, post }) {
   }
   async function save() {
     const v = text.trim();
-    if (!v) { uiAlert("답변 내용을 입력해 주세요."); return; }
+    if (!v) { uiAlert(mode === "add" ? "추가 답변 내용을 입력해 주세요." : "답변 내용을 입력해 주세요."); return; }
     if (v.length > T365_BODY_MAX) { uiAlert("답변이 너무 깁니다."); return; }
+    if (mode !== "add" && has && !canEditAns) { uiAlert("이 답변은 처음 답변한 담당자와 관리자만 고칠 수 있습니다 — 「추가 답변」 으로 덧붙여 주세요."); return; }
     setBusy(true);
     try {
       const cols = await tListColumns(T365_LISTS.posts);
+      const metaOk = cols.has("AnswerMetaJson");
+      if (mode === "add") {
+        // 11-06 추가 답변 — 처음 답변은 그대로 두고 이력(adds)에 덧붙인다. 그 사이 다른 사람이 덧붙인 것도 다시 읽어 함께
+        if (!metaOk) { uiAlert(`게시물 목록에 AnswerMetaJson 열(여러 줄 텍스트)이 없어 추가 답변을 저장할 수 없습니다 — IT 에 열 추가를 요청해 주세요.`); setBusy(false); return; }
+        const cur = await tGetItem(T365_LISTS.posts, post.id).catch(() => undefined);
+        if (cur === null) { setBusy(false); uiAlert("이 질문은 그 사이에 삭제되었습니다."); await ctx.reload(); return; }
+        const m0 = parseAnsMeta(cur && cur.AnswerMetaJson) || seedAnsMeta(cur || post);
+        const at = new Date().toISOString();
+        m0.adds = [...m0.adds, { id: Math.random().toString(36).slice(2, 10), name: ctx.me.name, email: normEmail(ctx.me.email), at, text: v }];
+        await tUpdate(T365_LISTS.posts, post.id, { AnswerMetaJson: JSON.stringify(m0), AnsweredAt: at }, { prevCat: post.Category });   // 답변 시각을 당겨 질문자에게 「새 답변」
+        t365Log("게시물", "추가 답변", post.Title, { info: { 게시물ID: post.id, "처음 답변자": nameOfName(m0.first && m0.first.name) || "", 내용: plainPreview(v, 300) } });
+        await ctx.reload();
+        setEditing(false); setMode("edit"); setText(post.Answer || ""); toast("추가 답변을 등록했습니다");
+        setBusy(false); return;
+      }
       if (!cols.has("Answer")) { uiAlert(`게시물 목록에 Answer 열이 없어 답변을 저장할 수 없습니다 — IT 에 열 추가(Answer · AnsweredBy · AnsweredAt)를 요청해 주세요.`); setBusy(false); return; }
       const filesTouched = adds.length > 0 || keep.length !== ansFiles.length;
       if (filesTouched && !cols.has("AnswerFilesJson")) { uiAlert(`게시물 목록에 AnswerFilesJson 열(여러 줄 텍스트)이 없어 답변 첨부를 저장할 수 없습니다 — IT 에 열 추가를 요청해 주세요.\n첨부를 빼면 답변 글은 저장할 수 있습니다.`); setBusy(false); return; }
@@ -3795,10 +3833,20 @@ function QnaAnswer({ ctx, post }) {
       }
       setUpMsg("");
       const allFiles = [...keep, ...uploaded];
-      await tUpdate(T365_LISTS.posts, post.id, { Answer: v, AnsweredBy: ctx.me.name, AnsweredAt: at, ...(filesTouched ? { AnswerFilesJson: allFiles.length ? JSON.stringify(allFiles) : "" } : {}) }, { prevCat: post.Category });   // 쓰기 확인은 그 글의 게시판(Q&A) 편집 권한
+      // 11-06 고칠 때 — 답변자(AnsweredBy)는 처음 답변한 사람 그대로, 고친 사람 · 시각 · 고치기 전 내용은 이력(AnswerMetaJson)과 활동 이력에
+      const prevAns = cur && cur.Answer != null ? cur.Answer : post.Answer;
+      let m1 = null;
+      if (metaOk) {
+        m1 = parseAnsMeta(cur && cur.AnswerMetaJson) || (has ? seedAnsMeta(cur || post) : null);
+        if (!has || !m1) m1 = { v: 1, first: { name: ctx.me.name, email: normEmail(ctx.me.email), at }, edits: [], adds: (m1 && m1.adds) || [] };
+        else m1.edits = [...m1.edits, { name: ctx.me.name, email: normEmail(ctx.me.email), at, prev: plainPreview(prevAns, 1500) }].slice(-T365_ANS_EDITS_MAX);
+      }
+      const keepBy = has ? (((m1 && m1.first) || first || {}).name || (cur && cur.AnsweredBy) || post.AnsweredBy || ctx.me.name) : ctx.me.name;
+      await tUpdate(T365_LISTS.posts, post.id, { Answer: v, AnsweredBy: keepBy, AnsweredAt: at, ...(m1 ? { AnswerMetaJson: JSON.stringify(m1) } : {}), ...(filesTouched ? { AnswerFilesJson: allFiles.length ? JSON.stringify(allFiles) : "" } : {}) }, { prevCat: post.Category });   // 쓰기 확인은 그 글의 게시판(Q&A) 편집 권한
       const removed = ansFiles.filter((f) => !keep.some((k) => k.itemId === f.itemId));
       if (removed.length) tDeleteRemovedFiles(post.id, removed);
-      t365Log("게시물", has ? "답변 수정" : "답변", post.Title, { info: { 게시물ID: post.id } });
+      if (has) t365Log("게시물", "답변 수정", post.Title, { changes: { 답변: [plainPreview(prevAns, 4000), plainPreview(v, 4000)] }, info: { 게시물ID: post.id, "처음 답변자": nameOfName(keepBy), 수정자: `${ctx.me.name} (${normEmail(ctx.me.email)})`, "이력 기록": m1 ? "예" : "아니요(AnswerMetaJson 열 없음 — 활동 이력에만)" } });
+      else t365Log("게시물", "답변", post.Title, { info: { 게시물ID: post.id } });
       await ctx.reload();
       setEditing(false); toast(has ? "답변을 수정했습니다" : asker && asker !== normEmail(ctx.me.email) ? "답변을 등록했습니다 — 「질문자에게 알리기」 로 메일을 보낼 수 있습니다" : "답변을 등록했습니다");
     } catch (e) { setUpMsg(""); uiAlert(e.message); }
@@ -3808,18 +3856,11 @@ function QnaAnswer({ ctx, post }) {
   const seenMark = showSeen ? (askerSeen
     ? <span className="inline-flex items-center gap-0.5 text-emerald-600" title={`질문자가 ${fmtDate(askerRow.LastViewedAt)} 에 답변을 봤습니다`} data-testid="qna-seen" data-seen="1"><CheckCircle2 size={12} />읽음</span>
     : <span className="text-slate-400" title={notifyHref ? "질문자가 아직 답변을 보지 않았습니다 — 메일 단추로 알릴 수 있습니다" : "질문자가 아직 답변을 보지 않았습니다"} data-testid="qna-seen" data-seen="0">안 읽음</span>) : null;
-  const answerBtn = <button onClick={() => setEditing(true)} className="h-7 px-2 rounded-md inline-flex items-center gap-1 text-[12px] font-semibold text-[#1D4ED8] hover:bg-white" data-testid="qna-answer-btn"><SquarePen size={13} />{has ? "수정" : "답변 쓰기"}</button>;
-  return (
-    <section className="px-5 md:px-10 pb-5" data-testid="qna-answer">
-      {/* 답변 — 게시판 글처럼: 「답변」 제목 줄 + 작성자 카드(이름 · 시각) + 본문 + 첨부 (10-18 「허전하다」) */}
-      <div className="border-t border-slate-200 pt-5">
-        {!(has && !showEd) && <div className="flex items-center gap-2 flex-wrap min-h-[30px] text-[12px] text-slate-400 mb-3">
-          <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: has ? "#1D4ED8" : "#E2E8F0", color: has ? "#fff" : "#64748B" }}><MessageSquareReply size={15} /></span>
-          <span className="text-[15px] font-bold text-slate-900">답변</span>
-          {!has && <span className="inline-flex items-center gap-1 h-6 px-2 rounded-md bg-slate-100 text-slate-500 font-medium"><Clock size={12} />답변 대기</span>}
-          {canAnswer && !showEd && <span className="ml-auto">{answerBtn}</span>}
-        </div>}
-        {showEd ? (
+  const answerBtn = !has || canEditAns
+    ? <button onClick={() => { setMode("edit"); setText(post.Answer || ""); setEditing(true); }} className="h-7 px-2 rounded-md inline-flex items-center gap-1 text-[12px] font-semibold text-[#1D4ED8] hover:bg-white" data-testid="qna-answer-btn"><SquarePen size={13} />{has ? "수정" : "답변 쓰기"}</button>
+    : canAddAns ? <button onClick={() => { setMode("add"); setText(""); setAdds([]); setEditing(true); }} className="h-7 px-2 rounded-md inline-flex items-center gap-1 text-[12px] font-semibold text-[#1D4ED8] hover:bg-white" title={`처음 답변(${nameOfName(first && first.name) || "담당자"})은 그 담당자와 관리자만 고칠 수 있습니다 — 아래에 덧붙입니다`} data-testid="qna-add-btn"><Plus size={13} />추가 답변</button>
+    : null;
+  const editorEl = (
           <div className="mt-2">
             {/* 보이는 대로 편집(글 편집기와 같은 RichEditor) — 굵게 · 목록이 바로 그 모양으로 보이고, 저장은 지금처럼 표기 글자 */}
             <div className="rounded-lg border border-slate-300 focus-within:border-[#93B4F0] focus-within:ring-2 focus-within:ring-[#1D4ED8]/20 overflow-hidden bg-white">
@@ -3830,9 +3871,9 @@ function QnaAnswer({ ctx, post }) {
                 <span className="w-px h-4 bg-slate-200 mx-1" aria-hidden="true"></span>
                 <StyleButtons onApply={(k) => { const el = taRef.current; if (!el) return; if (!t365ApplyStyle(el, k)) { toast("꾸밀 글자를 먼저 고른 뒤 누르세요"); return; } el.dispatchEvent(new Event("input", { bubbles: true })); }} />
               </div>
-              <RichEditor ref={taRef} value={text} onChange={setText} onFiles={addAnsFiles} placeholder="답변을 입력하세요" className="t365-answer-ed max-h-[360px]" testid="qna-answer-input" />
-              {/* 첨부 — 편집 칸 아래 한 줄(끌어 놓기도 됨) */}
-              <div className="border-t border-slate-100 px-2 py-1.5" data-testid="qna-answer-files">
+              <RichEditor ref={taRef} value={text} onChange={setText} onFiles={addAnsFiles} placeholder={mode === "add" ? "추가 답변을 입력하세요 — 처음 답변 아래에 덧붙습니다" : "답변을 입력하세요"} className="t365-answer-ed max-h-[360px]" testid="qna-answer-input" />
+              {/* 첨부 — 편집 칸 아래 한 줄(끌어 놓기도 됨). 추가 답변은 글만 */}
+              {mode !== "add" && <div className="border-t border-slate-100 px-2 py-1.5" data-testid="qna-answer-files">
                 {(keep.length > 0 || adds.length > 0) && <ul className="mb-1">
                   {[...keep.map((f) => ({ f, old: true })), ...adds.map((f) => ({ f, old: false }))].map(({ f, old }, i) => { const k = fileKind(f.name); return (
                     <li key={(old ? f.itemId : "n" + i) } className="flex items-center gap-2 px-1.5 h-8 rounded-md hover:bg-slate-50 text-[12.5px] min-w-0" data-ans-file={old ? f.itemId : "new"}>
@@ -3845,22 +3886,34 @@ function QnaAnswer({ ctx, post }) {
                 </ul>}
                 <input ref={fileIn} type="file" multiple className="hidden" onChange={(e) => { addAnsFiles(e.target.files); e.target.value = ""; }} data-testid="qna-answer-file-input" />
                 <button type="button" disabled={busy} onClick={() => fileIn.current && fileIn.current.click()} className="h-7 px-2 rounded-md inline-flex items-center gap-1.5 text-[12px] text-slate-500 hover:text-slate-900 hover:bg-slate-100" data-testid="qna-answer-attach"><Paperclip size={13} />파일 첨부{(keep.length + adds.length) > 0 && <span className="tabular-nums text-slate-400">{keep.length + adds.length} / {T365_FILES_MAX}</span>}</button>
-              </div>
+              </div>}
             </div>
             <div className="mt-2 flex items-center justify-end gap-2">
               {upMsg && <span className="mr-auto text-[12px] text-slate-500 tabular-nums" data-testid="qna-answer-upmsg">{upMsg}</span>}
-              {!openAlways && <button onClick={() => { setEditing(false); setText(post.Answer || ""); setKeep(parseFiles(post.AnswerFilesJson)); setAdds([]); }} disabled={busy} className={btnCls}>취소</button>}
-              <button onClick={save} disabled={busy} className="h-9 px-4 rounded-lg text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: "#1D4ED8" }} data-testid="qna-answer-save">{busy ? "저장 중..." : has ? "수정 저장" : "답변 등록"}</button>
+              {!openAlways && <button onClick={() => { setEditing(false); setMode("edit"); setText(post.Answer || ""); setKeep(parseFiles(post.AnswerFilesJson)); setAdds([]); }} disabled={busy} className={btnCls}>취소</button>}
+              <button onClick={save} disabled={busy} className="h-9 px-4 rounded-lg text-[13px] font-semibold text-white disabled:opacity-60" style={{ background: "#1D4ED8" }} data-testid="qna-answer-save">{busy ? "저장 중..." : mode === "add" ? "추가 답변 등록" : has ? "수정 저장" : "답변 등록"}</button>
             </div>
           </div>
-        ) : has ? (
+  );
+  return (
+    <section className="px-5 md:px-10 pb-5" data-testid="qna-answer">
+      {/* 답변 — 게시판 글처럼: 「답변」 제목 줄 + 작성자 카드(이름 · 시각) + 본문 + 첨부 (10-18 「허전하다」) */}
+      <div className="border-t border-slate-200 pt-5">
+        {!(has && (!showEd || mode === "add")) && <div className="flex items-center gap-2 flex-wrap min-h-[30px] text-[12px] text-slate-400 mb-3">
+          <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: has ? "#1D4ED8" : "#E2E8F0", color: has ? "#fff" : "#64748B" }}><MessageSquareReply size={15} /></span>
+          <span className="text-[15px] font-bold text-slate-900">답변</span>
+          {!has && <span className="inline-flex items-center gap-1 h-6 px-2 rounded-md bg-slate-100 text-slate-500 font-medium"><Clock size={12} />답변 대기</span>}
+          {canAnswer && !showEd && <span className="ml-auto">{answerBtn}</span>}
+        </div>}
+        {showEd && mode !== "add" ? editorEl : has ? (
           <article className="rounded-xl bg-[#F7F9FD] border border-[#E3EBFB] overflow-hidden" data-testid="qna-answer-card">
             {/* 한 줄 머리 — 답변 · 담당자 · 시각 · (질문자 읽음) · 오른쪽 작은 단추 (10-18 「번잡하다」) */}
             <div className="px-4 md:px-5 pt-3.5 flex items-center gap-2 flex-wrap text-[12px] text-slate-400">
               <span className="inline-flex items-center gap-1 text-[12.5px] font-bold text-[#1D4ED8]"><MessageSquareReply size={14} />답변</span>
               <span className="text-slate-300" aria-hidden="true">·</span>
-              <span className="font-medium text-slate-600">{nameOfName(post.AnsweredBy) || "담당자"}</span>
-              {post.AnsweredAt && <span className="tabular-nums">{fmtDate(post.AnsweredAt)}</span>}
+              <span className="font-medium text-slate-600">{nameOfName((first && first.name) || post.AnsweredBy) || "담당자"}</span>
+              {((first && first.at) || post.AnsweredAt) && <span className="tabular-nums">{fmtDate((first && first.at) || post.AnsweredAt)}</span>}
+              {edits.length > 0 && <span className="inline-flex items-center gap-1 h-5 px-1.5 rounded bg-amber-50 text-amber-700 text-[11px] font-medium tabular-nums cursor-help" title={"수정 이력\n" + edits.map((x) => `${fmtDate(x.at)} · ${nameOf(x.email, x.name)}`).join("\n")} data-testid="qna-answer-edited"><SquarePen size={11} />수정됨 {fmtDate(edits[edits.length - 1].at)}{edits.length > 1 ? ` · ${edits.length}회` : ""}</span>}
               {seenMark}
               {canAnswer && <span className="ml-auto flex items-center gap-1">
                 {notifyHref && <a href={notifyHref} target="_blank" rel="noopener noreferrer" onClick={() => t365Log("게시물", "답변 알림 메일", post.Title, { info: { 질문자: asker } })} className="w-7 h-7 rounded-md inline-flex items-center justify-center text-slate-400 hover:text-[#1D4ED8] hover:bg-white" data-testid="qna-notify" title={`질문자에게 알리기 — ${asker} 에게 메일 쓰기`} aria-label="질문자에게 알리기"><Mail size={14} /></a>}
@@ -3870,6 +3923,14 @@ function QnaAnswer({ ctx, post }) {
             <div className="px-4 md:px-5 pt-2 pb-4">
               <div className="max-w-[760px]" data-testid="qna-answer-body"><RichText text={post.Answer} /></div>
             </div>
+            {ansAdds.length > 0 && <div className="px-4 md:px-5 pb-4 space-y-2" data-testid="qna-answer-adds">
+              {ansAdds.map((a) => (
+                <div key={a.id || a.at} className="rounded-lg bg-white border border-[#E3EBFB] px-3.5 py-3" data-add-id={a.id}>
+                  <div className="flex items-center gap-1.5 text-[12px] text-slate-400 mb-1"><span className="inline-flex items-center gap-1 font-semibold text-[#1D4ED8]"><Plus size={12} />추가 답변</span><span className="text-slate-300" aria-hidden="true">·</span><span className="font-medium text-slate-600">{nameOf(a.email, a.name) || "담당자"}</span><span className="tabular-nums">{fmtDate(a.at)}</span></div>
+                  <div className="max-w-[740px] text-[14px]"><RichText text={a.text} /></div>
+                </div>
+              ))}
+            </div>}
             {ansFiles.length > 0 && <div className="px-4 md:px-5 pb-3">
               <div className="border-t border-slate-100 pt-3">
                 <div className="flex items-center gap-1.5 mb-1 text-[12px] text-slate-400"><Paperclip size={13} /><span className="font-medium text-slate-500">첨부</span><span className="tabular-nums">{ansFiles.length}</span><span className="ml-auto tabular-nums">{fmtSize(ansFiles.reduce((a, f) => a + (Number(f.size) || 0), 0))}</span></div>
@@ -3883,6 +3944,7 @@ function QnaAnswer({ ctx, post }) {
             <p className="text-[13px] text-slate-500 leading-relaxed">{ctx.isAgent ? "담당자가 확인한 뒤 이곳에 답변을 드립니다. 급한 문의는 오른쪽 아래 「?」 에서 담당자에게 메일을 보내 주세요." : canAnswer ? "아직 답변이 없는 질문입니다 — 「답변 쓰기」 로 답변해 주세요." : "아직 답변이 없는 질문입니다."}</p>
           </div>
         )}
+        {showEd && mode === "add" && <div className="mt-3" data-testid="qna-add-editor">{editorEl}</div>}
       </div>
     </section>
   );
@@ -4264,7 +4326,6 @@ function PublishCheckBadge({ post }) {
           {lvRec && (() => { const LI = lvRec.icon; return (
             <div className="mt-1.5 flex items-center gap-1.5 h-8 px-2 rounded-md text-[12px] min-w-0" style={{ background: lvRec.soft, color: lvRec.color }} data-testid="post-check-level">
               <LI size={13} className="shrink-0" /><span className="font-semibold shrink-0">{lvRec.ko}</span><span className="truncate opacity-80">{lvRec.en}</span>
-              {rec.masked && <span className="ml-auto shrink-0 text-[11px] text-slate-500">암호화 · 마스킹 확인</span>}
             </div>); })()}
           <p className="mt-2.5 text-[11px] text-slate-400 leading-snug">{when} 모두 확인{lvRec ? " · 정보 분류 지정" : ""} · 활동 이력에도 같은 기록</p>
         </div>
