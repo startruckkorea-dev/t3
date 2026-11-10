@@ -1159,6 +1159,10 @@ const normEmail = (e) => String(e || "").trim().toLowerCase();
 const T365_MAIL_RE = /^[a-z0-9._'+-]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/;
 const safeMail = (e) => { const s = normEmail(e); return T365_MAIL_RE.test(s) ? s : ""; };
 const mailtoOf = (e) => (safeMail(e) ? `mailto:${safeMail(e)}` : undefined);
+// 11-10 게시판 「문의 메일 보내기」 — 그 게시판 담당자 모두를 받는 사람으로(쉼표). 화면에는 이름 · 메일을 보이지 않는다(외부 Agent 에게 직원 이름이 보이지 않게)
+const mailtoAll = (list) => { const m = [...new Set((list || []).map((c) => safeMail(normEmail(c && c.email))).filter(Boolean))]; return m.length ? `mailto:${m.join(",")}` : undefined; };
+// 「문의 메일 보내기」 를 두는 게시판 — 담당자가 있고 Q&A 가 아닌 것(Q&A 는 게시판에 질문하고, 그 담당자는 답변 담당자)
+const mailCatsOf = (cats) => (cats || []).filter((c) => c.key !== "qna" && (c.contacts || []).length && mailtoAll(c.contacts));
 function isExternalEmail(e) { const d = normEmail(e).split("@")[1] || ""; return !!d && !/(^|\.)hyosung\.com$|(^|\.)startruckkorea\.com$/.test(d); }
 
 /* ---- 한글 이름(11-05) — 사용자 목록의 KorName(사용자 · 권한 관리 「한글 이름」 칸 · 직원 명부 KorName 에서 채움) ----
@@ -5902,7 +5906,7 @@ function CatStyleModal({ ctx, d, onApply, onClose }) {
   }
   const sec = "text-[12px] font-semibold text-slate-500 mb-2 flex items-center gap-1.5";
   return (
-    <Modal title={`${d.label} — 아이콘 · 색 · ${d.key === "qna" ? "답변 담당자" : "문의 담당자"}`} onClose={onClose} wide>
+    <Modal title={`${d.label} — 아이콘 · 색 · ${d.key === "qna" ? "답변 담당자" : "문의 메일 받는 사람"}`} onClose={onClose} wide>
       <div className="flex items-center gap-3 mb-4 p-3 rounded-xl bg-slate-50 border border-slate-200" data-testid="cs-preview">
         <CatIconBox cat={preview} size={40} icon={20} />
         <div className="min-w-0"><div className="text-[14px] font-semibold text-slate-800">{d.label}</div><div className="text-[11.5px] text-slate-400">사이드바 · 게시판 홈 · 글쓰기에서 이렇게 보입니다</div></div>
@@ -5934,7 +5938,7 @@ function CatStyleModal({ ctx, d, onApply, onClose }) {
         })}
       </div>
 
-      <div className="text-[12px] text-slate-500 mb-2 leading-relaxed"><span className="inline-flex items-center gap-1.5 font-semibold whitespace-nowrap align-middle"><HelpCircle size={13} />{d.key === "qna" ? "답변 담당자" : "문의 담당자"}</span> <span className="text-slate-400">— {d.key === "qna" ? "「답변 대기」 질문 숫자(주황)가 이 사람들에게 갑니다. 비워 두면 답변할 수 있는 직원 모두에게 갑니다 · 「문의하기」 에도 보입니다" : "「문의하기」 와 이 게시판 머리에 보입니다"} · {T365_CONTACT_MAX}명까지</span></div>
+      <div className="text-[12px] text-slate-500 mb-2 leading-relaxed"><span className="inline-flex items-center gap-1.5 font-semibold whitespace-nowrap align-middle"><HelpCircle size={13} />{d.key === "qna" ? "답변 담당자" : "문의 메일 받는 사람"}</span> <span className="text-slate-400">— {d.key === "qna" ? "「답변 대기」 질문 숫자(주황)가 이 사람들에게 갑니다. 비워 두면 답변할 수 있는 직원 모두에게 갑니다" : "이 게시판 머리 · 「문의하기」 의 「문의 메일 보내기」 를 누르면 이 사람들에게 메일이 갑니다(이름 · 메일은 화면에 보이지 않음)"} · {T365_CONTACT_MAX}명까지</span></div>
       <div className="space-y-1.5 mb-2" data-testid="cs-contacts">
         {contacts.length ? contacts.map((c, k) => (
           <div key={c.email} className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-slate-200 bg-white" data-contact={c.email}>
@@ -5943,7 +5947,7 @@ function CatStyleModal({ ctx, d, onApply, onClose }) {
             {k > 0 && <button type="button" onClick={() => setContacts((p) => { const n = p.slice(); [n[k - 1], n[k]] = [n[k], n[k - 1]]; return n; })} className="text-slate-300 hover:text-slate-600" aria-label="위로"><ChevronUp size={15} /></button>}
             <button type="button" onClick={() => setContacts((p) => p.filter((x) => x.email !== c.email))} className="text-slate-300 hover:text-red-600" aria-label={`${nameOf(c.email, c.name)} 빼기`}><X size={15} /></button>
           </div>
-        )) : <div className="text-[12.5px] text-slate-400 px-3 py-2.5 rounded-lg border border-dashed border-slate-200">아직 지정한 담당자가 없습니다 — 「문의하기」 에는 IT 연락처만 보입니다.</div>}
+        )) : <div className="text-[12.5px] text-slate-400 px-3 py-2.5 rounded-lg border border-dashed border-slate-200">아직 지정하지 않았습니다 — 이 게시판에는 「문의 메일 보내기」 가 보이지 않고, 「문의하기」 에는 IT 연락처만 보입니다.</div>}
       </div>
       <div className="flex flex-col sm:flex-row gap-2 mb-5">
         <div className="flex gap-1.5 flex-1 min-w-0">
@@ -6072,7 +6076,7 @@ function CategoriesTab({ ctx, catRows, bannerRows, listStatus, reload }) {
                       <button type="button" onClick={() => move(d.key, 1)} disabled={i === sorted.length - 1} className="w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-slate-800 hover:bg-slate-100 disabled:opacity-25 disabled:hover:bg-transparent" title="아래로" data-cat-down={d.key}><ChevronDown size={14} /></button>
                     </div>
                   ) : <span className="w-5 shrink-0 text-center text-[11px] text-slate-400 tabular-nums pt-3">{i + 1}</span>}
-                  <button type="button" disabled={locked} onClick={() => setStyling(d)} title={locked ? "" : "아이콘 · 색 · 문의 담당자"} className={`relative rounded-xl shrink-0 disabled:cursor-default group/ic ${d.active ? "" : "grayscale opacity-60"}`} data-cat-style={d.key}>
+                  <button type="button" disabled={locked} onClick={() => setStyling(d)} title={locked ? "" : "아이콘 · 색 · 문의 메일 받는 사람"} className={`relative rounded-xl shrink-0 disabled:cursor-default group/ic ${d.active ? "" : "grayscale opacity-60"}`} data-cat-style={d.key}>
                     <CatIconBox cat={vc} size={44} icon={21} />
                     {!locked && <span className="absolute -right-1 -bottom-1 w-5 h-5 rounded-full bg-white border border-slate-200 flex items-center justify-center text-slate-500 group-hover/ic:text-slate-900 shadow-sm"><Pencil size={10} /></span>}
                   </button>
@@ -6824,7 +6828,7 @@ function HelpFab({ ctx }) {
     window.addEventListener("keydown", k); document.addEventListener("mousedown", c);
     return () => { window.removeEventListener("keydown", k); document.removeEventListener("mousedown", c); };
   }, [open]);
-  const withC = ctx.cats.filter((c) => (c.contacts || []).length).length;
+  const withC = mailCatsOf(ctx.cats).length;
   return (
     <div ref={ref} className="fixed right-4 bottom-4 md:right-6 md:bottom-6 z-40 flex flex-col items-end gap-3" data-testid="help-fab-wrap">
       {open && (
@@ -6844,7 +6848,7 @@ function HelpFab({ ctx }) {
             )}
             <button onClick={() => { setOpen(false); ctx.openContact(); }} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 text-left" data-testid="link-contact">
               <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: BRAND.accentSoft, color: BRAND.accent }}><Mail size={15} /></span>
-              <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-slate-800">자료 · 권한 · 사용법</span><span className="block text-[11.5px] text-slate-400">게시판별 담당자{withC ? ` · ${withC}개 게시판` : ""}</span></span>
+              <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-slate-800">자료 · 권한 · 사용법</span><span className="block text-[11.5px] text-slate-400">게시판 담당자에게 메일{withC ? ` · ${withC}개 게시판` : ""}</span></span>
               <ChevronRight size={15} className="text-slate-300" />
             </button>
             <a href={mailtoOf(t365ItMail()) || T365_ITSM_URL} target={t365ItMail() ? undefined : "_blank"} rel="noopener noreferrer" className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50" data-testid="help-it">
@@ -6863,7 +6867,7 @@ function HelpFab({ ctx }) {
   );
 }
 function ContactModal({ ctx, onClose }) {
-  const withC = ctx.cats.filter((c) => (c.contacts || []).length);
+  const withC = mailCatsOf(ctx.cats);   // 11-10 담당자 이름 · 메일은 보이지 않고, 게시판마다 「문의 메일 보내기」 하나
   const Person = ({ name, email, sub, color }) => (
     <a href={mailtoOf(email)} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 min-w-0" data-contact-mail={normEmail(email)}>
       <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0" style={{ background: color || BRAND.accent }}>{String(name || email || "?").trim().slice(0, 1).toUpperCase()}</div>
@@ -6880,7 +6884,11 @@ function ContactModal({ ctx, onClose }) {
             <div className="flex items-center gap-2 px-3 h-10 border-b border-slate-100" style={{ background: c.soft }}>
               <CatIconBox cat={{ ...c, soft: "#ffffff" }} size={24} icon={13} /><span className="text-[13px] font-semibold" style={{ color: c.color }}>{c.label}</span>
             </div>
-            <div className="py-1">{c.contacts.map((x) => <Person key={x.email} name={nameOf(x.email, x.name)} email={x.email} color={c.color} />)}</div>
+            <a href={mailtoAll(c.contacts)} className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 min-w-0" data-contact-mailto={c.key}>
+              <span className="w-8 h-8 rounded-full flex items-center justify-center text-white shrink-0" style={{ background: c.color || BRAND.accent }}><Mail size={14} /></span>
+              <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-slate-800">문의 메일 보내기</span><span className="block text-[11.5px] text-slate-400 truncate">이 게시판 담당자에게 메일을 씁니다</span></span>
+              <ChevronRight size={15} className="text-slate-300 shrink-0" />
+            </a>
           </section>
         ))}
       </div>
@@ -7227,7 +7235,7 @@ function App({ boot }) {
     all: [LayoutList, "모든 게시판의 글을 한 번에 찾아봅니다 — 안 읽은 글 · 공지 · 필수 보기와 검색"],
     status: [BarChart3, "게시물마다 대상 Agent 중 몇 명이 조회확인했는지(필수 글을 연 시각) 봅니다 — 눌러서 누가 · 언제 확인했는지 확인"],
     users: [Users, "역할이 기본 권한이고, 칸을 바꾸면 그 사람만 따로 적용됩니다 · 변경은 활동 이력에 남습니다"],
-    categories: [Tags, "게시판(이름 · 설명 · 순서 · 아이콘 · 색 · 문의 담당자)과 게시판 홈 배너를 관리합니다"],
+    categories: [Tags, "게시판(이름 · 설명 · 순서 · 아이콘 · 색 · 문의 메일 받는 사람)과 게시판 홈 배너를 관리합니다"],
     links: [Link2, "사이드바 「바로가기」 링크(이름 · 주소 · 아이콘 · 색 · 보이는 사람 · 순서)를 관리합니다 — 누르면 새 창으로 열립니다"],
     access: [LogIn, "계정별 로그인 · 로그아웃 시각과 세션 종료(추정)를 조회하고 Excel 로 내보냅니다"],
     activity: [History, "게시물 · 사용자 · 카테고리 관리 이력을 날짜별로 조회합니다 (기본 최근 3일)"],
@@ -7309,7 +7317,7 @@ function App({ boot }) {
               </div>
             )}
             <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">문의</p>
-            <button onClick={() => setContactOpen(true)} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors" data-testid="btn-contact"><HelpCircle size={12} className="shrink-0" /><span>문의하기 · 담당자 연락처</span></button>
+            <button onClick={() => setContactOpen(true)} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors" data-testid="btn-contact"><HelpCircle size={12} className="shrink-0" /><span>문의하기</span></button>
           </div>
         )}
       </aside>
@@ -7359,16 +7367,12 @@ function App({ boot }) {
         <main className="t365-main-scroll flex-1 p-4 pb-24 md:px-6 md:pt-4 md:pb-24 overflow-y-auto">
           <div className={`${tab === "overview" ? "max-w-[1840px]" : "max-w-[1600px]"} mx-auto`}>
             {tab !== "overview" && (   /* 글은 창으로 떠서 뒤 머리를 숨기지 않는다 — 숨기면 목록이 위로 당겨져 보임 */
-              <PageHeader icon={meta[0]} title={cur.label} subtitle={meta[1]} tint={meta[2]} descSide right={curCat && curCat.contacts && curCat.contacts.length ? (
-                /* 11-05 문의 담당자 — 테두리 상자 · 알약 · 동그라미 없이 글자 한 줄로(「✉ 문의 담당자 | 이름 · 이름 외 N명」). 메일 주소는 마우스를 올리면, 누르면 메일 쓰기
+              <PageHeader icon={meta[0]} title={cur.label} subtitle={meta[1]} tint={meta[2]} descSide right={curCat && curCat.key !== "qna" && mailtoAll(curCat.contacts) ? (
+                /* 11-10 「문의 메일 보내기」 — 예전(11-05)엔 「✉ 문의 담당자 | 이름 · 이름 외 N명」 으로 직원 이름이 보여, 외부 Agent 에게도 내부 직원 이름이 나갔다(11-10 사용자).
+                   이제 이름 · 메일 없이 단추 글자 하나 — 누르면 그 게시판 담당자 모두에게 메일 쓰기. 담당자 지정은 관리자 「게시판 · 배너」 에서 그대로.
                    11-06 오른쪽 끝을 목록 상자 끝이 아니라 그 안의 도구 줄(md:px-4 — 「질문하기」 · 「글쓰기」 단추 오른쪽 끝)에 맞춘다 */
-                <div className="hidden sm:flex items-center gap-2.5 min-w-0 max-w-[420px] text-[13px] sm:mr-3 md:mr-4" data-testid="board-contacts">
-                  <span className="inline-flex items-center gap-1.5 text-slate-400 whitespace-nowrap"><Mail size={13} aria-hidden="true" />문의 담당자</span>
-                  <span className="w-px h-3.5 bg-slate-200 shrink-0" aria-hidden="true"></span>
-                  <span className="inline-flex items-center min-w-0 whitespace-nowrap">
-                    {curCat.contacts.slice(0, 2).map((c, i) => <React.Fragment key={c.email}>{i > 0 && <span className="text-slate-300 mx-1.5" aria-hidden="true">·</span>}<a href={mailtoOf(c.email)} title={`${c.email} — 눌러서 메일 쓰기`} className="font-semibold text-slate-700 hover:text-[color:var(--t365-c)] hover:underline underline-offset-4 decoration-1 truncate max-w-[150px] transition-colors" style={{ "--t365-c": curCat.color }} data-contact={c.email}>{nameOf(c.email, c.name) || c.email}</a></React.Fragment>)}
-                    {curCat.contacts.length > 2 && <button onClick={() => setContactOpen(true)} className="ml-1.5 text-[12.5px] text-slate-400 hover:text-slate-700 hover:underline underline-offset-4" title="문의 담당자 모두 보기" data-testid="board-contacts-more">외 {curCat.contacts.length - 2}명</button>}
-                  </span>
+                <div className="hidden sm:flex items-center min-w-0 text-[13px] sm:mr-3 md:mr-4" data-testid="board-contacts">
+                  <a href={mailtoAll(curCat.contacts)} title="이 게시판 담당자에게 문의 메일을 보냅니다" className="inline-flex items-center gap-1.5 font-semibold text-slate-600 hover:text-[color:var(--t365-c)] hover:underline underline-offset-4 decoration-1 whitespace-nowrap transition-colors" style={{ "--t365-c": curCat.color }} data-testid="board-mail"><Mail size={14} aria-hidden="true" />문의 메일 보내기</a>
                 </div>) : null} />
             )}
             {showSetup && <SetupNotice status={listStatus} infoToo={tab === "overview" || T365_ADMIN_TABS.includes(tab)} />}
