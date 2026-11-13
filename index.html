@@ -1160,7 +1160,10 @@ const T365_MAIL_RE = /^[a-z0-9._'+-]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/;
 const safeMail = (e) => { const s = normEmail(e); return T365_MAIL_RE.test(s) ? s : ""; };
 const mailtoOf = (e) => (safeMail(e) ? `mailto:${safeMail(e)}` : undefined);
 // 11-10 게시판 「문의 메일 보내기」 — 그 게시판 담당자 모두를 받는 사람으로(쉼표). 화면에는 이름 · 메일을 보이지 않는다(외부 Agent 에게 직원 이름이 보이지 않게)
-const mailtoAll = (list) => { const m = [...new Set((list || []).map((c) => safeMail(normEmail(c && c.email))).filter(Boolean))]; return m.length ? `mailto:${m.join(",")}` : undefined; };
+// 11-13 받는 사람이 둘 이상일 때 — Windows 의 Outlook(데스크톱)은 쉼표를 주소 하나로 읽어 「Check Names」 로 막힌다(사용자). Windows 는 세미콜론,
+//       그 밖(휴대폰 · Mac 메일 앱)은 표준대로 쉼표 — 새 Outlook · 웹 Outlook 은 둘 다 받는다
+const mailtoSep = () => { try { return /Windows/i.test(navigator.userAgent || "") ? ";" : ","; } catch (e) { return ","; } };
+const mailtoAll = (list) => { const m = [...new Set((list || []).map((c) => safeMail(normEmail(c && c.email))).filter(Boolean))]; return m.length ? `mailto:${m.join(mailtoSep())}` : undefined; };
 // 「문의 메일 보내기」 를 두는 게시판 — 담당자가 있고 Q&A 가 아닌 것(Q&A 는 게시판에 질문하고, 그 담당자는 답변 담당자)
 const mailCatsOf = (cats) => (cats || []).filter((c) => c.key !== "qna" && (c.contacts || []).length && mailtoAll(c.contacts));
 function isExternalEmail(e) { const d = normEmail(e).split("@")[1] || ""; return !!d && !/(^|\.)hyosung\.com$|(^|\.)startruckkorea\.com$/.test(d); }
